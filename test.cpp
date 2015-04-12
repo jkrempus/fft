@@ -191,6 +191,22 @@ pair<Vec, Vec> interleave(Vec a, Vec b)
     return transpose_128(a, b);
 }
 
+template<Int elements>
+Vec load_repeated(T* ptr)
+{
+  if(elements == 1)
+    return _mm256_broadcast_ss(ptr);
+  if(elements == 2)
+  {
+    // can probably improve this
+    Vec a = _mm256_broadcast_ss(ptr);
+    Vec b = _mm256_broadcast_ss(ptr + 1);
+    return _mm256_blend_ps(a, b, 0xaa);
+  }
+  else if(elements == 4)
+    return _mm256_broadcast_ps((__m128*) ptr);
+}
+
 void init_twiddle(Int len, ComplexPtrs<T> dst)
 {
   auto end = dst + len;
@@ -244,9 +260,10 @@ void ct_dft_size_pass(
   auto vsrc1_im = (Vec*) src.im + vn / 2;
   auto vdst_re = (Vec*) dst.re;
   auto vdst_im = (Vec*) dst.im;
-  if(dft_size == 1)
-  {
-    for(Int i = 0; i < vn / 2; i++)
+  Vec tw_re = load_repeated<dft_size>(twiddle.re);
+  Vec tw_im = load_repeated<dft_size>(twiddle.im);
+  for(Int i = 0; i < vn / 2; i++)
+    if(dft_size == 1)
     {
       Vec re0 = vsrc0_re[i]; 
       Vec im0 = vsrc0_im[i]; 
@@ -258,8 +275,26 @@ void ct_dft_size_pass(
       vdst_re[2 * i + 1] = dre.second;
       vdst_im[2 * i] = dim.first;
       vdst_im[2 * i + 1] = dim.second;
-    }    
-  }
+    }
+    else
+    {
+      Vec re0 = vsrc0_re[i]; 
+      Vec im0 = vsrc0_im[i]; 
+      Vec re1 = vsrc1_re[i]; 
+      Vec im1 = vsrc1_im[i]; 
+      Vec mul_re = tw_re * re1 - tw_im * im1;
+      Vec mul_im = tw_re * im1 + tw_im * re1;
+      pair<Vec, Vec> dre = interleave<vec_size / dft_size>(
+        re0 + mul_re, re0 - mul_re);
+
+      pair<Vec, Vec> dim = interleave<vec_size / dft_size>(
+        im0 + mul_im, im0 - mul_im);
+
+      vdst_re[2 * i] = dre.first;
+      vdst_re[2 * i + 1] = dre.second;
+      vdst_im[2 * i] = dim.first;
+      vdst_im[2 * i + 1] = dim.second;
+    }
 }
 
 template<typename T>
@@ -307,7 +342,11 @@ void fft(
     auto tw = twiddle + (n - 2 * dft_size); 
     if(dft_size == 1)
       ct_dft_size_pass<1>(n, src, tw, dst);
-    if(dft_size < vec_size)
+    else if(dft_size == 2)
+      ct_dft_size_pass<2>(n, src, tw, dst);
+    else if(dft_size == 4)
+      ct_dft_size_pass<4>(n, src, tw, dst);
+    else if(dft_size < vec_size)
       pass(n, dft_size, src, tw, dst);
     else
       pass(
@@ -385,6 +424,9 @@ void dump(T_* ptr, Int n, const char* name)
 
 int main()
 {
+  float asdf[2] = {1, 2};
+  printf("%s\n", tostr(load_repeated<2>(asdf)).c_str());
+
   Int log2n = 10;
   Int n = 1 << log2n;
   ComplexPtrs<T> twiddle = {new T[n], new T[n]};
