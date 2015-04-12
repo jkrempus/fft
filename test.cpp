@@ -148,8 +148,8 @@ struct pair
 template<typename T_>
 struct ComplexPtrs
 {
-  T* re;
-  T* im;
+  T_* re;
+  T_* im;
 
   ComplexPtrs& operator+=(Int offset)
   {
@@ -190,13 +190,6 @@ pair<Vec, Vec> interleave(Vec a, Vec b)
   else if (elements_per_vec == 2)
     return transpose_128(a, b);
 }
-
-/*
-void pass(Int len, int dft_size,
-  ComplexPtrs<Vec> src, ComplexPtrs<Vec> twiddle, Vec* dst)
-{
-  for(Int i = 0; i < len / 2; i += dft_size
-}*/
 
 void init_twiddle(Int len, ComplexPtrs<T> dst)
 {
@@ -239,42 +232,90 @@ void swap(T& a, T& b)
 extern "C" int sprintf(char* s, const char* fmt, ...);
 template<typename T_> void dump(T_* ptr, Int n, const char* name);
 
-#if 1
-void simple_fft(
+template<Int dft_size>
+void ct_dft_size_pass(
   Int n, ComplexPtrs<T> src, ComplexPtrs<T> twiddle, ComplexPtrs<T> dst)
 {
+  const Int vec_size = sizeof(Vec) / sizeof(T);
+  Int vn = n / vec_size;
+  auto vsrc0_re = (Vec*) src.re;
+  auto vsrc0_im = (Vec*) src.im;
+  auto vsrc1_re = (Vec*) src.re + vn / 2;
+  auto vsrc1_im = (Vec*) src.im + vn / 2;
+  auto vdst_re = (Vec*) dst.re;
+  auto vdst_im = (Vec*) dst.im;
+  if(dft_size == 1)
+  {
+    for(Int i = 0; i < vn / 2; i++)
+    {
+      Vec re0 = vsrc0_re[i]; 
+      Vec im0 = vsrc0_im[i]; 
+      Vec re1 = vsrc1_re[i]; 
+      Vec im1 = vsrc1_im[i]; 
+      pair<Vec, Vec> dre = interleave<vec_size>(re0 + re1, re0 - re1);
+      pair<Vec, Vec> dim = interleave<vec_size>(im0 + im1, im0 - im1);
+      vdst_re[2 * i] = dre.first;
+      vdst_re[2 * i + 1] = dre.second;
+      vdst_im[2 * i] = dim.first;
+      vdst_im[2 * i + 1] = dim.second;
+    }    
+  }
+}
+
+template<typename T>
+void pass(
+  Int n, Int dft_size,
+  ComplexPtrs<T> src, ComplexPtrs<T> twiddle,
+  ComplexPtrs<T> dst)
+{
+  for(Int i = 0; i < n / 2; i += dft_size)
+  {
+    T* re0_ptr = src.re + i;
+    T* im0_ptr = src.im + i;
+    T* re1_ptr = src.re + n / 2 + i;
+    T* im1_ptr = src.im + n / 2 + i;
+    T* dst0_re_ptr = dst.re + 2 * i;
+    T* dst0_im_ptr = dst.im + 2 * i;
+    T* dst1_re_ptr = dst.re + 2 * i + dft_size;
+    T* dst1_im_ptr = dst.im + 2 * i + dft_size;
+
+    for(Int j = 0; j < dft_size; j++)
+    {
+      T tw_re = twiddle.re[j];
+      T tw_im = twiddle.im[j];
+      T re0 = re0_ptr[j];
+      T im0 = im0_ptr[j];
+      T re1 = re1_ptr[j];
+      T im1 = im1_ptr[j];
+      T mul_re = tw_re * re1 - tw_im * im1;
+      T mul_im = tw_re * im1 + tw_im * re1;
+      dst0_re_ptr[j] = re0 + mul_re;
+      dst1_re_ptr[j] = re0 - mul_re;
+      dst0_im_ptr[j] = im0 + mul_im;
+      dst1_im_ptr[j] = im0 - mul_im;
+    }
+  }
+}
+
+void fft(
+  Int n, ComplexPtrs<T> src, ComplexPtrs<T> twiddle, ComplexPtrs<T> dst)
+{
+  const Int vec_size = sizeof(Vec) / sizeof(T);
   bool result_in_dst = false;
   for(Int dft_size = 1; dft_size < n; dft_size *= 2)
   {
-    T* tw_re_ptr = twiddle.re + n - 2 * dft_size;
-    T* tw_im_ptr = twiddle.im + n - 2 * dft_size;
-    for(Int i = 0; i < n / 2; i += dft_size)
-    {
-      T* re0_ptr = src.re + i;
-      T* im0_ptr = src.im + i;
-      T* re1_ptr = src.re + n / 2 + i;
-      T* im1_ptr = src.im + n / 2 + i;
-      T* dst0_re_ptr = dst.re + 2 * i;
-      T* dst0_im_ptr = dst.im + 2 * i;
-      T* dst1_re_ptr = dst.re + 2 * i + dft_size;
-      T* dst1_im_ptr = dst.im + 2 * i + dft_size;
-
-      for(Int j = 0; j < dft_size; j++)
-      {
-        T tw_re = tw_re_ptr[j];
-        T tw_im = tw_im_ptr[j];
-        T re0 = re0_ptr[j];
-        T im0 = im0_ptr[j];
-        T re1 = re1_ptr[j];
-        T im1 = im1_ptr[j];
-        T mul_re = tw_re * re1 - tw_im * im1;
-        T mul_im = tw_re * im1 + tw_im * re1;
-        dst0_re_ptr[j] = re0 + mul_re;
-        dst1_re_ptr[j] = re0 - mul_re;
-        dst0_im_ptr[j] = im0 + mul_im;
-        dst1_im_ptr[j] = im0 - mul_im;
-      }
-    }
+    auto tw = twiddle + (n - 2 * dft_size); 
+    if(dft_size == 1)
+      ct_dft_size_pass<1>(n, src, tw, dst);
+    if(dft_size < vec_size)
+      pass(n, dft_size, src, tw, dst);
+    else
+      pass(
+        n / vec_size,
+        dft_size / vec_size,
+        (ComplexPtrs<Vec>&) src,
+        (ComplexPtrs<Vec>&) tw,
+        (ComplexPtrs<Vec>&) dst);
 
 #if 0
     char buf[100];
@@ -295,56 +336,7 @@ void simple_fft(
       dst.im[i] = src.im[i];
     }
 }
-#else
-void simple_fft(
-  Int n, ComplexPtrs<T> src, ComplexPtrs<T> twiddle, ComplexPtrs<T> dst)
-{
-  bool result_in_dst = false;
-  for(Int dft_size = 1; dft_size < n; dft_size *= 2)
-  {
-    T* tw_re_ptr = twiddle.re + n - 2 * dft_size;
-    T* tw_im_ptr = twiddle.im + n - 2 * dft_size;
-    for(Int i0 = 0, i1 = n / 2; i0 < n / 2; i0++, i1++)
-    {
-      T tw_re = tw_re_ptr[i0 & (dft_size - 1)];
-      T tw_im = tw_im_ptr[i0 & (dft_size - 1)];
-      T re0 = src.re[i0];
-      T im0 = src.im[i0];
-      T re1 = src.re[i1];
-      T im1 = src.im[i1];
-      T mul_re = tw_re * re1 - tw_im * im1;
-      T mul_im = tw_re * im1 + tw_im * re1;
-      dst.re[2 * i0] = re0 + mul_re;
-      dst.re[2 * i0 + 1] = re0 - mul_re;
-      dst.im[2 * i0] = im0 + mul_im;
-      dst.im[2 * i0 + 1] = im0 - mul_im;
-    }
 
-#if 1
-    char buf[100];
-    sprintf(buf, "src_re%d.float32", dft_size);
-    dump(src.re, n, buf);
-    sprintf(buf, "dst_re%d.float32", dft_size);
-    dump(dst.re, n, buf);
-    
-    sprintf(buf, "src_im%d.float32", dft_size);
-    dump(src.im, n, buf);
-    sprintf(buf, "dst_im%d.float32", dft_size);
-    dump(dst.im, n, buf);
-#endif
-    
-    swap(src, dst);
-    result_in_dst = !result_in_dst;
-  }
-
-  if(!result_in_dst)
-    for(Int i = 0; i < n; i++)
-    {
-      dst.re[i] = src.re[i];
-      dst.im[i] = src.im[i];
-    }
-}
-#endif
 void foo(Int n, const float* a, const float* b, float* c)
 {
   auto va = (Vec*) a;
@@ -395,30 +387,6 @@ int main()
 {
   Int log2n = 10;
   Int n = 1 << log2n;
-#if 0
-  auto a = (float*) valloc(n * sizeof(float));
-  auto b = (float*) valloc(n * sizeof(float));
-  for(Int i = 0; i < n; i++)
-  {
-    a[i] = rand() % 5;
-    b[i] = rand() % 5;
-  }
-
-  for(Int i = 0; i < 1000000000 / n; i++)
-  {
-    foo(n / 2, a, a + n / 2, b);
-    std::swap(a, b);
-  }
-
-  float sum = 0.0f;
-  for(Int i = 0; i < n; i++) sum += a[i] + b[i];
-  printf("%f\n", sum);
-#elif 0
-  Vec a = {0, 1, 2, 3, 4, 5, 6, 7};
-  Vec b = {8, 9, 10, 11, 12, 13, 14, 15};
-  auto r = interleave<4>(a, b);
-  printf("%s\n%s\n", tostr(r.first).c_str(), tostr(r.second).c_str());
-#elif 1
   ComplexPtrs<T> twiddle = {new T[n], new T[n]};
   init_twiddle(n, twiddle);
 
@@ -441,14 +409,13 @@ int main()
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
-  for(int i = 0; i < 1000000000 / (5 * n * log2n); i++)
-    simple_fft(n, src, twiddle, dst);
+  for(int i = 0; i < 10000000000LL / (5 * n * log2n); i++)
+    fft(n, src, twiddle, dst);
 
   printf("time %f\n", get_time() - t);
 
   dump(dst.re, n, "dst_re.float32");
   dump(dst.im, n, "dst_im.float32");
 
-#endif
   return 0;
 }
