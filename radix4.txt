@@ -1,0 +1,53 @@
+current fft size m
+
+indices:
+  base - multiple of 2 * m
+  o - less than m
+  i0 = base + o
+  i1 = i0 + m
+  i2 = i1 + m
+  i3 = i2 + m
+ 
+pass 1:
+w = twiddle(m, o) = twiddle(2 * m, 2 * o)
+a_i0 a_i1 a_i2 a_i3
+a_i0+a_i1*w a_i0-a_i1*w a_i2+a_i3*w a_i2-a_i3*w
+
+pass2:
+w0 = twiddle(2 * m, o)
+w1 = twiddle(2 * m, o + m)
+b_i0 b_+i1 b_i2 b_i3
+b_i0+b_i2*w0 b_i1+b_i3*w1 b_i0-b_i2*w0 b_i1-b_i3*w1
+
+ee = twiddle(2 * m, 1)
+ii = sqrt(-1)
+
+c_i0 = b_i0 + b_i2 * w0 = a_i0 + a_i1 * w + w0 * (a_i2 + a_i3 * w)
+c_i0 = a_i0 + a_i1 * w + w0 * a_i2 + w0 * w * a_i3
+c_i0 = a_i0 + a_i1 * ee^(2*o) + a_i2 * ee^(o) + a_i3 * ee^(o**3)
+
+c_i1 = b_i1 + b_i3 * w1 = a_i0 - w * a_i1 + w1 * a_i2 - w1 * w * a_i3
+c_i1 = a_i0 - a_i1 * ee^(2*o) + a_i2 * ee^(o+m) - a_i3 * ee^(3*o+m)
+c_i1 = a_i0 - a_i1 * ee^(2*o) + ii * a_i2 * ee^(o) - ii * a_i3 * ee^(3*o)
+
+c_i2 = a_i0 + a_i1 * w - w0 * a_i2 - w0 * w * a_i3
+c_i2 = a_i0 + a_i1 * ee^(2*o) - a_i2 * ee^(o) - a_i3 * ee^(o**3)
+
+c_i3 = a_i0 - w * a_i1 - w1 * a_i2 + w1 * w * a_i3
+c_i3 = a_i0 - a_i1 * ee^(2*o) - ii * a_i2 * ee^(o) + ii * a_i3 * ee^(3*o)
+
+
+c_i0 = a_i0 + a_i1 * ee^(2*o) + a_i2 * ee^(o) + a_i3 * ee^(o**3)
+c_i1 = a_i0 - a_i1 * ee^(2*o) + ii * a_i2 * ee^(o) - ii * a_i3 * ee^(3*o)
+c_i2 = a_i0 + a_i1 * ee^(2*o) - a_i2 * ee^(o) - a_i3 * ee^(o**3)
+c_i3 = a_i0 - a_i1 * ee^(2*o) - ii * a_i2 * ee^(o) + ii * a_i3 * ee^(3*o)
+
+complex operations:
+  3 mul
+  (2 + 2 + 4 add)
+
+real operations:
+  3*4 mul = 12 mul
+  (3*2 + 8*2 add) = 22 add
+  34 ops
+  instead of 40
