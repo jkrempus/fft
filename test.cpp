@@ -310,42 +310,49 @@ FORCEINLINE void pass(
   }
 }
 
+Int most_significant_bit_index(Int n)
+{
+  Int r;
+  for(r = -1; n; r++, n >>= 1) {}
+  return r; 
+}
+
 template<typename V>
 void fft(
   Int n,
   ComplexPtrs<typename V::T> src,
   ComplexPtrs<typename V::T> twiddle,
+  ComplexPtrs<typename V::T> working,
   ComplexPtrs<typename V::T> dst)
 {
   VEC_TYPEDEFS(V);
-  bool result_in_dst = false;
+
+  auto is_odd = bool(most_significant_bit_index(n) & 1);
+  auto current_src = src;
+  auto next_dst = is_odd ? working : dst;
+  auto current_dst = is_odd ? dst : working;
+
   for(Int dft_size = 1; dft_size < n; dft_size *= 2)
   {
     auto tw = twiddle + (n - 2 * dft_size); 
     if(V::vec_size > 1 && dft_size == 1)
-      ct_dft_size_pass<V, 1>(n, src, tw, dst);
+      ct_dft_size_pass<V, 1>(n, current_src, tw, current_dst);
     else if(V::vec_size > 2 && dft_size == 2)
-      ct_dft_size_pass<V, 2>(n, src, tw, dst);
+      ct_dft_size_pass<V, 2>(n, current_src, tw, current_dst);
     else if(V::vec_size > 4 && dft_size == 4)
-      ct_dft_size_pass<V, 4>(n, src, tw, dst);
+      ct_dft_size_pass<V, 4>(n, current_src, tw, current_dst);
     else if(V::vec_size > 8 && dft_size == 8)
-      ct_dft_size_pass<V, 8>(n, src, tw, dst);
+      ct_dft_size_pass<V, 8>(n, current_src, tw, current_dst);
     else
       pass(
         n / V::vec_size,
         dft_size / V::vec_size,
-        (ComplexPtrs<Vec>&) src,
+        (ComplexPtrs<Vec>&) current_src,
         (ComplexPtrs<Vec>&) tw,
-        (ComplexPtrs<Vec>&) dst);
+        (ComplexPtrs<Vec>&) current_dst);
 
-    swap(src, dst);
-    result_in_dst = !result_in_dst;
-  }
-
-  if(!result_in_dst)
-  {
-    copy(src.re, n, dst.re);
-    copy(src.im, n, dst.im);
+    swap(next_dst, current_dst);
+    current_src = next_dst;
   }
 }
 
@@ -383,13 +390,15 @@ void dump(T_* ptr, Int n, const char* name)
 
 int main(int argc, char** argv)
 {
-  VEC_TYPEDEFS(AvxFloat);
+  typedef AvxFloat V;
+  VEC_TYPEDEFS(V);
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
   ComplexPtrs<T> twiddle = {new T[n], new T[n]};
-  init_twiddle<AvxFloat>(n, twiddle);
+  init_twiddle<V>(n, twiddle);
 
   ComplexPtrs<T> src = {new T[n], new T[n]};
+  ComplexPtrs<T> working = {new T[n], new T[n]};
   ComplexPtrs<T> dst = {new T[n], new T[n]};
 
   std::fill_n(dst.re, n, T(0));
@@ -408,8 +417,8 @@ int main(int argc, char** argv)
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
-  //for(int i = 0; i < 10000000000LL / (5 * n * log2n); i++)
-    fft<AvxFloat>(n, src, twiddle, dst);
+  for(int i = 0; i < 10LL*1000*1000*1000 / (5 * n * log2n); i++)
+    fft<V>(n, src, twiddle, working, dst);
 
   printf("time %f\n", get_time() - t);
 
