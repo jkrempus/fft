@@ -7,6 +7,8 @@ indices:
   i1 = i0 + m
   i2 = i1 + m
   i3 = i2 + m
+
+We have data in bit reversed order, so the passes are:
  
 pass 1:
 w = twiddle(m, o) = twiddle(2 * m, 2 * o)
@@ -51,3 +53,52 @@ real operations:
   (3*2 + 8*2 add) = 22 add
   34 ops
   instead of 40
+
+
+for stockham:
+current fft size m
+
+indices:
+  l = n / 4
+  i * m < l
+  o - less than m
+  a0 is at: i * m + o
+  a1 is at: i * m + o + l
+  a2 is at: i * m + o + 2 * l
+  a3 is at: i * m + o + 3 * l
+
+  b0 is at: 2 * i * m + o
+  b1 is at: 2 * i * m + o + m
+  b2 is at: 2 * l + 2 * i * m + o
+  b3 is at: 2 * l + 2 * i * m + o + m
+
+  c0 is at: 4 * i * m + o                (from b0 and b2)
+  c1 is at: 4 * i * m + o + m            (from b1 and b3)
+  c2 is at: 4 * i * m + o + 2 * m        (from b0 and b2)
+  c3 is at: 4 * i * m + o + 3 * m        (from b1 and b3)
+
+first pass:
+w = twiddle(m, o) = twiddle(2 * m, 2 * o)
+a0       a1       a2       a3
+a0+w*a2  a0-w*a2  a1+w*a3  a1-w*a3
+b0       b1       b2       b3
+
+second pass:
+w0 = twiddle(2*m, o)
+w1 = twiddle(2*m, o + m)
+ee = twiddle(2*m, 1)
+
+c0 = b0 + w0 * b2
+c0 = a0 + w * a2 + w0 * a1 + w * w0 * a3
+c0 = a0 +      ee^(o) * a1 + ee^(2*o) * a2 +      ee^(3*o) * a3
+c1 = a0 + ii * ee^(o) * a1 - ee^(2*o) * a2 - ii * ee^(3*o) * a3
+c2 = a0 -      ee^(o) * a1 + ee^(2*o) * a2 -      ee^(3*o) * a3
+c3 = a0 - ii * ee^(o) * a1 - ee^(2*o) * a2 + ii * ee^(3*o) * a3
+
+
+pass 1:
+w = twiddle(m, o) = twiddle(2 * m, 2 * o)
+a_i0 a_i1 a_i2 a_i3
+a_i0+a_i1*w a_i0-a_i1*w a_i2+a_i3*w a_i2-a_i3*w
+
+

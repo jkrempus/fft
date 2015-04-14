@@ -2,7 +2,7 @@
 
 typedef long Int;
 
-#define FORCEINLINE __attribute__((always_inline))
+#define FORCEINLINE __attribute__((always_inline)) inline
 
 template<typename T>
 struct SinCosTable { };
@@ -90,6 +90,8 @@ struct SseFloat
   }
 };
 
+#ifdef __AVX__
+
 struct AvxFloat
 {
   typedef float T;
@@ -136,6 +138,7 @@ private:
       _mm256_permute2f128_ps(a, b, _MM_SHUFFLE(0, 3, 0, 1)) };
   }
 };
+#endif
 
 #define VEC_TYPEDEFS(V) \
   typedef typename V::T T; \
@@ -310,6 +313,119 @@ FORCEINLINE void pass(
   }
 }
 
+template<typename T>
+FORCEINLINE void two_pass(
+  Int n, Int dft_size,
+  ComplexPtrs<T> src,
+  ComplexPtrs<T> twiddle0,
+  ComplexPtrs<T> twiddle1,
+  ComplexPtrs<T> dst)
+{
+  for(Int i = 0; i < n / 4; i += dft_size)
+  {
+    Int l = n / 4;
+    T* re0_ptr = src.re + i;
+    T* im0_ptr = src.im + i;
+
+    T* re1_ptr = src.re + l + i;
+    T* im1_ptr = src.im + l + i;
+
+    T* re2_ptr = src.re + 2 * l + i;
+    T* im2_ptr = src.im + 2 * l + i;
+
+    T* re3_ptr = src.re + 3 * l + i;
+    T* im3_ptr = src.im + 3 * l + i;
+
+    T* dst0_re_ptr = dst.re + 4 * i;
+    T* dst0_im_ptr = dst.im + 4 * i;
+
+    T* dst1_re_ptr = dst.re + 4 * i + dft_size;
+    T* dst1_im_ptr = dst.im + 4 * i + dft_size;
+
+    T* dst2_re_ptr = dst.re + 4 * i + 2 * dft_size;
+    T* dst2_im_ptr = dst.im + 4 * i + 2 * dft_size;
+
+    T* dst3_re_ptr = dst.re + 4 * i + 3 * dft_size;
+    T* dst3_im_ptr = dst.im + 4 * i + 3 * dft_size;
+
+    for(Int j = 0; j < dft_size; j++)
+    {
+      T w_re = twiddle0.re[j];
+      T w_im = twiddle0.im[j];
+
+      T b0_re, b1_re, b0_im, b1_im;
+      {
+        T a0_re = re0_ptr[j];
+        T a0_im = im0_ptr[j];
+        T a2_re = re2_ptr[j];
+        T a2_im = im2_ptr[j];
+        T mul_re = w_re * a2_re - w_im * a2_im;
+        T mul_im = w_re * a2_im + w_im * a2_re;
+        b0_re = a0_re + mul_re;
+        b1_re = a0_re - mul_re;
+        b0_im = a0_im + mul_im;
+        b1_im = a0_im - mul_im;
+      }
+
+      T b2_re, b3_re, b2_im, b3_im;
+      {
+        T a1_re = re1_ptr[j];
+        T a1_im = im1_ptr[j];
+        T a3_re = re3_ptr[j];
+        T a3_im = im3_ptr[j];
+        T mul_re = w_re * a3_re - w_im * a3_im;
+        T mul_im = w_re * a3_im + w_im * a3_re;
+        b2_re = a1_re + mul_re;
+        b3_re = a1_re - mul_re;
+        b2_im = a1_im + mul_im;
+        b3_im = a1_im - mul_im;
+      }
+
+      {
+        T w_re = twiddle1.re[j];
+        T w_im = twiddle1.im[j];
+        T mul_re = w_re * b2_re - w_im * b2_im;
+        T mul_im = w_re * b2_im + w_im * b2_re;
+        dst0_re_ptr[j] = b0_re + mul_re; 
+        dst2_re_ptr[j] = b0_re - mul_re; 
+        dst0_im_ptr[j] = b0_im + mul_im; 
+        dst2_im_ptr[j] = b0_im - mul_im; 
+      }
+      
+      {
+        T w_re = twiddle1.re[j + dft_size];
+        T w_im = twiddle1.im[j + dft_size];
+        T mul_re = w_re * b3_re - w_im * b3_im;
+        T mul_im = w_re * b3_im + w_im * b3_re;
+        dst1_re_ptr[j] = b1_re + mul_re; 
+        dst3_re_ptr[j] = b1_re - mul_re; 
+        dst1_im_ptr[j] = b1_im + mul_im; 
+        dst3_im_ptr[j] = b1_im - mul_im; 
+      }
+    }
+  }
+}
+
+Int top_level_loop_iterations(Int n, Int vec_size)
+{
+  Int iter = 0;
+  for(Int dft_size = 1; dft_size < n;)
+  {
+    iter++;
+    if(dft_size >= vec_size)
+    {
+      if(dft_size * 4 > n)
+        dft_size *= 2;
+      else
+        dft_size *= 4;
+    }
+    else
+      dft_size *= 2;
+  }
+
+  return iter;
+}
+
 Int most_significant_bit_index(Int n)
 {
   Int r;
@@ -327,29 +443,54 @@ void fft(
 {
   VEC_TYPEDEFS(V);
 
-  auto is_odd = bool(most_significant_bit_index(n) & 1);
+  auto is_odd = bool(top_level_loop_iterations(n, V::vec_size) & 1);
   auto current_src = src;
-  auto next_dst = is_odd ? working : dst;
   auto current_dst = is_odd ? dst : working;
+  auto next_dst = is_odd ? working : dst;
 
-  for(Int dft_size = 1; dft_size < n; dft_size *= 2)
+  for(Int dft_size = 1; dft_size < n;)
   {
     auto tw = twiddle + (n - 2 * dft_size); 
-    if(V::vec_size > 1 && dft_size == 1)
-      ct_dft_size_pass<V, 1>(n, current_src, tw, current_dst);
-    else if(V::vec_size > 2 && dft_size == 2)
-      ct_dft_size_pass<V, 2>(n, current_src, tw, current_dst);
-    else if(V::vec_size > 4 && dft_size == 4)
-      ct_dft_size_pass<V, 4>(n, current_src, tw, current_dst);
-    else if(V::vec_size > 8 && dft_size == 8)
-      ct_dft_size_pass<V, 8>(n, current_src, tw, current_dst);
+    if(dft_size >= V::vec_size)
+    {
+      if(dft_size * 4 > n)
+      {
+        pass(
+          n / V::vec_size,
+          dft_size / V::vec_size,
+          (ComplexPtrs<Vec>&) current_src,
+          (ComplexPtrs<Vec>&) tw,
+          (ComplexPtrs<Vec>&) current_dst);
+
+        dft_size *= 2;
+      }
+      else
+      {
+        auto other_tw = twiddle + (n - 4 * dft_size); 
+        two_pass(
+          n / V::vec_size,
+          dft_size / V::vec_size,
+          (ComplexPtrs<Vec>&) current_src,
+          (ComplexPtrs<Vec>&) tw,
+          (ComplexPtrs<Vec>&) other_tw,
+          (ComplexPtrs<Vec>&) current_dst);
+
+        dft_size *= 4;
+      }
+    }
     else
-      pass(
-        n / V::vec_size,
-        dft_size / V::vec_size,
-        (ComplexPtrs<Vec>&) current_src,
-        (ComplexPtrs<Vec>&) tw,
-        (ComplexPtrs<Vec>&) current_dst);
+    {
+      if(V::vec_size > 1 && dft_size == 1)
+        ct_dft_size_pass<V, 1>(n, current_src, tw, current_dst);
+      else if(V::vec_size > 2 && dft_size == 2)
+        ct_dft_size_pass<V, 2>(n, current_src, tw, current_dst);
+      else if(V::vec_size > 4 && dft_size == 4)
+        ct_dft_size_pass<V, 4>(n, current_src, tw, current_dst);
+      else if(V::vec_size > 8 && dft_size == 8)
+        ct_dft_size_pass<V, 8>(n, current_src, tw, current_dst);
+
+      dft_size *= 2;
+    }
 
     swap(next_dst, current_dst);
     current_src = next_dst;
@@ -362,24 +503,13 @@ void fft(
 #include <cstdio>
 #include <sys/time.h>
 #include <fstream>
+#include <unistd.h>
 
 double get_time()
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return tv.tv_sec + tv.tv_usec * 1e-6;
-}
-
-std::string tostr(AvxFloat::Vec a)
-{
-  std::string r;
-  for(Int i = 0; i < 8; i++)
-  {
-    if(i != 0) r += " ";
-    r += std::to_string(((float*) &a)[i]);
-  }
-
-  return r;
 }
 
 template<typename T_>
@@ -390,6 +520,7 @@ void dump(T_* ptr, Int n, const char* name)
 
 int main(int argc, char** argv)
 {
+  printf("%d\n", setpriority(PRIO_PROCESS, 0, -20));
   typedef AvxFloat V;
   VEC_TYPEDEFS(V);
   Int log2n = atoi(argv[1]);
