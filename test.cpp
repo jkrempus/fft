@@ -99,19 +99,19 @@ struct AvxFloat
   const static Int vec_size = 8;
 
   template<Int elements_per_vec>
-  static FORCEINLINE pair<Vec, Vec> interleave(Vec a, Vec b)
+  static FORCEINLINE void interleave(
+    Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     if(elements_per_vec == 8)
-      return transpose_128(_mm256_unpacklo_ps(a, b), _mm256_unpackhi_ps(a, b));
+      transpose_128(
+        _mm256_unpacklo_ps(a0, a1), _mm256_unpackhi_ps(a0, a1), r0, r1);
     else if(elements_per_vec == 4)
-    {
-      return transpose_128(
-        _mm256_shuffle_ps(a, b, _MM_SHUFFLE(1, 0, 1, 0)), 
-        _mm256_shuffle_ps(a, b, _MM_SHUFFLE(3, 2, 3, 2)));
-    }
-    else if (elements_per_vec == 2) return transpose_128(a, b);
-
-    return pair<Vec, Vec>(); // get rid of warnings
+      transpose_128(
+        _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)), 
+        _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2)),
+        r0, r1);
+    else if (elements_per_vec == 2)
+      transpose_128(a0, a1, r0, r1);
   }
 
   template<Int elements>
@@ -129,13 +129,33 @@ struct AvxFloat
     
     return Vec(); // get rid of warnings
   }
-   
-private: 
-  static pair<Vec, Vec> FORCEINLINE transpose_128(Vec a, Vec b)
+
+  // The input matrix has 4 rows and vec_size columns
+  static Vec FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
   {
-    return {
-      _mm256_permute2f128_ps(a, b, _MM_SHUFFLE(0, 2, 0, 0)),
-      _mm256_permute2f128_ps(a, b, _MM_SHUFFLE(0, 3, 0, 1)) };
+    Vec b0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)); 
+    Vec b1 = _mm256_shuffle_ps(a2, a3, _MM_SHUFFLE(1, 0, 1, 0));
+    Vec b2 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2)); 
+    Vec b3 = _mm256_shuffle_ps(a2, a3, _MM_SHUFFLE(3, 2, 3, 2));
+     
+    Vec c0 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
+    Vec c1 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
+    Vec c2 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
+    Vec c3 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
+
+    r0 = _mm256_permute2f128_ps(c0, c1, _MM_SHUFFLE(0, 2, 0, 0));
+    r1 = _mm256_permute2f128_ps(c2, c3, _MM_SHUFFLE(0, 2, 0, 0));
+    r2 = _mm256_permute2f128_ps(c0, c1, _MM_SHUFFLE(0, 3, 0, 1));
+    r3 = _mm256_permute2f128_ps(c2, c3, _MM_SHUFFLE(0, 3, 0, 1));
+  }
+
+private: 
+  static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    r0 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
+    r1 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 3, 0, 1));
   }
 };
 #endif
@@ -245,16 +265,11 @@ FORCEINLINE void ct_dft_size_pass(
       Vec im0 = vsrc0_im[i]; 
       Vec re1 = vsrc1_re[i]; 
       Vec im1 = vsrc1_im[i]; 
-      pair<Vec, Vec> dre = V::template interleave<V::vec_size>(
-        re0 + re1, re0 - re1);
+      V::template interleave<V::vec_size>(
+        re0 + re1, re0 - re1, vdst_re[2 * i], vdst_re[2 * i + 1]);
 
-      pair<Vec, Vec> dim = V::template interleave<V::vec_size>(
-        im0 + im1, im0 - im1);
-
-      vdst_re[2 * i] = dre.first;
-      vdst_re[2 * i + 1] = dre.second;
-      vdst_im[2 * i] = dim.first;
-      vdst_im[2 * i + 1] = dim.second;
+      V::template interleave<V::vec_size>(
+        im0 + im1, im0 - im1, vdst_im[2 * i], vdst_im[2 * i + 1]);
     }
     else
     {
@@ -264,17 +279,93 @@ FORCEINLINE void ct_dft_size_pass(
       Vec im1 = vsrc1_im[i]; 
       Vec mul_re = tw_re * re1 - tw_im * im1;
       Vec mul_im = tw_re * im1 + tw_im * re1;
-      pair<Vec, Vec> dre = V::template interleave<V::vec_size / dft_size>(
-        re0 + mul_re, re0 - mul_re);
+      V::template interleave<V::vec_size / dft_size>(
+        re0 + mul_re, re0 - mul_re, vdst_re[2 * i], vdst_re[2 * i + 1]);
 
-      pair<Vec, Vec> dim = V::template interleave<V::vec_size / dft_size>(
-        im0 + mul_im, im0 - mul_im);
-
-      vdst_re[2 * i] = dre.first;
-      vdst_re[2 * i + 1] = dre.second;
-      vdst_im[2 * i] = dim.first;
-      vdst_im[2 * i + 1] = dim.second;
+      V::template interleave<V::vec_size / dft_size>(
+        im0 + mul_im, im0 - mul_im, vdst_im[2 * i], vdst_im[2 * i + 1]);
     }
+}
+
+template<typename V>
+FORCEINLINE void first_two_passes(
+  Int n, ComplexPtrs<typename V::T> src, ComplexPtrs<typename V::T> dst)
+{
+  VEC_TYPEDEFS(V);
+  Int vn = n / V::vec_size;
+  Vec* vsrc0_re = (Vec*) src.re;
+  Vec* vsrc1_re = (Vec*) src.re + vn / 4;
+  Vec* vsrc2_re = (Vec*) src.re + 2 * vn / 4;
+  Vec* vsrc3_re = (Vec*) src.re + 3 * vn / 4;
+  
+  Vec* vsrc0_im = (Vec*) src.im;
+  Vec* vsrc1_im = (Vec*) src.im + vn / 4;
+  Vec* vsrc2_im = (Vec*) src.im + 2 * vn / 4;
+  Vec* vsrc3_im = (Vec*) src.im + 3 * vn / 4;
+
+  Vec* vdst_re = (Vec*) dst.re;
+  Vec* vdst_im = (Vec*) dst.im;
+
+  for(Int i = 0; i < vn / 4; i++)
+  {
+    Vec a0_re = vsrc0_re[i];
+    Vec a1_re = vsrc1_re[i];
+    Vec a2_re = vsrc2_re[i];
+    Vec a3_re = vsrc3_re[i];
+    
+    Vec a0_im = vsrc0_im[i];
+    Vec a1_im = vsrc1_im[i];
+    Vec a2_im = vsrc2_im[i];
+    Vec a3_im = vsrc3_im[i];
+
+    //TODO: Check why these aren't the same
+#if 0
+    Vec c0_re = a0_re + a1_re + a2_re + a3_re;
+    Vec c0_im = a0_im + a1_im + a2_im + a3_im;
+    
+    Vec c1_re = a0_re - a1_im - a2_re + a3_im;
+    Vec c1_im = a0_im + a1_re - a2_im - a3_re;
+
+    Vec c2_re = a0_re - a1_re + a2_re - a3_re;
+    Vec c2_im = a0_im - a1_im + a2_im - a3_im;
+
+    Vec c3_re = a0_re + a1_im - a2_re - a3_im;
+    Vec c3_im = a0_im - a1_re - a2_im + a3_re;
+#else
+    Vec b0_re = a0_re + a2_re;
+    Vec b0_im = a0_im + a2_im;
+
+    Vec b1_re = a0_re - a2_re;
+    Vec b1_im = a0_im - a2_im;
+
+    Vec b2_re = a1_re + a3_re;
+    Vec b2_im = a1_im + a3_im;
+    
+    Vec b3_re = a1_re - a3_re;
+    Vec b3_im = a1_im - a3_im;
+
+    Vec c0_re = b0_re + b2_re;
+    Vec c0_im = b0_im + b2_im;
+
+    Vec c2_re = b0_re - b2_re;
+    Vec c2_im = b0_im - b2_im;
+
+    Vec c1_re = b1_re + b3_im;
+    Vec c1_im = b1_im - b3_re; 
+
+    Vec c3_re = b1_re - b3_im;
+    Vec c3_im = b1_im + b3_re;
+#endif
+
+    Int j = 4 * i;
+    V::transpose(
+      c0_re, c1_re, c2_re, c3_re,
+      vdst_re[j], vdst_re[j + 1], vdst_re[j + 2], vdst_re[j + 3]);
+    
+    V::transpose(
+      c0_im, c1_im, c2_im, c3_im,
+      vdst_im[j], vdst_im[j + 1], vdst_im[j + 2], vdst_im[j + 3]);
+  }
 }
 
 template<typename T>
@@ -323,85 +414,62 @@ FORCEINLINE void two_pass(
 {
   for(Int i = 0; i < n / 4; i += dft_size)
   {
+    T* re_ptr = src.re + i;
+    T* im_ptr = src.im + i;
+    T* dst_re_ptr = dst.re + 4 * i;
+    T* dst_im_ptr = dst.im + 4 * i;
+
     Int l = n / 4;
-    T* re0_ptr = src.re + i;
-    T* im0_ptr = src.im + i;
-
-    T* re1_ptr = src.re + l + i;
-    T* im1_ptr = src.im + l + i;
-
-    T* re2_ptr = src.re + 2 * l + i;
-    T* im2_ptr = src.im + 2 * l + i;
-
-    T* re3_ptr = src.re + 3 * l + i;
-    T* im3_ptr = src.im + 3 * l + i;
-
-    T* dst0_re_ptr = dst.re + 4 * i;
-    T* dst0_im_ptr = dst.im + 4 * i;
-
-    T* dst1_re_ptr = dst.re + 4 * i + dft_size;
-    T* dst1_im_ptr = dst.im + 4 * i + dft_size;
-
-    T* dst2_re_ptr = dst.re + 4 * i + 2 * dft_size;
-    T* dst2_im_ptr = dst.im + 4 * i + 2 * dft_size;
-
-    T* dst3_re_ptr = dst.re + 4 * i + 3 * dft_size;
-    T* dst3_im_ptr = dst.im + 4 * i + 3 * dft_size;
 
     for(Int j = 0; j < dft_size; j++)
     {
-      T w_re = twiddle0.re[j];
-      T w_im = twiddle0.im[j];
+      T w0_re = twiddle0.re[j];
+      T w0_im = twiddle0.im[j];
+
+      T a2_re = re_ptr[2 * l + j];
+      T a2_im = im_ptr[2 * l + j];
+      T mul02_re = w0_re * a2_re - w0_im * a2_im;
+      T mul02_im = w0_re * a2_im + w0_im * a2_re;
+
+      T a3_re = re_ptr[3 * l + j];
+      T a3_im = im_ptr[3 * l + j];
+      T mul03_re = w0_re * a3_re - w0_im * a3_im;
+      T mul03_im = w0_re * a3_im + w0_im * a3_re;
 
       T b0_re, b1_re, b0_im, b1_im;
-      {
-        T a0_re = re0_ptr[j];
-        T a0_im = im0_ptr[j];
-        T a2_re = re2_ptr[j];
-        T a2_im = im2_ptr[j];
-        T mul_re = w_re * a2_re - w_im * a2_im;
-        T mul_im = w_re * a2_im + w_im * a2_re;
-        b0_re = a0_re + mul_re;
-        b1_re = a0_re - mul_re;
-        b0_im = a0_im + mul_im;
-        b1_im = a0_im - mul_im;
-      }
+      T a0_re = re_ptr[j];
+      T a0_im = im_ptr[j];
+      b0_re = a0_re + mul02_re;
+      b1_re = a0_re - mul02_re;
+      b0_im = a0_im + mul02_im;
+      b1_im = a0_im - mul02_im;
 
       T b2_re, b3_re, b2_im, b3_im;
-      {
-        T a1_re = re1_ptr[j];
-        T a1_im = im1_ptr[j];
-        T a3_re = re3_ptr[j];
-        T a3_im = im3_ptr[j];
-        T mul_re = w_re * a3_re - w_im * a3_im;
-        T mul_im = w_re * a3_im + w_im * a3_re;
-        b2_re = a1_re + mul_re;
-        b3_re = a1_re - mul_re;
-        b2_im = a1_im + mul_im;
-        b3_im = a1_im - mul_im;
-      }
+      T a1_re = re_ptr[l + j];
+      T a1_im = im_ptr[l + j];
+      b2_re = a1_re + mul03_re;
+      b3_re = a1_re - mul03_re;
+      b2_im = a1_im + mul03_im;
+      b3_im = a1_im - mul03_im;
 
-      {
-        T w_re = twiddle1.re[j];
-        T w_im = twiddle1.im[j];
-        T mul_re = w_re * b2_re - w_im * b2_im;
-        T mul_im = w_re * b2_im + w_im * b2_re;
-        dst0_re_ptr[j] = b0_re + mul_re; 
-        dst2_re_ptr[j] = b0_re - mul_re; 
-        dst0_im_ptr[j] = b0_im + mul_im; 
-        dst2_im_ptr[j] = b0_im - mul_im; 
-      }
+      T w1_re = twiddle1.re[j];
+      T w1_im = twiddle1.im[j];
+      T mul12_re = w1_re * b2_re - w1_im * b2_im;
+      T mul12_im = w1_re * b2_im + w1_im * b2_re;
+      //the table value at j+dft_size is table 
+      //value at j multiplied by -i (imaginary unit)
+      T mul13_im     = w1_im * b3_im - w1_re * b3_re;
+      T mul13_re = w1_re * b3_im + w1_im * b3_re;
       
-      {
-        T w_re = twiddle1.re[j + dft_size];
-        T w_im = twiddle1.im[j + dft_size];
-        T mul_re = w_re * b3_re - w_im * b3_im;
-        T mul_im = w_re * b3_im + w_im * b3_re;
-        dst1_re_ptr[j] = b1_re + mul_re; 
-        dst3_re_ptr[j] = b1_re - mul_re; 
-        dst1_im_ptr[j] = b1_im + mul_im; 
-        dst3_im_ptr[j] = b1_im - mul_im; 
-      }
+      dst_re_ptr[j] = b0_re + mul12_re; 
+      dst_re_ptr[2 * dft_size + j] = b0_re - mul12_re; 
+      dst_im_ptr[j] = b0_im + mul12_im; 
+      dst_im_ptr[2 * dft_size + j] = b0_im - mul12_im; 
+      
+      dst_re_ptr[dft_size + j] = b1_re + mul13_re; 
+      dst_re_ptr[3 * dft_size + j] = b1_re - mul13_re; 
+      dst_im_ptr[dft_size + j] = b1_im + mul13_im; 
+      dst_im_ptr[3 * dft_size + j] = b1_im - mul13_im; 
     }
   }
 }
@@ -412,7 +480,11 @@ Int top_level_loop_iterations(Int n, Int vec_size)
   for(Int dft_size = 1; dft_size < n;)
   {
     iter++;
-    if(dft_size >= vec_size)
+    if(dft_size == 1)
+    {
+      dft_size *= 4;
+    }
+    else if(dft_size >= vec_size)
     {
       if(dft_size * 4 > n)
         dft_size *= 2;
@@ -450,8 +522,14 @@ void fft(
 
   for(Int dft_size = 1; dft_size < n;)
   {
-    auto tw = twiddle + (n - 2 * dft_size); 
-    if(dft_size >= V::vec_size)
+    auto tw = twiddle + (n - 2 * dft_size);
+    if(dft_size == 1)
+    {
+      first_two_passes<V>(n, current_src, current_dst);
+
+      dft_size *= 4;
+    } 
+    else if(dft_size >= V::vec_size)
     {
       if(dft_size * 4 > n)
       {
@@ -518,11 +596,39 @@ void dump(T_* ptr, Int n, const char* name)
   std::ofstream(name, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
 }
 
+void print_vec(AvxFloat::Vec a)
+{
+  for(Int i = 0; i < 8; i++)
+    printf("%f ", ((float*)&a)[i]);
+
+  printf("\n"); 
+}
+
 int main(int argc, char** argv)
 {
   printf("%d\n", setpriority(PRIO_PROCESS, 0, -20));
   typedef AvxFloat V;
   VEC_TYPEDEFS(V);
+
+  Vec d =  {8, 8, 8, 8, 8, 8, 8, 8};
+  Vec aa = {0, 1, 2, 3, 4, 5, 6, 7};
+  Vec bb = aa + d;
+  Vec cc = bb + d;
+  Vec dd = cc + d;
+  print_vec(aa);
+  print_vec(bb);
+  print_vec(cc);
+  print_vec(dd);
+  V::transpose(
+    aa, bb, cc, dd,
+    aa, bb, cc, dd);
+
+  printf("\n");
+  print_vec(aa);
+  print_vec(bb);
+  print_vec(cc);
+  print_vec(dd);
+
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
   ComplexPtrs<T> twiddle = {new T[n], new T[n]};
@@ -548,7 +654,7 @@ int main(int argc, char** argv)
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
-  for(int i = 0; i < 10LL*1000*1000*1000 / (5 * n * log2n); i++)
+  for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
     fft<V>(n, src, twiddle, working, dst);
 
   printf("time %f\n", get_time() - t);

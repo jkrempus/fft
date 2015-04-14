@@ -60,7 +60,7 @@ current fft size m
 
 indices:
   l = n / 4
-  i * m < l
+  4 * i * m < l
   o - less than m
   a0 is at: i * m + o
   a1 is at: i * m + o + l
@@ -90,15 +90,17 @@ ee = twiddle(2*m, 1)
 
 c0 = b0 + w0 * b2
 c0 = a0 + w * a2 + w0 * a1 + w * w0 * a3
+
 c0 = a0 +      ee^(o) * a1 + ee^(2*o) * a2 +      ee^(3*o) * a3
 c1 = a0 + ii * ee^(o) * a1 - ee^(2*o) * a2 - ii * ee^(3*o) * a3
 c2 = a0 -      ee^(o) * a1 + ee^(2*o) * a2 -      ee^(3*o) * a3
 c3 = a0 - ii * ee^(o) * a1 - ee^(2*o) * a2 + ii * ee^(3*o) * a3
 
-
-pass 1:
-w = twiddle(m, o) = twiddle(2 * m, 2 * o)
-a_i0 a_i1 a_i2 a_i3
-a_i0+a_i1*w a_i0-a_i1*w a_i2+a_i3*w a_i2-a_i3*w
-
+special case m = 1
+o = 0
+ee = ii
+c0 = a0 + a1 + a2 + a3
+c1 = a0 + ii * a1 - a2 - ii * a3
+c2 = a0 - a1 + a2 - a3
+c3 = a0 - ii * a1 - a2 + ii * a3
 
