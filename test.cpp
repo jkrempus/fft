@@ -64,16 +64,18 @@ struct SseFloat
   const static Int vec_size = 4;
   
   template<Int elements_per_vec>
-  static FORCEINLINE pair<Vec, Vec> interleave(Vec a, Vec b)
+  static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     if(elements_per_vec == 4)
-      return {_mm_unpacklo_ps(a, b), _mm_unpackhi_ps(a, b)};
+    {
+      r0 = _mm_unpacklo_ps(a0, a1);
+      r1 = _mm_unpackhi_ps(a0, a1);
+    }
     if(elements_per_vec == 2)
-      return {
-        _mm_shuffle_ps(a, b, _MM_SHUFFLE(1, 0, 1, 0)), 
-        _mm_shuffle_ps(a, b, _MM_SHUFFLE(3, 2, 3, 2))};
-      
-    return pair<Vec, Vec>(); // get rid of warnings
+    {
+        r0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0));
+        r1 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2));
+    }
   }
   
   template<Int elements>
@@ -88,6 +90,22 @@ struct SseFloat
 
     return Vec();
   }
+  
+  static Vec FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
+  {
+    Vec b0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)); 
+    Vec b1 = _mm_shuffle_ps(a2, a3, _MM_SHUFFLE(1, 0, 1, 0));
+    Vec b2 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2)); 
+    Vec b3 = _mm_shuffle_ps(a2, a3, _MM_SHUFFLE(3, 2, 3, 2));
+     
+    r0 = _mm_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
+    r1 = _mm_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
+    r2 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
+    r3 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
+  }
+
 };
 
 #ifdef __AVX__
@@ -402,6 +420,30 @@ FORCEINLINE void pass(
 }
 
 template<typename T>
+struct Complex
+{
+  T re;
+  T im;
+  FORCEINLINE Complex mul_with_neg_imag_unit() { return {im, -re}; }
+  FORCEINLINE Complex operator+(Complex other)
+  {
+    return {re + other.re, im + other.im};
+  }
+
+  FORCEINLINE Complex operator-(Complex other)
+  {
+    return {re - other.re, im - other.im};
+  }
+
+  FORCEINLINE Complex operator*(Complex other)
+  {
+    return {
+      re * other.re - im * other.im,
+      re * other.im + im * other.re};
+  }
+};
+
+template<typename T>
 FORCEINLINE void two_passes(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
@@ -421,53 +463,40 @@ FORCEINLINE void two_passes(
 
     for(Int j = 0; j < dft_size; j++)
     {
-      T w0_re = twiddle0.re[j];
-      T w0_im = twiddle0.im[j];
-
-      T a2_re = re_ptr[2 * l];
-      T a2_im = im_ptr[2 * l];
-      T mul02_re = w0_re * a2_re - w0_im * a2_im;
-      T mul02_im = w0_re * a2_im + w0_im * a2_re;
-
-      T a3_re = re_ptr[3 * l];
-      T a3_im = im_ptr[3 * l];
-      T mul03_re = w0_re * a3_re - w0_im * a3_im;
-      T mul03_im = w0_re * a3_im + w0_im * a3_re;
-
-      T b0_re, b1_re, b0_im, b1_im;
-      T a0_re = re_ptr[0];
-      T a0_im = im_ptr[0];
-      b0_re = a0_re + mul02_re;
-      b1_re = a0_re - mul02_re;
-      b0_im = a0_im + mul02_im;
-      b1_im = a0_im - mul02_im;
-
-      T b2_re, b3_re, b2_im, b3_im;
-      T a1_re = re_ptr[l];
-      T a1_im = im_ptr[l];
-      b2_re = a1_re + mul03_re;
-      b3_re = a1_re - mul03_re;
-      b2_im = a1_im + mul03_im;
-      b3_im = a1_im - mul03_im;
-
-      T w1_re = twiddle1.re[j];
-      T w1_im = twiddle1.im[j];
-      T mul12_re = cmul_re(b2_re, b2_im, w1_re, w1_im);
-      T mul12_im = cmul_im(b2_re, b2_im, w1_re, w1_im);
-      //the table value at j+dft_size is table 
-      //value at j multiplied by -i (imaginary unit)
-      T mul13_re = cmul_re(b3_re, b3_im, w1_im, -w1_re);
-      T mul13_im = cmul_im(b3_re, b3_im, w1_im, -w1_re);
-
-      dst_re_ptr[j] = b0_re + mul12_re; 
-      dst_re_ptr[2 * dft_size + j] = b0_re - mul12_re; 
-      dst_im_ptr[j] = b0_im + mul12_im; 
-      dst_im_ptr[2 * dft_size + j] = b0_im - mul12_im; 
+      Complex<T> w0 = {twiddle0.re[j], twiddle0.im[j]};
       
-      dst_re_ptr[dft_size + j] = b1_re + mul13_re; 
-      dst_re_ptr[3 * dft_size + j] = b1_re - mul13_re; 
-      dst_im_ptr[dft_size + j] = b1_im + mul13_im; 
-      dst_im_ptr[3 * dft_size + j] = b1_im - mul13_im; 
+      Complex<T> a2 = {re_ptr[2 * l], im_ptr[2 * l]};
+      Complex<T> mul02 = w0 * a2;
+
+      Complex<T> a3 = {re_ptr[3 * l], im_ptr[3 * l]};
+      Complex<T> mul03 = w0 * a3;
+
+      Complex<T> a0 = {re_ptr[0], im_ptr[0]};
+      Complex<T> b0 = a0 + mul02;
+      Complex<T> b1 = a0 - mul02;
+
+      Complex<T> a1 = {re_ptr[l], im_ptr[l]};
+      Complex<T> b2 = a1 + mul03;
+      Complex<T> b3 = a1 - mul03;
+
+      Complex<T> w1 = {twiddle1.re[j], twiddle1.im[j]};
+      Complex<T> mul12 = b2 * w1;
+      Complex<T> mul13 = b3 * w1.mul_with_neg_imag_unit();
+
+      Complex<T> c0 = b0 + mul12; 
+      Complex<T> c2 = b0 - mul12; 
+      Complex<T> c1 = b1 + mul13; 
+      Complex<T> c3 = b1 - mul13; 
+
+      dst_re_ptr[j] = c0.re;
+      dst_re_ptr[2 * dft_size + j] = c2.re;
+      dst_im_ptr[j] = c0.im;
+      dst_im_ptr[2 * dft_size + j] = c2.im;
+
+      dst_re_ptr[dft_size + j] = c1.re;
+      dst_re_ptr[3 * dft_size + j] = c3.re;
+      dst_im_ptr[dft_size + j] = c1.im;
+      dst_im_ptr[3 * dft_size + j] = c3.im;
 
       re_ptr++;
       im_ptr++;
@@ -597,9 +626,10 @@ void dump(T_* ptr, Int n, const char* name)
   std::ofstream(name, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
 }
 
-void print_vec(AvxFloat::Vec a)
+template<typename T>
+void print_vec(T a)
 {
-  for(Int i = 0; i < 8; i++)
+  for(Int i = 0; i < sizeof(T) / sizeof(float); i++)
     printf("%f ", ((float*)&a)[i]);
 
   printf("\n"); 
@@ -609,26 +639,8 @@ int main(int argc, char** argv)
 {
   printf("%d\n", setpriority(PRIO_PROCESS, 0, -20));
   typedef AvxFloat V;
+  //typedef SseFloat V;
   VEC_TYPEDEFS(V);
-
-  Vec d =  {8, 8, 8, 8, 8, 8, 8, 8};
-  Vec aa = {0, 1, 2, 3, 4, 5, 6, 7};
-  Vec bb = aa + d;
-  Vec cc = bb + d;
-  Vec dd = cc + d;
-  print_vec(aa);
-  print_vec(bb);
-  print_vec(cc);
-  print_vec(dd);
-  V::transpose(
-    aa, bb, cc, dd,
-    aa, bb, cc, dd);
-
-  printf("\n");
-  print_vec(aa);
-  print_vec(bb);
-  print_vec(cc);
-  print_vec(dd);
 
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
