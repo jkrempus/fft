@@ -472,10 +472,19 @@ FORCEINLINE void two_passes(
       Complex<T> a2 = {re_ptr[2 * l], im_ptr[2 * l]};
       Complex<T> a3 = {re_ptr[3 * l], im_ptr[3 * l]};
 
-      Complex<T> c0 = a0 + w2 * a2 + w1 * a1 + w3 * a3; 
-      Complex<T> c2 = a0 + w2 * a2 - w1 * a1 - w3 * a3;
-      Complex<T> c1 = a0 - w2 * a2 + w1 * a1.mul_neg_i() - w3 * a3.mul_neg_i(); 
-      Complex<T> c3 = a0 - w2 * a2 - w1 * a1.mul_neg_i() + w3 * a3.mul_neg_i(); 
+      Complex<T> mul1 = w1 * a1;
+      Complex<T> mul2 = w2 * a2;
+      Complex<T> mul3 = w3 * a3;
+
+      Complex<T> sum02 = a0 + mul2;
+      Complex<T> dif02 = a0 - mul2;
+      Complex<T> sum13 = mul1 + mul3;
+      Complex<T> dif13 = mul1 - mul3;
+
+      Complex<T> c0 = sum02 + sum13; 
+      Complex<T> c2 = sum02 - sum13;
+      Complex<T> c1 = dif02 + dif13.mul_neg_i(); 
+      Complex<T> c3 = dif02 - dif13.mul_neg_i(); 
 
       dst_re_ptr[j] = c0.re;
       dst_re_ptr[2 * dft_size + j] = c2.re;
