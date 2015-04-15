@@ -206,18 +206,42 @@ struct ComplexPtrs
   ComplexPtrs operator-(Int offset) { return {re - offset, im - offset}; }
 };
 
+template<typename T>
+struct Complex
+{
+  T re;
+  T im;
+  FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
+  FORCEINLINE Complex operator+(Complex other)
+  {
+    return {re + other.re, im + other.im};
+  }
+
+  FORCEINLINE Complex operator-(Complex other)
+  {
+    return {re - other.re, im - other.im};
+  }
+
+  FORCEINLINE Complex operator*(Complex other)
+  {
+    return {
+      re * other.re - im * other.im,
+      re * other.im + im * other.re};
+  }
+};
+
 template<typename V>
-void init_twiddle(Int len, ComplexPtrs<typename V::T> dst)
+void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
 {
   VEC_TYPEDEFS(V);
-  auto end = dst + len;
+  auto end = dst + n;
   Int table_index = 0;
   end.re[-1] = T(0);
   end.im[-1] = T(0);
   end.re[-2] = T(1);
   end.im[-2] = T(0);
 
-  for(Int size = 2; size < len; size *= 2)
+  for(Int size = 2; size < n; size *= 2)
   {
     table_index++;
     auto c = SinCosTable<T>::cos[table_index];
@@ -234,6 +258,45 @@ void init_twiddle(Int len, ComplexPtrs<typename V::T> dst)
       current.re[2 * j + 1] = prev_re * c + prev_im * s;
       current.im[2 * j + 1] = prev_im * c - prev_re * s;
     }
+  }
+
+  Int iter = 0;
+  for(Int dft_size = 1; dft_size < n;)
+  {
+    iter++;
+    if(dft_size == 1)
+    {
+      dft_size *= 4;
+    }
+    else if(dft_size >= V::vec_size)
+    {
+      if(dft_size * 4 > n)
+        dft_size *= 2;
+      else
+      {
+        Int vn = n / V::vec_size;
+        Int vdft_size = dft_size / V::vec_size;
+
+        Vec* row_re = (Vec*) dst.re + vn - 4 * vdft_size;
+        Vec* row_im = (Vec*) dst.im + vn - 4 * vdft_size;
+        for(Int i = vdft_size - 1; i >= 0; i--)
+        {
+          Complex<Vec> w1 = {row_re[i], row_im[i]};
+          Complex<Vec> w2 = w1 * w1;
+          Complex<Vec> w3 = w2 * w1;
+          row_re[3 * i] = w1.re;
+          row_re[3 * i + 1] = w2.re;
+          row_re[3 * i + 2] = w3.re;
+          row_im[3 * i] = w1.im;
+          row_im[3 * i + 1] = w2.im;
+          row_im[3 * i + 2] = w3.im;
+        }
+
+        dft_size *= 4;
+      }
+    }
+    else
+      dft_size *= 2;
   }
 }
 
@@ -420,61 +483,47 @@ FORCEINLINE void pass(
 }
 
 template<typename T>
-struct Complex
-{
-  T re;
-  T im;
-  FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
-  FORCEINLINE Complex operator+(Complex other)
-  {
-    return {re + other.re, im + other.im};
-  }
-
-  FORCEINLINE Complex operator-(Complex other)
-  {
-    return {re - other.re, im - other.im};
-  }
-
-  FORCEINLINE Complex operator*(Complex other)
-  {
-    return {
-      re * other.re - im * other.im,
-      re * other.im + im * other.re};
-  }
-};
-
-template<typename T>
 FORCEINLINE void two_passes(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
-  ComplexPtrs<T> twiddle0,
-  ComplexPtrs<T> twiddle1,
+  ComplexPtrs<T> twiddle,
   ComplexPtrs<T> dst)
 {
   T* re_ptr = src.re;
   T* im_ptr = src.im;
+  T* dst_re_ptr = dst.re;
+  T* dst_im_ptr = dst.im;
+  T* tw_re = twiddle.re;
+  T* tw_im = twiddle.im;
 
-  for(Int i = 0; i < n / 4; i += dft_size)
+  Int l = n / 4;
+  Int l2 = l * 2;
+  Int l3 = l * 3;
+  Int dft_size2 = dft_size * 2;
+  Int dft_size3 = dft_size * 3;
+
+  for(T* end = re_ptr + l; re_ptr < end;)
   {
-    T* dst_re_ptr = dst.re + 4 * i;
-    T* dst_im_ptr = dst.im + 4 * i;
-
-    Int l = n / 4;
-
-    for(Int j = 0; j < dft_size; j++)
+    for(T* end1 = re_ptr + dft_size;;)
     {
-      Complex<T> w1 = {twiddle1.re[j], twiddle1.im[j]};
-      Complex<T> w2 = {twiddle0.re[j], twiddle0.im[j]};
-      Complex<T> w3 = w1 * w2;
-      
       Complex<T> a0 = {re_ptr[0], im_ptr[0]};
+      
+      Complex<T> w1 = {tw_re[0], tw_im[0]};
       Complex<T> a1 = {re_ptr[l], im_ptr[l]};
-      Complex<T> a2 = {re_ptr[2 * l], im_ptr[2 * l]};
-      Complex<T> a3 = {re_ptr[3 * l], im_ptr[3 * l]};
-
       Complex<T> mul1 = w1 * a1;
+
+      Complex<T> w2 = {tw_re[1], tw_im[1]};
+      Complex<T> a2 = {re_ptr[l2], im_ptr[l2]};
       Complex<T> mul2 = w2 * a2;
+
+      Complex<T> w3 = {tw_re[2], tw_im[2]};
+      Complex<T> a3 = {re_ptr[l3], im_ptr[l3]};
       Complex<T> mul3 = w3 * a3;
+
+      re_ptr++;
+      im_ptr++;
+      tw_re += 3;
+      tw_im += 3;
 
       Complex<T> sum02 = a0 + mul2;
       Complex<T> dif02 = a0 - mul2;
@@ -486,23 +535,32 @@ FORCEINLINE void two_passes(
       Complex<T> c1 = dif02 + dif13.mul_neg_i(); 
       Complex<T> c3 = dif02 - dif13.mul_neg_i(); 
 
-      dst_re_ptr[j] = c0.re;
-      dst_re_ptr[2 * dft_size + j] = c2.re;
-      dst_im_ptr[j] = c0.im;
-      dst_im_ptr[2 * dft_size + j] = c2.im;
+      dst_re_ptr[0] = c0.re;
+      dst_re_ptr[dft_size2] = c2.re;
+      dst_im_ptr[0] = c0.im;
+      dst_im_ptr[dft_size2] = c2.im;
 
-      dst_re_ptr[dft_size + j] = c1.re;
-      dst_re_ptr[3 * dft_size + j] = c3.re;
-      dst_im_ptr[dft_size + j] = c1.im;
-      dst_im_ptr[3 * dft_size + j] = c3.im;
+      dst_re_ptr[dft_size] = c1.re;
+      dst_re_ptr[dft_size3] = c3.re;
+      dst_im_ptr[dft_size] = c1.im;
+      dst_im_ptr[dft_size3] = c3.im;
 
-      re_ptr++;
-      im_ptr++;
+      dst_re_ptr++;
+      dst_im_ptr++;
+      //We check the condition here, so that we don't need to check
+      //it for first iteration
+      if(!(re_ptr < end1)) break;
     }
+
+    dst_re_ptr += dft_size3;
+    dst_im_ptr += dft_size3;
+    tw_re -= dft_size3;
+    tw_im -= dft_size3;
   }
 }
 
-Int top_level_loop_iterations(Int n, Int vec_size)
+template<typename V>
+Int top_level_loop_iterations(Int n)
 {
   Int iter = 0;
   for(Int dft_size = 1; dft_size < n;)
@@ -512,7 +570,7 @@ Int top_level_loop_iterations(Int n, Int vec_size)
     {
       dft_size *= 4;
     }
-    else if(dft_size >= vec_size)
+    else if(dft_size >= V::vec_size)
     {
       if(dft_size * 4 > n)
         dft_size *= 2;
@@ -543,7 +601,7 @@ void fft(
 {
   VEC_TYPEDEFS(V);
 
-  auto is_odd = bool(top_level_loop_iterations(n, V::vec_size) & 1);
+  auto is_odd = bool(top_level_loop_iterations<V>(n) & 1);
   auto current_src = src;
   auto current_dst = is_odd ? dst : working;
   auto next_dst = is_odd ? working : dst;
@@ -577,7 +635,6 @@ void fft(
           n / V::vec_size,
           dft_size / V::vec_size,
           (ComplexPtrs<Vec>&) current_src,
-          (ComplexPtrs<Vec>&) tw,
           (ComplexPtrs<Vec>&) other_tw,
           (ComplexPtrs<Vec>&) current_dst);
 
