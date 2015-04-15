@@ -463,27 +463,19 @@ FORCEINLINE void two_passes(
 
     for(Int j = 0; j < dft_size; j++)
     {
-      Complex<T> w0 = {twiddle0.re[j], twiddle0.im[j]};
+      Complex<T> w1 = {twiddle1.re[j], twiddle1.im[j]};
+      Complex<T> w2 = {twiddle0.re[j], twiddle0.im[j]};
+      Complex<T> w3 = w1 * w2;
       
       Complex<T> a0 = {re_ptr[0], im_ptr[0]};
       Complex<T> a1 = {re_ptr[l], im_ptr[l]};
       Complex<T> a2 = {re_ptr[2 * l], im_ptr[2 * l]};
       Complex<T> a3 = {re_ptr[3 * l], im_ptr[3 * l]};
 
-      Complex<T> b0 = a0 + w0 * a2;
-      Complex<T> b1 = a0 - w0 * a2;
-      Complex<T> b2 = a1 + w0 * a3;
-      Complex<T> b3 = a1 - w0 * a3;
-
-      Complex<T> w1 = {twiddle1.re[j], twiddle1.im[j]};
-
-      Complex<T> c0 = a0 + w0 * a2 + w1 * a1 + w0 * w1 * a3; 
-      Complex<T> c2 = a0 + w0 * a2 - w1 * a1 - w1 * w0 * a3;
-      Complex<T> c1 = a0 - w0 * a2
-        + w1.mul_neg_i() * a1 - w1.mul_neg_i() * w0 * a3; 
-
-      Complex<T> c3 = a0 - w0 * a2
-        - w1.mul_neg_i() * a1 + w1.mul_neg_i() * w0 * a3; 
+      Complex<T> c0 = a0 + w2 * a2 + w1 * a1 + w3 * a3; 
+      Complex<T> c2 = a0 + w2 * a2 - w1 * a1 - w3 * a3;
+      Complex<T> c1 = a0 - w2 * a2 + w1 * a1.mul_neg_i() - w3 * a3.mul_neg_i(); 
+      Complex<T> c3 = a0 - w2 * a2 - w1 * a1.mul_neg_i() + w3 * a3.mul_neg_i(); 
 
       dst_re_ptr[j] = c0.re;
       dst_re_ptr[2 * dft_size + j] = c2.re;
