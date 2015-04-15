@@ -424,7 +424,7 @@ struct Complex
 {
   T re;
   T im;
-  FORCEINLINE Complex mul_with_neg_imag_unit() { return {im, -re}; }
+  FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
   FORCEINLINE Complex operator+(Complex other)
   {
     return {re + other.re, im + other.im};
@@ -477,10 +477,13 @@ FORCEINLINE void two_passes(
 
       Complex<T> w1 = {twiddle1.re[j], twiddle1.im[j]};
 
-      Complex<T> c0 = b0 + b2 * w1; 
-      Complex<T> c2 = b0 - b2 * w1; 
-      Complex<T> c1 = b1 + b3 * w1.mul_with_neg_imag_unit(); 
-      Complex<T> c3 = b1 - b3 * w1.mul_with_neg_imag_unit(); 
+      Complex<T> c0 = a0 + w0 * a2 + w1 * a1 + w0 * w1 * a3; 
+      Complex<T> c2 = a0 + w0 * a2 - w1 * a1 - w1 * w0 * a3;
+      Complex<T> c1 = a0 - w0 * a2
+        + w1.mul_neg_i() * a1 - w1.mul_neg_i() * w0 * a3; 
+
+      Complex<T> c3 = a0 - w0 * a2
+        - w1.mul_neg_i() * a1 + w1.mul_neg_i() * w0 * a3; 
 
       dst_re_ptr[j] = c0.re;
       dst_re_ptr[2 * dft_size + j] = c2.re;
