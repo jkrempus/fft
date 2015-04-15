@@ -241,6 +241,18 @@ FORCEINLINE void copy(const T* src, Int n, T* dst)
 #endif
 }
 
+template<typename T>
+FORCEINLINE T cmul_re(T a_re, T a_im, T b_re, T b_im)
+{
+  return a_re * b_re - a_im * b_im;
+}
+
+template<typename T>
+FORCEINLINE T cmul_im(T a_re, T a_im, T b_re, T b_im)
+{
+  return a_re * b_im + a_im * b_re;
+}
+
 template<typename V, Int dft_size>
 FORCEINLINE void ct_dft_size_pass(
   Int n,
@@ -277,8 +289,8 @@ FORCEINLINE void ct_dft_size_pass(
       Vec im0 = vsrc0_im[i]; 
       Vec re1 = vsrc1_re[i]; 
       Vec im1 = vsrc1_im[i]; 
-      Vec mul_re = tw_re * re1 - tw_im * im1;
-      Vec mul_im = tw_re * im1 + tw_im * re1;
+      Vec mul_re = cmul_re(re1, im1, tw_re, tw_im);
+      Vec mul_im = cmul_im(re1, im1, tw_re, tw_im);
       V::template interleave<V::vec_size / dft_size>(
         re0 + mul_re, re0 - mul_re, vdst_re[2 * i], vdst_re[2 * i + 1]);
 
@@ -318,20 +330,6 @@ FORCEINLINE void first_two_passes(
     Vec a2_im = vsrc2_im[i];
     Vec a3_im = vsrc3_im[i];
 
-    //TODO: Check why these aren't the same
-#if 0
-    Vec c0_re = a0_re + a1_re + a2_re + a3_re;
-    Vec c0_im = a0_im + a1_im + a2_im + a3_im;
-    
-    Vec c1_re = a0_re - a1_im - a2_re + a3_im;
-    Vec c1_im = a0_im + a1_re - a2_im - a3_re;
-
-    Vec c2_re = a0_re - a1_re + a2_re - a3_re;
-    Vec c2_im = a0_im - a1_im + a2_im - a3_im;
-
-    Vec c3_re = a0_re + a1_im - a2_re - a3_im;
-    Vec c3_im = a0_im - a1_re - a2_im + a3_re;
-#else
     Vec b0_re = a0_re + a2_re;
     Vec b0_im = a0_im + a2_im;
 
@@ -355,7 +353,6 @@ FORCEINLINE void first_two_passes(
 
     Vec c3_re = b1_re - b3_im;
     Vec c3_im = b1_im + b3_re;
-#endif
 
     Int j = 4 * i;
     V::transpose(
@@ -455,13 +452,13 @@ FORCEINLINE void two_passes(
 
       T w1_re = twiddle1.re[j];
       T w1_im = twiddle1.im[j];
-      T mul12_re = w1_re * b2_re - w1_im * b2_im;
-      T mul12_im = w1_re * b2_im + w1_im * b2_re;
+      T mul12_re = cmul_re(b2_re, b2_im, w1_re, w1_im);
+      T mul12_im = cmul_im(b2_re, b2_im, w1_re, w1_im);
       //the table value at j+dft_size is table 
       //value at j multiplied by -i (imaginary unit)
-      T mul13_im     = w1_im * b3_im - w1_re * b3_re;
-      T mul13_re = w1_re * b3_im + w1_im * b3_re;
-      
+      T mul13_re = cmul_re(b3_re, b3_im, w1_im, -w1_re);
+      T mul13_im = cmul_im(b3_re, b3_im, w1_im, -w1_re);
+
       dst_re_ptr[j] = b0_re + mul12_re; 
       dst_re_ptr[2 * dft_size + j] = b0_re - mul12_re; 
       dst_im_ptr[j] = b0_im + mul12_im; 
