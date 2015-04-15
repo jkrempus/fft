@@ -465,28 +465,22 @@ FORCEINLINE void two_passes(
     {
       Complex<T> w0 = {twiddle0.re[j], twiddle0.im[j]};
       
-      Complex<T> a2 = {re_ptr[2 * l], im_ptr[2 * l]};
-      Complex<T> mul02 = w0 * a2;
-
-      Complex<T> a3 = {re_ptr[3 * l], im_ptr[3 * l]};
-      Complex<T> mul03 = w0 * a3;
-
       Complex<T> a0 = {re_ptr[0], im_ptr[0]};
-      Complex<T> b0 = a0 + mul02;
-      Complex<T> b1 = a0 - mul02;
-
       Complex<T> a1 = {re_ptr[l], im_ptr[l]};
-      Complex<T> b2 = a1 + mul03;
-      Complex<T> b3 = a1 - mul03;
+      Complex<T> a2 = {re_ptr[2 * l], im_ptr[2 * l]};
+      Complex<T> a3 = {re_ptr[3 * l], im_ptr[3 * l]};
+
+      Complex<T> b0 = a0 + w0 * a2;
+      Complex<T> b1 = a0 - w0 * a2;
+      Complex<T> b2 = a1 + w0 * a3;
+      Complex<T> b3 = a1 - w0 * a3;
 
       Complex<T> w1 = {twiddle1.re[j], twiddle1.im[j]};
-      Complex<T> mul12 = b2 * w1;
-      Complex<T> mul13 = b3 * w1.mul_with_neg_imag_unit();
 
-      Complex<T> c0 = b0 + mul12; 
-      Complex<T> c2 = b0 - mul12; 
-      Complex<T> c1 = b1 + mul13; 
-      Complex<T> c3 = b1 - mul13; 
+      Complex<T> c0 = b0 + b2 * w1; 
+      Complex<T> c2 = b0 - b2 * w1; 
+      Complex<T> c1 = b1 + b3 * w1.mul_with_neg_imag_unit(); 
+      Complex<T> c3 = b1 - b3 * w1.mul_with_neg_imag_unit(); 
 
       dst_re_ptr[j] = c0.re;
       dst_re_ptr[2 * dft_size + j] = c2.re;
