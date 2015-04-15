@@ -405,17 +405,18 @@ FORCEINLINE void pass(
 }
 
 template<typename T>
-FORCEINLINE void two_pass(
+FORCEINLINE void two_passes(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
   ComplexPtrs<T> twiddle0,
   ComplexPtrs<T> twiddle1,
   ComplexPtrs<T> dst)
 {
+  T* re_ptr = src.re;
+  T* im_ptr = src.im;
+
   for(Int i = 0; i < n / 4; i += dft_size)
   {
-    T* re_ptr = src.re + i;
-    T* im_ptr = src.im + i;
     T* dst_re_ptr = dst.re + 4 * i;
     T* dst_im_ptr = dst.im + 4 * i;
 
@@ -426,27 +427,27 @@ FORCEINLINE void two_pass(
       T w0_re = twiddle0.re[j];
       T w0_im = twiddle0.im[j];
 
-      T a2_re = re_ptr[2 * l + j];
-      T a2_im = im_ptr[2 * l + j];
+      T a2_re = re_ptr[2 * l];
+      T a2_im = im_ptr[2 * l];
       T mul02_re = w0_re * a2_re - w0_im * a2_im;
       T mul02_im = w0_re * a2_im + w0_im * a2_re;
 
-      T a3_re = re_ptr[3 * l + j];
-      T a3_im = im_ptr[3 * l + j];
+      T a3_re = re_ptr[3 * l];
+      T a3_im = im_ptr[3 * l];
       T mul03_re = w0_re * a3_re - w0_im * a3_im;
       T mul03_im = w0_re * a3_im + w0_im * a3_re;
 
       T b0_re, b1_re, b0_im, b1_im;
-      T a0_re = re_ptr[j];
-      T a0_im = im_ptr[j];
+      T a0_re = re_ptr[0];
+      T a0_im = im_ptr[0];
       b0_re = a0_re + mul02_re;
       b1_re = a0_re - mul02_re;
       b0_im = a0_im + mul02_im;
       b1_im = a0_im - mul02_im;
 
       T b2_re, b3_re, b2_im, b3_im;
-      T a1_re = re_ptr[l + j];
-      T a1_im = im_ptr[l + j];
+      T a1_re = re_ptr[l];
+      T a1_im = im_ptr[l];
       b2_re = a1_re + mul03_re;
       b3_re = a1_re - mul03_re;
       b2_im = a1_im + mul03_im;
@@ -470,6 +471,9 @@ FORCEINLINE void two_pass(
       dst_re_ptr[3 * dft_size + j] = b1_re - mul13_re; 
       dst_im_ptr[dft_size + j] = b1_im + mul13_im; 
       dst_im_ptr[3 * dft_size + j] = b1_im - mul13_im; 
+
+      re_ptr++;
+      im_ptr++;
     }
   }
 }
@@ -545,7 +549,7 @@ void fft(
       else
       {
         auto other_tw = twiddle + (n - 4 * dft_size); 
-        two_pass(
+        two_passes(
           n / V::vec_size,
           dft_size / V::vec_size,
           (ComplexPtrs<Vec>&) current_src,
