@@ -105,7 +105,6 @@ struct SseFloat
     r2 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
     r3 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
-
 };
 
 #ifdef __AVX__
@@ -148,6 +147,7 @@ struct AvxFloat
     return Vec(); // get rid of warnings
   }
 
+
   // The input matrix has 4 rows and vec_size columns
   static Vec FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
@@ -169,11 +169,41 @@ struct AvxFloat
     r3 = _mm256_permute2f128_ps(c2, c3, _MM_SHUFFLE(0, 3, 0, 1));
   }
 
+  static Vec FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec a4, Vec a5, Vec a6, Vec a7,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
+    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
+  {
+    transpose4x4_two(a0, a2, a4, a6);
+    transpose4x4_two(a1, a3, a5, a7);
+
+    transpose_128(a0, a1, r0, r1);
+    transpose_128(a2, a3, r2, r3);
+    transpose_128(a4, a5, r4, r5);
+    transpose_128(a6, a7, r6, r7);
+  }
+
+  static Vec FORCEINLINE to_vec(T a){ return _mm256_set1_ps(a); }
+
 private: 
   static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
     r1 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 3, 0, 1));
+  }
+  
+  static void transpose4x4_two(Vec& a0, Vec& a1, Vec& a2, Vec& a3)
+  {
+    Vec b0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0));
+    Vec b1 = _mm256_shuffle_ps(a2, a3, _MM_SHUFFLE(1, 0, 1, 0));
+    Vec b2 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2));
+    Vec b3 = _mm256_shuffle_ps(a2, a3, _MM_SHUFFLE(3, 2, 3, 2));
+
+    a0 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
+    a1 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
+    a2 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
+    a3 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
 };
 #endif
@@ -227,6 +257,12 @@ struct Complex
     return {
       re * other.re - im * other.im,
       re * other.im + im * other.re};
+  }
+
+  FORCEINLINE void store(T* re_ptr, T* im_ptr, Int offset)
+  {
+    re_ptr[offset] = re;
+    im_ptr[offset] = im;
   }
 };
 
@@ -342,6 +378,7 @@ FORCEINLINE void ct_dft_size_pass(
   ComplexPtrs<typename V::T> dst)
 {
   VEC_TYPEDEFS(V);
+  ComplexPtrs<T> tw = twiddle + n - 2 * dft_size;
   Int vn = n / V::vec_size;
   auto vsrc0_re = (Vec*) src.re;
   auto vsrc0_im = (Vec*) src.im;
@@ -349,8 +386,8 @@ FORCEINLINE void ct_dft_size_pass(
   auto vsrc1_im = (Vec*) src.im + vn / 2;
   auto vdst_re = (Vec*) dst.re;
   auto vdst_im = (Vec*) dst.im;
-  Vec tw_re = V::template load_repeated<dft_size>(twiddle.re);
-  Vec tw_im = V::template load_repeated<dft_size>(twiddle.im);
+  Vec tw_re = V::template load_repeated<dft_size>(tw.re);
+  Vec tw_im = V::template load_repeated<dft_size>(tw.im);
   for(Int i = 0; i < vn / 2; i++)
     if(dft_size == 1)
     {
@@ -369,7 +406,7 @@ FORCEINLINE void ct_dft_size_pass(
       Vec re0 = vsrc0_re[i]; 
       Vec im0 = vsrc0_im[i]; 
       Vec re1 = vsrc1_re[i]; 
-      Vec im1 = vsrc1_im[i]; 
+      Vec im1 = vsrc1_im[i];
       Vec mul_re = cmul_re(re1, im1, tw_re, tw_im);
       Vec mul_im = cmul_im(re1, im1, tw_re, tw_im);
       V::template interleave<V::vec_size / dft_size>(
@@ -401,48 +438,111 @@ FORCEINLINE void first_two_passes(
 
   for(Int i = 0; i < vn / 4; i++)
   {
-    Vec a0_re = vsrc0_re[i];
-    Vec a1_re = vsrc1_re[i];
-    Vec a2_re = vsrc2_re[i];
-    Vec a3_re = vsrc3_re[i];
-    
-    Vec a0_im = vsrc0_im[i];
-    Vec a1_im = vsrc1_im[i];
-    Vec a2_im = vsrc2_im[i];
-    Vec a3_im = vsrc3_im[i];
+    Complex<Vec> a0 = {vsrc0_re[i], vsrc0_im[i]};
+    Complex<Vec> a1 = {vsrc1_re[i], vsrc1_im[i]};
+    Complex<Vec> a2 = {vsrc2_re[i], vsrc2_im[i]};
+    Complex<Vec> a3 = {vsrc3_re[i], vsrc3_im[i]};
 
-    Vec b0_re = a0_re + a2_re;
-    Vec b0_im = a0_im + a2_im;
+    Complex<Vec> b0 = a0 + a2;
+    Complex<Vec> b1 = a0 - a2;
+    Complex<Vec> b2 = a1 + a3; 
+    Complex<Vec> b3 = a1 - a3; 
 
-    Vec b1_re = a0_re - a2_re;
-    Vec b1_im = a0_im - a2_im;
-
-    Vec b2_re = a1_re + a3_re;
-    Vec b2_im = a1_im + a3_im;
-    
-    Vec b3_re = a1_re - a3_re;
-    Vec b3_im = a1_im - a3_im;
-
-    Vec c0_re = b0_re + b2_re;
-    Vec c0_im = b0_im + b2_im;
-
-    Vec c2_re = b0_re - b2_re;
-    Vec c2_im = b0_im - b2_im;
-
-    Vec c1_re = b1_re + b3_im;
-    Vec c1_im = b1_im - b3_re; 
-
-    Vec c3_re = b1_re - b3_im;
-    Vec c3_im = b1_im + b3_re;
+    Complex<Vec> c0 = b0 + b2; 
+    Complex<Vec> c2 = b0 - b2;
+    Complex<Vec> c1 = b1 + b3.mul_neg_i();
+    Complex<Vec> c3 = b1 - b3.mul_neg_i();
 
     Int j = 4 * i;
     V::transpose(
-      c0_re, c1_re, c2_re, c3_re,
+      c0.re, c1.re, c2.re, c3.re,
       vdst_re[j], vdst_re[j + 1], vdst_re[j + 2], vdst_re[j + 3]);
     
     V::transpose(
-      c0_im, c1_im, c2_im, c3_im,
+      c0.im, c1.im, c2.im, c3.im,
       vdst_im[j], vdst_im[j + 1], vdst_im[j + 2], vdst_im[j + 3]);
+  }
+}
+
+template<typename V>
+FORCEINLINE void first_three_passes(
+  Int n,
+  ComplexPtrs<typename V::T> src,
+  ComplexPtrs<typename V::T> twiddle,
+  ComplexPtrs<typename V::T> dst)
+{
+  VEC_TYPEDEFS(V);
+  Int vn = n / V::vec_size;
+
+  Int l = vn / 8;
+  
+  Vec* vsrc_re = (Vec*) src.re;
+  Vec* vsrc_im = (Vec*) src.im;
+
+  Vec* vdst_re = (Vec*) dst.re;
+  Vec* vdst_im = (Vec*) dst.im;
+
+  ComplexPtrs<V> tw = twiddle + n - 2 * 8;
+  for(Int i = 0; i < l; i++)
+  {
+    Complex<Vec> c0, c1, c2, c3;
+    {
+      Complex<Vec> a0 = {vsrc_re[i], vsrc_im[i]};
+      Complex<Vec> a1 = {vsrc_re[i + 2 * l], vsrc_im[i + 2 * l]};
+      Complex<Vec> a2 = {vsrc_re[i + 4 * l], vsrc_im[i + 4 * l]};
+      Complex<Vec> a3 = {vsrc_re[i + 6 * l], vsrc_im[i + 6 * l]};
+      Complex<Vec> b0 = a0 + a2;
+      Complex<Vec> b1 = a0 - a2;
+      Complex<Vec> b2 = a1 + a3; 
+      Complex<Vec> b3 = a1 - a3; 
+      c0 = b0 + b2; 
+      c2 = b0 - b2;
+      c1 = b1 + b3.mul_neg_i();
+      c3 = b1 - b3.mul_neg_i();
+    }
+
+    Complex<Vec> c4, c5, c6, c7;
+    {
+      Complex<Vec> a0 = {vsrc_re[i + l], vsrc_im[i + l]};
+      Complex<Vec> a1 = {vsrc_re[i + 3 * l], vsrc_im[i + 3 * l]};
+      Complex<Vec> a2 = {vsrc_re[i + 5 * l], vsrc_im[i + 5 * l]};
+      Complex<Vec> a3 = {vsrc_re[i + 7 * l], vsrc_im[i + 7 * l]};
+      Complex<Vec> b0 = a0 + a2;
+      Complex<Vec> b1 = a0 - a2;
+      Complex<Vec> b2 = a1 + a3; 
+      Complex<Vec> b3 = a1 - a3; 
+      c4 = b0 + b2; 
+      c5 = b0 - b2;
+      c6 = b1 + b3.mul_neg_i();
+      c7 = b1 - b3.mul_neg_i();
+    }
+
+    Complex<Vec> mul0 = c4 * (Complex<Vec>){tw.re[0], tw.im[0]};
+    Complex<Vec> d0 = c0 + mul0;
+    Complex<Vec> d4 = c0 - mul0;
+
+    Complex<Vec> mul1 = c5 * (Complex<Vec>){tw.re[1], tw.im[1]};
+    Complex<Vec> d1 = c1 + mul1;
+    Complex<Vec> d5 = c1 - mul1;
+
+    Complex<Vec> mul2 = c6 * (Complex<Vec>){tw.re[2], tw.im[2]};
+    Complex<Vec> d2 = c2 + mul2;
+    Complex<Vec> d6 = c2 - mul1;
+
+    Complex<Vec> mul3 = c7 * (Complex<Vec>){tw.re[3], tw.im[3]};
+    Complex<Vec> d3 = c3 + mul3;
+    Complex<Vec> d7 = c3 - mul3;
+
+    Int j = 8 * i;
+    V::transpose(
+      d0.re, d1.re, d2.re, d3.re, d4.re, d5.re, d6.re, d7.re,
+      vdst_re[j], vdst_re[j + 1], vdst_re[j + 2], vdst_re[j + 3],
+      vdst_re[j + 4], vdst_re[j + 5], vdst_re[j + 6], vdst_re[j + 7]);
+
+    V::transpose(
+      d0.im, d1.im, d2.im, d3.im, d4.im, d5.im, d6.im, d7.im,
+      vdst_im[j], vdst_im[j + 1], vdst_im[j + 2], vdst_im[j + 3],
+      vdst_im[j + 4], vdst_im[j + 5], vdst_im[j + 6], vdst_im[j + 7]);
   }
 }
 
@@ -530,25 +630,15 @@ FORCEINLINE void two_passes(
       Complex<T> sum13 = mul1 + mul3;
       Complex<T> dif13 = mul1 - mul3;
 
-      Complex<T> c0 = sum02 + sum13; 
-      Complex<T> c2 = sum02 - sum13;
-      Complex<T> c1 = dif02 + dif13.mul_neg_i(); 
-      Complex<T> c3 = dif02 - dif13.mul_neg_i(); 
-
-      dst_re_ptr[0] = c0.re;
-      dst_re_ptr[dft_size2] = c2.re;
-      dst_im_ptr[0] = c0.im;
-      dst_im_ptr[dft_size2] = c2.im;
-
-      dst_re_ptr[dft_size] = c1.re;
-      dst_re_ptr[dft_size3] = c3.re;
-      dst_im_ptr[dft_size] = c1.im;
-      dst_im_ptr[dft_size3] = c3.im;
+      (sum02 + sum13).store(dst_re_ptr, dst_im_ptr, 0); 
+      (sum02 - sum13).store(dst_re_ptr, dst_im_ptr, dft_size2);
+      (dif02 + dif13.mul_neg_i()).store(dst_re_ptr, dst_im_ptr, dft_size);
+      (dif02 - dif13.mul_neg_i()).store(dst_re_ptr, dst_im_ptr, dft_size3); 
 
       dst_re_ptr++;
       dst_im_ptr++;
       //We check the condition here, so that we don't need to check
-      //it for first iteration
+      //it for the first iteration
       if(!(re_ptr < end1)) break;
     }
 
