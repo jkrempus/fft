@@ -480,21 +480,23 @@ FORCEINLINE void first_three_passes(
 
   Int l = vn / 8;
   
-  Vec* vsrc_re = (Vec*) src.re;
-  Vec* vsrc_im = (Vec*) src.im;
-
-  Vec* vdst_re = (Vec*) dst.re;
-  Vec* vdst_im = (Vec*) dst.im;
-
   ComplexPtrs<T> tw = twiddle + n - 2 * 4;
+  Vec invsqrt2 = V::vec(tw.re[1]);
+
+  Vec* sre = (Vec*) src.re;
+  Vec* sim = (Vec*) src.im;
+
+  Vec* dre = (Vec*) dst.re;
+  Vec* dim = (Vec*) dst.im;
+
   for(Int i = 0; i < l; i++)
   {
     C c0, c1, c2, c3;
     {
-      C a0 = {vsrc_re[i],         vsrc_im[i]};
-      C a1 = {vsrc_re[i + 2 * l], vsrc_im[i + 2 * l]};
-      C a2 = {vsrc_re[i + 4 * l], vsrc_im[i + 4 * l]};
-      C a3 = {vsrc_re[i + 6 * l], vsrc_im[i + 6 * l]};
+      C a0 = {sre[0],     sim[0]};
+      C a1 = {sre[2 * l], sim[2 * l]};
+      C a2 = {sre[4 * l], sim[4 * l]};
+      C a3 = {sre[6 * l], sim[6 * l]};
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -507,10 +509,10 @@ FORCEINLINE void first_three_passes(
 
     C c4, c5, c6, c7;
     {
-      C a0 = {vsrc_re[i + l],     vsrc_im[i + l]};
-      C a1 = {vsrc_re[i + 3 * l], vsrc_im[i + 3 * l]};
-      C a2 = {vsrc_re[i + 5 * l], vsrc_im[i + 5 * l]};
-      C a3 = {vsrc_re[i + 7 * l], vsrc_im[i + 7 * l]};
+      C a0 = {sre[l],     sim[l]};
+      C a1 = {sre[3 * l], sim[3 * l]};
+      C a2 = {sre[5 * l], sim[5 * l]};
+      C a3 = {sre[7 * l], sim[7 * l]};
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -521,32 +523,35 @@ FORCEINLINE void first_three_passes(
       c7 = b1 - b3.mul_neg_i();
     }
 
-    C mul0 = c4 * (C){V::vec(tw.re[0]), V::vec(tw.im[0])};
+    sre++;
+    sim++;
+
+    C mul0 = c4;
     C d0 = c0 + mul0;
     C d4 = c0 - mul0;
 
-    C mul1 = c5 * (C){V::vec(tw.re[1]), V::vec(tw.im[1])};
+    C mul1 = {invsqrt2 * (c5.re + c5.im), invsqrt2 * (c5.im - c5.re)};
     C d1 = c1 + mul1;
     C d5 = c1 - mul1;
 
-    C mul2 = c6 * (C){V::vec(tw.re[2]), V::vec(tw.im[2])};
+    C mul2 = c6.mul_neg_i();
     C d2 = c2 + mul2;
     C d6 = c2 - mul2;
 
-    C mul3 = c7 * (C){V::vec(tw.re[3]), V::vec(tw.im[3])};
+    C mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
     C d3 = c3 + mul3;
     C d7 = c3 - mul3;
 
-    Int j = 8 * i;
     V::transpose(
       d0.re, d1.re, d2.re, d3.re, d4.re, d5.re, d6.re, d7.re,
-      vdst_re[j], vdst_re[j + 1], vdst_re[j + 2], vdst_re[j + 3],
-      vdst_re[j + 4], vdst_re[j + 5], vdst_re[j + 6], vdst_re[j + 7]);
+      dre[0], dre[1], dre[2], dre[3], dre[4], dre[5], dre[6], dre[7]);
 
     V::transpose(
       d0.im, d1.im, d2.im, d3.im, d4.im, d5.im, d6.im, d7.im,
-      vdst_im[j], vdst_im[j + 1], vdst_im[j + 2], vdst_im[j + 3],
-      vdst_im[j + 4], vdst_im[j + 5], vdst_im[j + 6], vdst_im[j + 7]);
+      dim[0], dim[1], dim[2], dim[3], dim[4], dim[5], dim[6], dim[7]);
+
+    dre += 8;
+    dim += 8;
   }
 }
 
