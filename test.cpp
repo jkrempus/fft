@@ -91,7 +91,7 @@ struct SseFloat
     return Vec();
   }
   
-  static Vec FORCEINLINE transpose(
+  static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec& r0, Vec& r1, Vec& r2, Vec& r3)
   {
@@ -149,7 +149,7 @@ struct AvxFloat
 
 
   // The input matrix has 4 rows and vec_size columns
-  static Vec FORCEINLINE transpose(
+  static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec& r0, Vec& r1, Vec& r2, Vec& r3)
   {
@@ -169,7 +169,7 @@ struct AvxFloat
     r3 = _mm256_permute2f128_ps(c2, c3, _MM_SHUFFLE(0, 3, 0, 1));
   }
 
-  static Vec FORCEINLINE transpose(
+  static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
     Vec& r0, Vec& r1, Vec& r2, Vec& r3,
@@ -184,7 +184,7 @@ struct AvxFloat
     transpose_128(a6, a7, r6, r7);
   }
 
-  static Vec FORCEINLINE to_vec(T a){ return _mm256_set1_ps(a); }
+  static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
 
 private: 
   static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
@@ -302,7 +302,12 @@ void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
     iter++;
     if(dft_size == 1)
     {
-      dft_size *= 4;
+#if 0
+      if(n >= 8 * vec_size)
+        dft_size *= 8
+      else
+#endif
+        dft_size *= 4;
     }
     else if(dft_size >= V::vec_size)
     {
@@ -472,6 +477,7 @@ FORCEINLINE void first_three_passes(
   ComplexPtrs<typename V::T> dst)
 {
   VEC_TYPEDEFS(V);
+  typedef Complex<Vec> C;
   Int vn = n / V::vec_size;
 
   Int l = vn / 8;
@@ -485,53 +491,53 @@ FORCEINLINE void first_three_passes(
   ComplexPtrs<V> tw = twiddle + n - 2 * 8;
   for(Int i = 0; i < l; i++)
   {
-    Complex<Vec> c0, c1, c2, c3;
+    C c0, c1, c2, c3;
     {
-      Complex<Vec> a0 = {vsrc_re[i], vsrc_im[i]};
-      Complex<Vec> a1 = {vsrc_re[i + 2 * l], vsrc_im[i + 2 * l]};
-      Complex<Vec> a2 = {vsrc_re[i + 4 * l], vsrc_im[i + 4 * l]};
-      Complex<Vec> a3 = {vsrc_re[i + 6 * l], vsrc_im[i + 6 * l]};
-      Complex<Vec> b0 = a0 + a2;
-      Complex<Vec> b1 = a0 - a2;
-      Complex<Vec> b2 = a1 + a3; 
-      Complex<Vec> b3 = a1 - a3; 
+      C a0 = {vsrc_re[i], vsrc_im[i]};
+      C a1 = {vsrc_re[i + 2 * l], vsrc_im[i + 2 * l]};
+      C a2 = {vsrc_re[i + 4 * l], vsrc_im[i + 4 * l]};
+      C a3 = {vsrc_re[i + 6 * l], vsrc_im[i + 6 * l]};
+      C b0 = a0 + a2;
+      C b1 = a0 - a2;
+      C b2 = a1 + a3; 
+      C b3 = a1 - a3; 
       c0 = b0 + b2; 
       c2 = b0 - b2;
       c1 = b1 + b3.mul_neg_i();
       c3 = b1 - b3.mul_neg_i();
     }
 
-    Complex<Vec> c4, c5, c6, c7;
+    C c4, c5, c6, c7;
     {
-      Complex<Vec> a0 = {vsrc_re[i + l], vsrc_im[i + l]};
-      Complex<Vec> a1 = {vsrc_re[i + 3 * l], vsrc_im[i + 3 * l]};
-      Complex<Vec> a2 = {vsrc_re[i + 5 * l], vsrc_im[i + 5 * l]};
-      Complex<Vec> a3 = {vsrc_re[i + 7 * l], vsrc_im[i + 7 * l]};
-      Complex<Vec> b0 = a0 + a2;
-      Complex<Vec> b1 = a0 - a2;
-      Complex<Vec> b2 = a1 + a3; 
-      Complex<Vec> b3 = a1 - a3; 
+      C a0 = {vsrc_re[i + l], vsrc_im[i + l]};
+      C a1 = {vsrc_re[i + 3 * l], vsrc_im[i + 3 * l]};
+      C a2 = {vsrc_re[i + 5 * l], vsrc_im[i + 5 * l]};
+      C a3 = {vsrc_re[i + 7 * l], vsrc_im[i + 7 * l]};
+      C b0 = a0 + a2;
+      C b1 = a0 - a2;
+      C b2 = a1 + a3; 
+      C b3 = a1 - a3; 
       c4 = b0 + b2; 
       c5 = b0 - b2;
       c6 = b1 + b3.mul_neg_i();
       c7 = b1 - b3.mul_neg_i();
     }
 
-    Complex<Vec> mul0 = c4 * (Complex<Vec>){tw.re[0], tw.im[0]};
-    Complex<Vec> d0 = c0 + mul0;
-    Complex<Vec> d4 = c0 - mul0;
+    C mul0 = c4 * (C){V::vec(tw.re[0]), V::vec(tw.im[0])};
+    C d0 = c0 + mul0;
+    C d4 = c0 - mul0;
 
-    Complex<Vec> mul1 = c5 * (Complex<Vec>){tw.re[1], tw.im[1]};
-    Complex<Vec> d1 = c1 + mul1;
-    Complex<Vec> d5 = c1 - mul1;
+    C mul1 = c5 * (C){V::vec(tw.re[1]), V::vec(tw.im[1])};
+    C d1 = c1 + mul1;
+    C d5 = c1 - mul1;
 
-    Complex<Vec> mul2 = c6 * (Complex<Vec>){tw.re[2], tw.im[2]};
-    Complex<Vec> d2 = c2 + mul2;
-    Complex<Vec> d6 = c2 - mul1;
+    C mul2 = c6 * (C){V::vec(tw.re[2]), V::vec(tw.im[2])};
+    C d2 = c2 + mul2;
+    C d6 = c2 - mul1;
 
-    Complex<Vec> mul3 = c7 * (Complex<Vec>){tw.re[3], tw.im[3]};
-    Complex<Vec> d3 = c3 + mul3;
-    Complex<Vec> d7 = c3 - mul3;
+    C mul3 = c7 * (C){V::vec(tw.re[3]), V::vec(tw.im[3])};
+    C d3 = c3 + mul3;
+    C d7 = c3 - mul3;
 
     Int j = 8 * i;
     V::transpose(
@@ -553,6 +559,7 @@ FORCEINLINE void pass(
   ComplexPtrs<T> twiddle,
   ComplexPtrs<T> dst)
 {
+  ComplexPtrs<T> tw = twiddle + n - 2 * dft_size;
   for(Int i = 0; i < n / 2; i += dft_size)
   {
     T* re0_ptr = src.re + i;
@@ -566,8 +573,8 @@ FORCEINLINE void pass(
 
     for(Int j = 0; j < dft_size; j++)
     {
-      T tw_re = twiddle.re[j];
-      T tw_im = twiddle.im[j];
+      T tw_re = tw.re[j];
+      T tw_im = tw.im[j];
       T re0 = re0_ptr[j];
       T im0 = im0_ptr[j];
       T re1 = re1_ptr[j];
@@ -593,8 +600,8 @@ FORCEINLINE void two_passes(
   T* im_ptr = src.im;
   T* dst_re_ptr = dst.re;
   T* dst_im_ptr = dst.im;
-  T* tw_re = twiddle.re;
-  T* tw_im = twiddle.im;
+  T* tw_re = twiddle.re + n - 4 * dft_size;
+  T* tw_im = twiddle.im + n - 4 * dft_size;
 
   Int l = n / 4;
   Int l2 = l * 2;
@@ -658,7 +665,12 @@ Int top_level_loop_iterations(Int n)
     iter++;
     if(dft_size == 1)
     {
-      dft_size *= 4;
+#if 0
+      if(n >= 8 * vec_size)
+        dft_size *= 8;
+      else
+#endif
+        dft_size *= 4;
     }
     else if(dft_size >= V::vec_size)
     {
@@ -698,12 +710,19 @@ void fft(
 
   for(Int dft_size = 1; dft_size < n;)
   {
-    auto tw = twiddle + (n - 2 * dft_size);
     if(dft_size == 1)
     {
-      first_two_passes<V>(n, current_src, current_dst);
-
-      dft_size *= 4;
+#if 0
+      if(n >= 8 * vec_size)
+      {
+        first_three
+      }
+      else
+#endif
+      {
+        first_two_passes<V>(n, current_src, current_dst);
+        dft_size *= 4;
+      }
     } 
     else if(dft_size >= V::vec_size)
     {
@@ -713,19 +732,18 @@ void fft(
           n / V::vec_size,
           dft_size / V::vec_size,
           (ComplexPtrs<Vec>&) current_src,
-          (ComplexPtrs<Vec>&) tw,
+          (ComplexPtrs<Vec>&) twiddle,
           (ComplexPtrs<Vec>&) current_dst);
 
         dft_size *= 2;
       }
       else
       {
-        auto other_tw = twiddle + (n - 4 * dft_size); 
         two_passes(
           n / V::vec_size,
           dft_size / V::vec_size,
           (ComplexPtrs<Vec>&) current_src,
-          (ComplexPtrs<Vec>&) other_tw,
+          (ComplexPtrs<Vec>&) twiddle,
           (ComplexPtrs<Vec>&) current_dst);
 
         dft_size *= 4;
@@ -734,13 +752,13 @@ void fft(
     else
     {
       if(V::vec_size > 1 && dft_size == 1)
-        ct_dft_size_pass<V, 1>(n, current_src, tw, current_dst);
+        ct_dft_size_pass<V, 1>(n, current_src, twiddle, current_dst);
       else if(V::vec_size > 2 && dft_size == 2)
-        ct_dft_size_pass<V, 2>(n, current_src, tw, current_dst);
+        ct_dft_size_pass<V, 2>(n, current_src, twiddle, current_dst);
       else if(V::vec_size > 4 && dft_size == 4)
-        ct_dft_size_pass<V, 4>(n, current_src, tw, current_dst);
+        ct_dft_size_pass<V, 4>(n, current_src, twiddle, current_dst);
       else if(V::vec_size > 8 && dft_size == 8)
-        ct_dft_size_pass<V, 8>(n, current_src, tw, current_dst);
+        ct_dft_size_pass<V, 8>(n, current_src, twiddle, current_dst);
 
       dft_size *= 2;
     }
