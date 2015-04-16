@@ -175,18 +175,18 @@ struct AvxFloat
     Vec& r0, Vec& r1, Vec& r2, Vec& r3,
     Vec& r4, Vec& r5, Vec& r6, Vec& r7)
   {
-    transpose4x4_two(a0, a2, a4, a6);
-    transpose4x4_two(a1, a3, a5, a7);
-
-    transpose_128(a0, a1, r0, r1);
-    transpose_128(a2, a3, r2, r3);
-    transpose_128(a4, a5, r4, r5);
-    transpose_128(a6, a7, r6, r7);
+    transpose4x4_two(a0, a1, a2, a3);
+    transpose4x4_two(a4, a5, a6, a7);
+    
+    transpose_128(a0, a4, r0, r4);
+    transpose_128(a1, a5, r1, r5);
+    transpose_128(a2, a6, r2, r6);
+    transpose_128(a3, a7, r3, r7);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
 
-private: 
+//private: 
   static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
@@ -302,11 +302,9 @@ void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
     iter++;
     if(dft_size == 1)
     {
-#if 0
-      if(n >= 8 * vec_size)
-        dft_size *= 8
+      if(n >= 8 * V::vec_size)
+        dft_size *= 8;
       else
-#endif
         dft_size *= 4;
     }
     else if(dft_size >= V::vec_size)
@@ -488,12 +486,12 @@ FORCEINLINE void first_three_passes(
   Vec* vdst_re = (Vec*) dst.re;
   Vec* vdst_im = (Vec*) dst.im;
 
-  ComplexPtrs<V> tw = twiddle + n - 2 * 8;
+  ComplexPtrs<T> tw = twiddle + n - 2 * 4;
   for(Int i = 0; i < l; i++)
   {
     C c0, c1, c2, c3;
     {
-      C a0 = {vsrc_re[i], vsrc_im[i]};
+      C a0 = {vsrc_re[i],         vsrc_im[i]};
       C a1 = {vsrc_re[i + 2 * l], vsrc_im[i + 2 * l]};
       C a2 = {vsrc_re[i + 4 * l], vsrc_im[i + 4 * l]};
       C a3 = {vsrc_re[i + 6 * l], vsrc_im[i + 6 * l]};
@@ -509,7 +507,7 @@ FORCEINLINE void first_three_passes(
 
     C c4, c5, c6, c7;
     {
-      C a0 = {vsrc_re[i + l], vsrc_im[i + l]};
+      C a0 = {vsrc_re[i + l],     vsrc_im[i + l]};
       C a1 = {vsrc_re[i + 3 * l], vsrc_im[i + 3 * l]};
       C a2 = {vsrc_re[i + 5 * l], vsrc_im[i + 5 * l]};
       C a3 = {vsrc_re[i + 7 * l], vsrc_im[i + 7 * l]};
@@ -518,8 +516,8 @@ FORCEINLINE void first_three_passes(
       C b2 = a1 + a3; 
       C b3 = a1 - a3; 
       c4 = b0 + b2; 
-      c5 = b0 - b2;
-      c6 = b1 + b3.mul_neg_i();
+      c6 = b0 - b2;
+      c5 = b1 + b3.mul_neg_i();
       c7 = b1 - b3.mul_neg_i();
     }
 
@@ -533,7 +531,7 @@ FORCEINLINE void first_three_passes(
 
     C mul2 = c6 * (C){V::vec(tw.re[2]), V::vec(tw.im[2])};
     C d2 = c2 + mul2;
-    C d6 = c2 - mul1;
+    C d6 = c2 - mul2;
 
     C mul3 = c7 * (C){V::vec(tw.re[3]), V::vec(tw.im[3])};
     C d3 = c3 + mul3;
@@ -665,11 +663,9 @@ Int top_level_loop_iterations(Int n)
     iter++;
     if(dft_size == 1)
     {
-#if 0
-      if(n >= 8 * vec_size)
+      if(n >= 8 * V::vec_size)
         dft_size *= 8;
       else
-#endif
         dft_size *= 4;
     }
     else if(dft_size >= V::vec_size)
@@ -712,13 +708,12 @@ void fft(
   {
     if(dft_size == 1)
     {
-#if 0
-      if(n >= 8 * vec_size)
+      if(n >= 8 * V::vec_size)
       {
-        first_three
+        first_three_passes<V>(n, current_src, twiddle, current_dst);
+        dft_size *= 8;
       }
       else
-#endif
       {
         first_two_passes<V>(n, current_src, current_dst);
         dft_size *= 4;
