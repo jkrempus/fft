@@ -104,3 +104,13 @@ c1 = a0 + ii * a1 - a2 - ii * a3
 c2 = a0 - a1 + a2 - a3
 c3 = a0 - ii * a1 - a2 + ii * a3
 
+
+
+
+Strided fft:
+we have:
+n - data size
+dft_size - the length of already computed dfts
+chunk_size - the size of a chunk
+stride - the distance between two successive chunks
+

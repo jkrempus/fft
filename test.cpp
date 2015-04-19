@@ -4,6 +4,60 @@ typedef long Int;
 
 #define FORCEINLINE __attribute__((always_inline)) inline
 
+template<typename T_>
+struct ComplexPtrs
+{
+  T_* re;
+  T_* im;
+
+  ComplexPtrs& operator+=(Int offset)
+  {
+    re += offset;
+    im += offset;
+    return *this;
+  }
+  
+  ComplexPtrs& operator-=(Int offset)
+  {
+    re -= offset;
+    im -= offset;
+    return *this;
+  }
+
+  ComplexPtrs operator+(Int offset) { return {re + offset, im + offset}; }
+  ComplexPtrs operator-(Int offset) { return {re - offset, im - offset}; }
+};
+
+template<typename T>
+struct Complex
+{
+  T re;
+  T im;
+  FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
+  FORCEINLINE Complex operator+(Complex other)
+  {
+    return {re + other.re, im + other.im};
+  }
+
+  FORCEINLINE Complex operator-(Complex other)
+  {
+    return {re - other.re, im - other.im};
+  }
+
+  FORCEINLINE Complex operator*(Complex other)
+  {
+    return {
+      re * other.re - im * other.im,
+      re * other.im + im * other.re};
+  }
+
+  FORCEINLINE void store(T* re_ptr, T* im_ptr, Int offset)
+  {
+    re_ptr[offset] = re;
+    im_ptr[offset] = im;
+  }
+};
+
 template<typename T>
 struct SinCosTable { };
 
@@ -210,61 +264,8 @@ struct AvxFloat
 
 #define VEC_TYPEDEFS(V) \
   typedef typename V::T T; \
-  typedef typename V::Vec Vec;
-
-template<typename T_>
-struct ComplexPtrs
-{
-  T_* re;
-  T_* im;
-
-  ComplexPtrs& operator+=(Int offset)
-  {
-    re += offset;
-    im += offset;
-    return *this;
-  }
-  
-  ComplexPtrs& operator-=(Int offset)
-  {
-    re -= offset;
-    im -= offset;
-    return *this;
-  }
-
-  ComplexPtrs operator+(Int offset) { return {re + offset, im + offset}; }
-  ComplexPtrs operator-(Int offset) { return {re - offset, im - offset}; }
-};
-
-template<typename T>
-struct Complex
-{
-  T re;
-  T im;
-  FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
-  FORCEINLINE Complex operator+(Complex other)
-  {
-    return {re + other.re, im + other.im};
-  }
-
-  FORCEINLINE Complex operator-(Complex other)
-  {
-    return {re - other.re, im - other.im};
-  }
-
-  FORCEINLINE Complex operator*(Complex other)
-  {
-    return {
-      re * other.re - im * other.im,
-      re * other.im + im * other.re};
-  }
-
-  FORCEINLINE void store(T* re_ptr, T* im_ptr, Int offset)
-  {
-    re_ptr[offset] = re;
-    im_ptr[offset] = im;
-  }
-};
+  typedef typename V::Vec Vec; \
+  typedef Complex<typename V::Vec> C
 
 template<typename V>
 void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
@@ -361,6 +362,17 @@ FORCEINLINE void copy(const T* src, Int n, T* dst)
 #endif
 }
 
+
+#if 0
+template<long chunk_size> 
+void strided_copy(V* src, V* dst, long n, long stride)
+{
+  for(long i = 0, j = 0; i < n * chunk_size; i += chunk_size, j += stride)
+    for(long k = 0; k < chunk_size; k++)
+      dst[i + k] = src[j + k];
+}
+#endif
+
 template<typename T>
 FORCEINLINE T cmul_re(T a_re, T a_im, T b_re, T b_im)
 {
@@ -373,9 +385,19 @@ FORCEINLINE T cmul_im(T a_re, T a_im, T b_re, T b_im)
   return a_re * b_im + a_im * b_re;
 }
 
+/*
+template<typename T>
+struct Step
+{
+  short size_factor;
+  short log2stride;
+  void (*funptr)(Int, Int, ComplexPtrs<...
+};*/
+
 template<typename V, Int dft_size>
-FORCEINLINE void ct_dft_size_pass(
+void ct_dft_size_pass(
   Int n,
+  Int rt_dft_size,
   ComplexPtrs<typename V::T> src,
   ComplexPtrs<typename V::T> twiddle,
   ComplexPtrs<typename V::T> dst)
@@ -421,8 +443,12 @@ FORCEINLINE void ct_dft_size_pass(
 }
 
 template<typename V>
-FORCEINLINE void first_two_passes(
-  Int n, ComplexPtrs<typename V::T> src, ComplexPtrs<typename V::T> dst)
+void first_two_passes(
+  Int n,
+  Int rt_dft_size,
+  ComplexPtrs<typename V::T> src,
+  ComplexPtrs<typename V::T> twiddle,
+  ComplexPtrs<typename V::T> dst)
 {
   VEC_TYPEDEFS(V);
   Int vn = n / V::vec_size;
@@ -468,21 +494,20 @@ FORCEINLINE void first_two_passes(
 }
 
 template<typename V>
-FORCEINLINE void first_three_passes(
+void first_three_passes(
   Int n,
+  Int rt_dft_size,
   ComplexPtrs<typename V::T> src,
   ComplexPtrs<typename V::T> twiddle,
   ComplexPtrs<typename V::T> dst)
 {
   VEC_TYPEDEFS(V);
-  typedef Complex<Vec> C;
+  
   Int vn = n / V::vec_size;
-
   Int l = vn / 8;
   
-  ComplexPtrs<T> tw = twiddle + n - 2 * 4;
-  Vec invsqrt2 = V::vec(tw.re[1]);
-
+  Vec invsqrt2 = V::vec((twiddle.re + n - 2 * 4)[1]);
+  
   Vec* sre = (Vec*) src.re;
   Vec* sim = (Vec*) src.im;
 
@@ -556,7 +581,7 @@ FORCEINLINE void first_three_passes(
 }
 
 template<typename T>
-FORCEINLINE void pass(
+FORCEINLINE void pass_impl(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
   ComplexPtrs<T> twiddle,
@@ -592,8 +617,23 @@ FORCEINLINE void pass(
   }
 }
 
+template<typename V>
+void pass_vec(
+  Int n, Int dft_size,
+  ComplexPtrs<typename V::T> src,
+  ComplexPtrs<typename V::T> twiddle,
+  ComplexPtrs<typename V::T> dst)
+{
+  VEC_TYPEDEFS(V);
+  pass_impl(
+    n / V::vec_size, dft_size / V::vec_size,
+    (ComplexPtrs<Vec>&) src,
+    (ComplexPtrs<Vec>&) twiddle,
+    (ComplexPtrs<Vec>&) dst);
+}
+
 template<typename T>
-FORCEINLINE void two_passes(
+FORCEINLINE void two_passes_impl(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
   ComplexPtrs<T> twiddle,
@@ -660,6 +700,28 @@ FORCEINLINE void two_passes(
 }
 
 template<typename V>
+void two_passes_vec(
+  Int n, Int dft_size,
+  ComplexPtrs<typename V::T> src,
+  ComplexPtrs<typename V::T> twiddle,
+  ComplexPtrs<typename V::T> dst)
+{
+  VEC_TYPEDEFS(V);
+  two_passes_impl(
+    n / V::vec_size, dft_size / V::vec_size,
+    (ComplexPtrs<Vec>&) src,
+    (ComplexPtrs<Vec>&) twiddle,
+    (ComplexPtrs<Vec>&) dst);
+}
+
+/*
+template<typename V, Int npasses, Int chunk_size>
+void strided_passes(Int n, ComplexPtrs<typename V::Vec>)
+{
+  Int stride = n >> npasses; 
+}*/
+
+template<typename V>
 Int top_level_loop_iterations(Int n)
 {
   Int iter = 0;
@@ -694,6 +756,17 @@ Int most_significant_bit_index(Int n)
   return r; 
 }
 
+/*template<typename V>
+void large_fft(
+  Int n,
+  ComplexPtrs<typename V::T> src,
+  ComplexPtrs<typename V::T> twiddle,
+  ComplexPtrs<typename V::T> working,
+  ComplexPtrs<typename V::T> dst)
+{
+  
+}*/
+
 template<typename V>
 void fft(
   Int n,
@@ -715,12 +788,12 @@ void fft(
     {
       if(n >= 8 * V::vec_size)
       {
-        first_three_passes<V>(n, current_src, twiddle, current_dst);
+        first_three_passes<V>(n, 0, current_src, twiddle, current_dst);
         dft_size *= 8;
       }
       else
       {
-        first_two_passes<V>(n, current_src, current_dst);
+        first_two_passes<V>(n, 0, current_src, twiddle, current_dst);
         dft_size *= 4;
       }
     } 
@@ -728,37 +801,25 @@ void fft(
     {
       if(dft_size * 4 > n)
       {
-        pass(
-          n / V::vec_size,
-          dft_size / V::vec_size,
-          (ComplexPtrs<Vec>&) current_src,
-          (ComplexPtrs<Vec>&) twiddle,
-          (ComplexPtrs<Vec>&) current_dst);
-
+        pass_vec<V>(n, dft_size, current_src, twiddle, current_dst);
         dft_size *= 2;
       }
       else
       {
-        two_passes(
-          n / V::vec_size,
-          dft_size / V::vec_size,
-          (ComplexPtrs<Vec>&) current_src,
-          (ComplexPtrs<Vec>&) twiddle,
-          (ComplexPtrs<Vec>&) current_dst);
-
+        two_passes_vec<V>(n, dft_size, current_src, twiddle, current_dst);
         dft_size *= 4;
       }
     }
     else
     {
       if(V::vec_size > 1 && dft_size == 1)
-        ct_dft_size_pass<V, 1>(n, current_src, twiddle, current_dst);
+        ct_dft_size_pass<V, 1>(n, 0, current_src, twiddle, current_dst);
       else if(V::vec_size > 2 && dft_size == 2)
-        ct_dft_size_pass<V, 2>(n, current_src, twiddle, current_dst);
+        ct_dft_size_pass<V, 2>(n, 0, current_src, twiddle, current_dst);
       else if(V::vec_size > 4 && dft_size == 4)
-        ct_dft_size_pass<V, 4>(n, current_src, twiddle, current_dst);
+        ct_dft_size_pass<V, 4>(n, 0, current_src, twiddle, current_dst);
       else if(V::vec_size > 8 && dft_size == 8)
-        ct_dft_size_pass<V, 8>(n, current_src, twiddle, current_dst);
+        ct_dft_size_pass<V, 8>(n, 0, current_src, twiddle, current_dst);
 
       dft_size *= 2;
     }
