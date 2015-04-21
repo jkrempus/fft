@@ -385,14 +385,23 @@ FORCEINLINE T cmul_im(T a_re, T a_im, T b_re, T b_im)
   return a_re * b_im + a_im * b_re;
 }
 
-/*
 template<typename T>
 struct Step
 {
-  short size_factor;
-  short log2stride;
-  void (*funptr)(Int, Int, ComplexPtrs<...
-};*/
+  short npasses;
+  short nsteps;
+  void (*fun_ptr)(Int n, Int, ComplexPtrs<T>, ComplexPtrs<T>, ComplexPtrs<T>);
+};
+
+template<typename T>
+struct State
+{
+  Int n;
+  ComplexPtrs<T> twiddle;
+  ComplexPtrs<T> working;
+  Step<T> steps[8 * sizeof(Int)];
+  Int nsteps;
+};
 
 template<typename V, Int dft_size>
 void ct_dft_size_pass(
@@ -756,73 +765,100 @@ Int most_significant_bit_index(Int n)
   return r; 
 }
 
-/*template<typename V>
-void large_fft(
-  Int n,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> working,
-  ComplexPtrs<typename V::T> dst)
-{
-  
-}*/
-
 template<typename V>
-void fft(
-  Int n,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> working,
-  ComplexPtrs<typename V::T> dst)
+void init_steps(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
-
-  auto is_odd = bool(top_level_loop_iterations<V>(n) & 1);
-  auto current_src = src;
-  auto current_dst = is_odd ? dst : working;
-  auto next_dst = is_odd ? working : dst;
-
-  for(Int dft_size = 1; dft_size < n;)
+  Int step_index = 0;
+  for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
+    Step<T> step;
+    step.nsteps = 1;
     if(dft_size == 1)
     {
-      if(n >= 8 * V::vec_size)
+      if(state.n >= 8 * V::vec_size)
       {
-        first_three_passes<V>(n, 0, current_src, twiddle, current_dst);
-        dft_size *= 8;
+        step.fun_ptr = &first_three_passes<V>;
+        step.npasses = 3;
       }
       else
       {
-        first_two_passes<V>(n, 0, current_src, twiddle, current_dst);
-        dft_size *= 4;
+        step.fun_ptr = &first_two_passes<V>;
+        step.npasses = 2;
       }
     } 
     else if(dft_size >= V::vec_size)
     {
-      if(dft_size * 4 > n)
+      if(dft_size * 4 > state.n)
       {
-        pass_vec<V>(n, dft_size, current_src, twiddle, current_dst);
-        dft_size *= 2;
+        step.fun_ptr = &pass_vec<V>;
+        step.npasses = 1;
       }
       else
       {
-        two_passes_vec<V>(n, dft_size, current_src, twiddle, current_dst);
-        dft_size *= 4;
+        step.fun_ptr = &two_passes_vec<V>;
+        step.npasses = 2;
       }
     }
     else
     {
       if(V::vec_size > 1 && dft_size == 1)
-        ct_dft_size_pass<V, 1>(n, 0, current_src, twiddle, current_dst);
+        step.fun_ptr = &ct_dft_size_pass<V, 1>;
       else if(V::vec_size > 2 && dft_size == 2)
-        ct_dft_size_pass<V, 2>(n, 0, current_src, twiddle, current_dst);
+        step.fun_ptr = &ct_dft_size_pass<V, 2>;
       else if(V::vec_size > 4 && dft_size == 4)
-        ct_dft_size_pass<V, 4>(n, 0, current_src, twiddle, current_dst);
+        step.fun_ptr = &ct_dft_size_pass<V, 4>;
       else if(V::vec_size > 8 && dft_size == 8)
-        ct_dft_size_pass<V, 8>(n, 0, current_src, twiddle, current_dst);
+        step.fun_ptr = &ct_dft_size_pass<V, 8>;
 
-      dft_size *= 2;
+      step.npasses = 1;
     }
+
+    state.steps[step_index] = step;
+    dft_size <<= step.npasses;
+  }
+
+  state.nsteps = step_index;
+}
+
+template<typename T>
+Int top_level_loop_iterations(const State<T>& state)
+{
+  Int iter = 0;
+  for(Int step = 0; step < state.nsteps; step += state.steps[step].nsteps)
+    iter++;
+
+  return iter;
+}
+
+template<typename V>
+void fft(
+  const State<typename V::T>& state,
+  ComplexPtrs<typename V::T> src,
+  ComplexPtrs<typename V::T> dst)
+{
+  VEC_TYPEDEFS(V);
+
+  auto is_odd = bool(top_level_loop_iterations(state) & 1);
+  auto current_src = src;
+  auto current_dst = is_odd ? dst : state.working;
+  auto next_dst = is_odd ? state.working : dst;
+
+  for(
+    Int dft_size = 1,
+    step = 0; step < state.nsteps;
+    step += state.steps[step].nsteps)
+  {
+    if(state.steps[step].nsteps == 1)
+    {
+      state.steps[step].fun_ptr(
+        state.n, dft_size, current_src, state.twiddle, current_dst);
+
+      dft_size <<= state.steps[step].npasses;
+    }
+    else
+      *((volatile int*) 0) = 0; // not implemented
+
 
     swap(next_dst, current_dst);
     current_src = next_dst;
@@ -868,12 +904,17 @@ int main(int argc, char** argv)
 
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
-  ComplexPtrs<T> twiddle = {new T[n], new T[n]};
-  init_twiddle<V>(n, twiddle);
 
   ComplexPtrs<T> src = {new T[n], new T[n]};
   ComplexPtrs<T> working = {new T[n], new T[n]};
   ComplexPtrs<T> dst = {new T[n], new T[n]};
+
+  State<T> state;
+  state.n = n;
+  state.working = {new T[n], new T[n]};
+  state.twiddle = {new T[n], new T[n]};
+  init_twiddle<V>(n, state.twiddle);
+  init_steps<V>(state);
 
   std::fill_n(dst.re, n, T(0));
   std::fill_n(dst.im, n, T(0));
@@ -885,14 +926,12 @@ int main(int argc, char** argv)
     src.re[i] = T(1) / (1 + 100 * x * x);
   }
 
-  dump(twiddle.re, n, "twiddle_re.float32");
-  dump(twiddle.im, n, "twiddle_im.float32");
   dump(src.re, n, "src_re.float32");
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
   for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
-    fft<V>(n, src, twiddle, working, dst);
+    fft<V>(state, src, dst);
 
   printf("time %f\n", get_time() - t);
 
