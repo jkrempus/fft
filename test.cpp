@@ -59,6 +59,24 @@ struct Complex
 };
 
 template<typename T>
+struct Step
+{
+  short npasses;
+  short nsteps;
+  void (*fun_ptr)(Int n, Int, ComplexPtrs<T>, ComplexPtrs<T>, ComplexPtrs<T>);
+};
+
+template<typename T>
+struct State
+{
+  Int n;
+  ComplexPtrs<T> twiddle;
+  ComplexPtrs<T> working;
+  Step<T> steps[8 * sizeof(Int)];
+  Int nsteps;
+};
+
+template<typename T>
 struct SinCosTable { };
 
 template<>
@@ -268,9 +286,11 @@ struct AvxFloat
   typedef Complex<typename V::Vec> C
 
 template<typename V>
-void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
+void init_twiddle(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
+  auto dst = state.twiddle;
+  auto n = state.n;
   auto end = dst + n;
   Int table_index = 0;
   end.re[-1] = T(0);
@@ -297,22 +317,12 @@ void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
     }
   }
 
-  Int iter = 0;
-  for(Int dft_size = 1; dft_size < n;)
+  int dft_size = 1;
+  for(Int s = 0; s < state.nsteps; s += state.steps[s].nsteps)
   {
-    iter++;
-    if(dft_size == 1)
+    if(state.steps[s].nsteps == 1)
     {
-      if(n >= 8 * V::vec_size)
-        dft_size *= 8;
-      else
-        dft_size *= 4;
-    }
-    else if(dft_size >= V::vec_size)
-    {
-      if(dft_size * 4 > n)
-        dft_size *= 2;
-      else
+      if(state.steps[s].npasses == 2 && dft_size >= V::vec_size)
       {
         Int vn = n / V::vec_size;
         Int vdft_size = dft_size / V::vec_size;
@@ -331,12 +341,12 @@ void init_twiddle(Int n, ComplexPtrs<typename V::T> dst)
           row_im[3 * i + 1] = w2.im;
           row_im[3 * i + 2] = w3.im;
         }
-
-        dft_size *= 4;
       }
+
+      dft_size <<= state.steps[s].npasses;
     }
     else
-      dft_size *= 2;
+      *((volatile int*) 0) = 0; // not implemented
   }
 }
 
@@ -384,24 +394,6 @@ FORCEINLINE T cmul_im(T a_re, T a_im, T b_re, T b_im)
 {
   return a_re * b_im + a_im * b_re;
 }
-
-template<typename T>
-struct Step
-{
-  short npasses;
-  short nsteps;
-  void (*fun_ptr)(Int n, Int, ComplexPtrs<T>, ComplexPtrs<T>, ComplexPtrs<T>);
-};
-
-template<typename T>
-struct State
-{
-  Int n;
-  ComplexPtrs<T> twiddle;
-  ComplexPtrs<T> working;
-  Step<T> steps[8 * sizeof(Int)];
-  Int nsteps;
-};
 
 template<typename V, Int dft_size>
 void ct_dft_size_pass(
@@ -723,48 +715,6 @@ void two_passes_vec(
     (ComplexPtrs<Vec>&) dst);
 }
 
-/*
-template<typename V, Int npasses, Int chunk_size>
-void strided_passes(Int n, ComplexPtrs<typename V::Vec>)
-{
-  Int stride = n >> npasses; 
-}*/
-
-template<typename V>
-Int top_level_loop_iterations(Int n)
-{
-  Int iter = 0;
-  for(Int dft_size = 1; dft_size < n;)
-  {
-    iter++;
-    if(dft_size == 1)
-    {
-      if(n >= 8 * V::vec_size)
-        dft_size *= 8;
-      else
-        dft_size *= 4;
-    }
-    else if(dft_size >= V::vec_size)
-    {
-      if(dft_size * 4 > n)
-        dft_size *= 2;
-      else
-        dft_size *= 4;
-    }
-    else
-      dft_size *= 2;
-  }
-
-  return iter;
-}
-
-Int most_significant_bit_index(Int n)
-{
-  Int r;
-  for(r = -1; n; r++, n >>= 1) {}
-  return r; 
-}
-
 template<typename V>
 void init_steps(State<typename V::T>& state)
 {
@@ -774,20 +724,7 @@ void init_steps(State<typename V::T>& state)
   {
     Step<T> step;
     step.nsteps = 1;
-    if(dft_size == 1)
-    {
-      if(state.n >= 8 * V::vec_size)
-      {
-        step.fun_ptr = &first_three_passes<V>;
-        step.npasses = 3;
-      }
-      else
-      {
-        step.fun_ptr = &first_two_passes<V>;
-        step.npasses = 2;
-      }
-    } 
-    else if(dft_size >= V::vec_size)
+    if(dft_size >= V::vec_size)
     {
       if(dft_size * 4 > state.n)
       {
@@ -799,6 +736,16 @@ void init_steps(State<typename V::T>& state)
         step.fun_ptr = &two_passes_vec<V>;
         step.npasses = 2;
       }
+    }
+    else if(dft_size == 1 && state.n >= 8 * V::vec_size)
+    {
+      step.fun_ptr = &first_three_passes<V>;
+      step.npasses = 3;
+    }
+    else if(dft_size == 1 && state.n >= 4 * V::vec_size)
+    {
+      step.fun_ptr = &first_two_passes<V>;
+      step.npasses = 2;
     }
     else
     {
@@ -913,8 +860,8 @@ int main(int argc, char** argv)
   state.n = n;
   state.working = {new T[n], new T[n]};
   state.twiddle = {new T[n], new T[n]};
-  init_twiddle<V>(n, state.twiddle);
   init_steps<V>(state);
+  init_twiddle<V>(state);
 
   std::fill_n(dst.re, n, T(0));
   std::fill_n(dst.im, n, T(0));
