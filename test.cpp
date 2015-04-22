@@ -24,8 +24,8 @@ struct ComplexPtrs
     return *this;
   }
 
-  ComplexPtrs operator+(Int offset) { return {re + offset, im + offset}; }
-  ComplexPtrs operator-(Int offset) { return {re - offset, im - offset}; }
+  ComplexPtrs operator+(Int offset) const { return {re + offset, im + offset}; }
+  ComplexPtrs operator-(Int offset) const { return {re - offset, im - offset}; }
 };
 
 template<typename T>
@@ -59,11 +59,21 @@ struct Complex
 };
 
 template<typename T>
+struct Arg
+{
+  Int n;
+  Int dft_size;
+  ComplexPtrs<T> src;
+  ComplexPtrs<T> twiddle;
+  ComplexPtrs<T> dst;
+};
+
+template<typename T>
 struct Step
 {
   short npasses;
   short nsteps;
-  void (*fun_ptr)(Int n, Int, ComplexPtrs<T>, ComplexPtrs<T>, ComplexPtrs<T>);
+  void (*fun_ptr)(const Arg<T>&);
 };
 
 template<typename T>
@@ -396,22 +406,17 @@ FORCEINLINE T cmul_im(T a_re, T a_im, T b_re, T b_im)
 }
 
 template<typename V, Int dft_size>
-void ct_dft_size_pass(
-  Int n,
-  Int rt_dft_size,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> dst)
+void ct_dft_size_pass(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  ComplexPtrs<T> tw = twiddle + n - 2 * dft_size;
-  Int vn = n / V::vec_size;
-  auto vsrc0_re = (Vec*) src.re;
-  auto vsrc0_im = (Vec*) src.im;
-  auto vsrc1_re = (Vec*) src.re + vn / 2;
-  auto vsrc1_im = (Vec*) src.im + vn / 2;
-  auto vdst_re = (Vec*) dst.re;
-  auto vdst_im = (Vec*) dst.im;
+  ComplexPtrs<T> tw = arg.twiddle + arg.n - 2 * dft_size;
+  Int vn = arg.n / V::vec_size;
+  auto vsrc0_re = (Vec*) arg.src.re;
+  auto vsrc0_im = (Vec*) arg.src.im;
+  auto vsrc1_re = (Vec*) arg.src.re + vn / 2;
+  auto vsrc1_im = (Vec*) arg.src.im + vn / 2;
+  auto vdst_re = (Vec*) arg.dst.re;
+  auto vdst_im = (Vec*) arg.dst.im;
   Vec tw_re = V::template load_repeated<dft_size>(tw.re);
   Vec tw_im = V::template load_repeated<dft_size>(tw.im);
   for(Int i = 0; i < vn / 2; i++)
@@ -444,27 +449,22 @@ void ct_dft_size_pass(
 }
 
 template<typename V>
-void first_two_passes(
-  Int n,
-  Int rt_dft_size,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> dst)
+void first_two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int vn = n / V::vec_size;
-  Vec* vsrc0_re = (Vec*) src.re;
-  Vec* vsrc1_re = (Vec*) src.re + vn / 4;
-  Vec* vsrc2_re = (Vec*) src.re + 2 * vn / 4;
-  Vec* vsrc3_re = (Vec*) src.re + 3 * vn / 4;
+  Int vn = arg.n / V::vec_size;
+  Vec* vsrc0_re = (Vec*) arg.src.re;
+  Vec* vsrc1_re = (Vec*) arg.src.re + vn / 4;
+  Vec* vsrc2_re = (Vec*) arg.src.re + 2 * vn / 4;
+  Vec* vsrc3_re = (Vec*) arg.src.re + 3 * vn / 4;
   
-  Vec* vsrc0_im = (Vec*) src.im;
-  Vec* vsrc1_im = (Vec*) src.im + vn / 4;
-  Vec* vsrc2_im = (Vec*) src.im + 2 * vn / 4;
-  Vec* vsrc3_im = (Vec*) src.im + 3 * vn / 4;
+  Vec* vsrc0_im = (Vec*) arg.src.im;
+  Vec* vsrc1_im = (Vec*) arg.src.im + vn / 4;
+  Vec* vsrc2_im = (Vec*) arg.src.im + 2 * vn / 4;
+  Vec* vsrc3_im = (Vec*) arg.src.im + 3 * vn / 4;
 
-  Vec* vdst_re = (Vec*) dst.re;
-  Vec* vdst_im = (Vec*) dst.im;
+  Vec* vdst_re = (Vec*) arg.dst.re;
+  Vec* vdst_im = (Vec*) arg.dst.im;
 
   for(Int i = 0; i < vn / 4; i++)
   {
@@ -495,25 +495,20 @@ void first_two_passes(
 }
 
 template<typename V>
-void first_three_passes(
-  Int n,
-  Int rt_dft_size,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> dst)
+void first_three_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   
-  Int vn = n / V::vec_size;
+  Int vn = arg.n / V::vec_size;
   Int l = vn / 8;
   
-  Vec invsqrt2 = V::vec((twiddle.re + n - 2 * 4)[1]);
+  Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
   
-  Vec* sre = (Vec*) src.re;
-  Vec* sim = (Vec*) src.im;
+  Vec* sre = (Vec*) arg.src.re;
+  Vec* sim = (Vec*) arg.src.im;
 
-  Vec* dre = (Vec*) dst.re;
-  Vec* dim = (Vec*) dst.im;
+  Vec* dre = (Vec*) arg.dst.re;
+  Vec* dim = (Vec*) arg.dst.im;
 
   for(Int i = 0; i < l; i++)
   {
@@ -619,18 +614,14 @@ FORCEINLINE void pass_impl(
 }
 
 template<typename V>
-void pass_vec(
-  Int n, Int dft_size,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> dst)
+void pass_vec(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   pass_impl(
-    n / V::vec_size, dft_size / V::vec_size,
-    (ComplexPtrs<Vec>&) src,
-    (ComplexPtrs<Vec>&) twiddle,
-    (ComplexPtrs<Vec>&) dst);
+    arg.n / V::vec_size, arg.dft_size / V::vec_size,
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
 }
 
 template<typename T>
@@ -701,18 +692,14 @@ FORCEINLINE void two_passes_impl(
 }
 
 template<typename V>
-void two_passes_vec(
-  Int n, Int dft_size,
-  ComplexPtrs<typename V::T> src,
-  ComplexPtrs<typename V::T> twiddle,
-  ComplexPtrs<typename V::T> dst)
+void two_passes_vec(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   two_passes_impl(
-    n / V::vec_size, dft_size / V::vec_size,
-    (ComplexPtrs<Vec>&) src,
-    (ComplexPtrs<Vec>&) twiddle,
-    (ComplexPtrs<Vec>&) dst);
+    arg.n / V::vec_size, arg.dft_size / V::vec_size,
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
 }
 
 template<typename V>
@@ -786,29 +773,28 @@ void fft(
 {
   VEC_TYPEDEFS(V);
 
+  Arg<T> arg;
+  arg.n = state.n;
+  arg.dft_size = 1;
+  arg.src = src;
+  arg.twiddle = state.twiddle;
+  
   auto is_odd = bool(top_level_loop_iterations(state) & 1);
-  auto current_src = src;
-  auto current_dst = is_odd ? dst : state.working;
+  arg.dst = is_odd ? dst : state.working;
   auto next_dst = is_odd ? state.working : dst;
 
-  for(
-    Int dft_size = 1,
-    step = 0; step < state.nsteps;
-    step += state.steps[step].nsteps)
+  for(Int step = 0; step < state.nsteps; step += state.steps[step].nsteps)
   {
     if(state.steps[step].nsteps == 1)
     {
-      state.steps[step].fun_ptr(
-        state.n, dft_size, current_src, state.twiddle, current_dst);
-
-      dft_size <<= state.steps[step].npasses;
+      state.steps[step].fun_ptr(arg);
+      arg.dft_size <<= state.steps[step].npasses;
     }
     else
       *((volatile int*) 0) = 0; // not implemented
 
-
-    swap(next_dst, current_dst);
-    current_src = next_dst;
+    swap(next_dst, arg.dst);
+    arg.src = next_dst;
   }
 }
 
