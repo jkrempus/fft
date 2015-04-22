@@ -63,6 +63,7 @@ struct Arg
 {
   Int n;
   Int dft_size;
+  Int offset;
   ComplexPtrs<T> src;
   ComplexPtrs<T> twiddle;
   ComplexPtrs<T> dst;
@@ -187,6 +188,18 @@ struct SseFloat
     r2 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
     r3 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
+  
+  static void FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec a4, Vec a5, Vec a6, Vec a7,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
+    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
+  {
+    transpose(a0, a1, a2, a3, r0, r2, r4, r6);
+    transpose(a4, a5, a6, a7, r1, r3, r5, r7);
+  }
+  
+  static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
 };
 
 #ifdef __AVX__
@@ -449,10 +462,10 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
 }
 
 template<typename V>
-void first_two_passes(const Arg<typename V::T>& arg)
+void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int vn = arg.n / V::vec_size;
+  Int vn = n / V::vec_size;
   Vec* vsrc0_re = (Vec*) arg.src.re;
   Vec* vsrc1_re = (Vec*) arg.src.re + vn / 4;
   Vec* vsrc2_re = (Vec*) arg.src.re + 2 * vn / 4;
@@ -495,11 +508,23 @@ void first_two_passes(const Arg<typename V::T>& arg)
 }
 
 template<typename V>
-void first_three_passes(const Arg<typename V::T>& arg)
+void first_two_passes(const Arg<typename V::T>& arg)
+{
+  first_two_passes_impl<V>(arg.n, arg);
+}
+
+template<typename V, Int n>
+void first_two_passes_ct_size(const Arg<typename V::T>& arg)
+{
+  first_two_passes_impl<V>(n, arg);
+}
+
+template<typename V>
+FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   
-  Int vn = arg.n / V::vec_size;
+  Int vn = n / V::vec_size;
   Int l = vn / 8;
   
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
@@ -578,9 +603,21 @@ void first_three_passes(const Arg<typename V::T>& arg)
   }
 }
 
+template<typename V>
+void first_three_passes(const Arg<typename V::T>& arg)
+{
+  first_three_passes_impl<V>(arg.n, arg);
+}
+
+template<typename V, Int n>
+void first_three_passes_ct_size(const Arg<typename V::T>& arg)
+{
+  first_three_passes_impl<V>(n, arg);
+}
+
 template<typename T>
 FORCEINLINE void last_pass_impl(
-  Int n, Int dft_size,
+  Int dft_size,
   ComplexPtrs<T> src,
   ComplexPtrs<T> twiddle,
   ComplexPtrs<T> dst)
@@ -607,7 +644,18 @@ void last_pass_vec(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   last_pass_impl(
-    arg.n / V::vec_size, arg.dft_size / V::vec_size,
+    arg.n / V::vec_size / 2,
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
+}
+
+template<typename V, Int n>
+void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  last_pass_impl(
+    n / V::vec_size / 2,
     (ComplexPtrs<Vec>&) arg.src,
     (ComplexPtrs<Vec>&) arg.twiddle,
     (ComplexPtrs<Vec>&) arg.dst);
@@ -704,7 +752,15 @@ void init_steps(State<typename V::T>& state)
     {
       if(dft_size * 4 > state.n)
       {
-        step.fun_ptr = &last_pass_vec<V>;
+        if(state.n == 2 * V::vec_size)
+          step.fun_ptr = &last_pass_vec_ct_size<V, 2 * V::vec_size>;
+        else if(state.n == 4 * V::vec_size)
+          step.fun_ptr = &last_pass_vec_ct_size<V, 4 * V::vec_size>;
+        else if(state.n == 8 * V::vec_size)
+          step.fun_ptr = &last_pass_vec_ct_size<V, 8 * V::vec_size>;
+        else
+          step.fun_ptr = &last_pass_vec<V>;
+
         step.npasses = 1;
       }
       else
@@ -715,12 +771,22 @@ void init_steps(State<typename V::T>& state)
     }
     else if(dft_size == 1 && state.n >= 8 * V::vec_size)
     {
-      step.fun_ptr = &first_three_passes<V>;
+      if(state.n == 8 * V::vec_size)
+        step.fun_ptr = &first_three_passes_ct_size<V, 8 * V::vec_size>;
+      else
+        step.fun_ptr = &first_three_passes<V>;
+
       step.npasses = 3;
     }
     else if(dft_size == 1 && state.n >= 4 * V::vec_size)
     {
-      step.fun_ptr = &first_two_passes<V>;
+      if(state.n == 4 * V::vec_size)
+        step.fun_ptr = &first_two_passes_ct_size<V, 4 * V::vec_size>;
+      else if(state.n == 8 * V::vec_size)
+        step.fun_ptr = &first_two_passes_ct_size<V, 8 * V::vec_size>;
+      else
+        step.fun_ptr = &first_two_passes<V>;
+
       step.npasses = 2;
     }
     else
@@ -763,6 +829,7 @@ void fft(
   VEC_TYPEDEFS(V);
 
   Arg<T> arg;
+  arg.offset = 0;
   arg.n = state.n;
   arg.dft_size = 1;
   arg.src = src;
@@ -819,9 +886,8 @@ void print_vec(T a)
 
 int main(int argc, char** argv)
 {
-  printf("%d\n", setpriority(PRIO_PROCESS, 0, -20));
-  typedef AvxFloat V;
-  //typedef SseFloat V;
+  //typedef AvxFloat V;
+  typedef SseFloat V;
   VEC_TYPEDEFS(V);
 
   Int log2n = atoi(argv[1]);
