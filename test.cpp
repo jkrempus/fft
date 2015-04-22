@@ -510,7 +510,8 @@ void first_three_passes(const Arg<typename V::T>& arg)
   Vec* dre = (Vec*) arg.dst.re;
   Vec* dim = (Vec*) arg.dst.im;
 
-  for(Int i = 0; i < l; i++)
+  //for(Int i = 0; i < l; i++)
+  for(auto end = sre + l;;)
   {
     C c0, c1, c2, c3;
     {
@@ -573,51 +574,39 @@ void first_three_passes(const Arg<typename V::T>& arg)
 
     dre += 8;
     dim += 8;
+    if(sre == end) break;
   }
 }
 
 template<typename T>
-FORCEINLINE void pass_impl(
+FORCEINLINE void last_pass_impl(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
   ComplexPtrs<T> twiddle,
   ComplexPtrs<T> dst)
 {
-  ComplexPtrs<T> tw = twiddle + n - 2 * dft_size;
-  for(Int i = 0; i < n / 2; i += dft_size)
+  for(Int i0 = 0, i1 = dft_size; i0 < dft_size; i0++, i1++)
   {
-    T* re0_ptr = src.re + i;
-    T* im0_ptr = src.im + i;
-    T* re1_ptr = src.re + n / 2 + i;
-    T* im1_ptr = src.im + n / 2 + i;
-    T* dst0_re_ptr = dst.re + 2 * i;
-    T* dst0_im_ptr = dst.im + 2 * i;
-    T* dst1_re_ptr = dst.re + 2 * i + dft_size;
-    T* dst1_im_ptr = dst.im + 2 * i + dft_size;
-
-    for(Int j = 0; j < dft_size; j++)
-    {
-      T tw_re = tw.re[j];
-      T tw_im = tw.im[j];
-      T re0 = re0_ptr[j];
-      T im0 = im0_ptr[j];
-      T re1 = re1_ptr[j];
-      T im1 = im1_ptr[j];
-      T mul_re = tw_re * re1 - tw_im * im1;
-      T mul_im = tw_re * im1 + tw_im * re1;
-      dst0_re_ptr[j] = re0 + mul_re;
-      dst1_re_ptr[j] = re0 - mul_re;
-      dst0_im_ptr[j] = im0 + mul_im;
-      dst1_im_ptr[j] = im0 - mul_im;
-    }
+    T tw_re = twiddle.re[i0];
+    T tw_im = twiddle.im[i0];
+    T re0 = src.re[i0];
+    T im0 = src.im[i0];
+    T re1 = src.re[i1];
+    T im1 = src.im[i1];
+    T mul_re = tw_re * re1 - tw_im * im1;
+    T mul_im = tw_re * im1 + tw_im * re1;
+    dst.re[i0] = re0 + mul_re;
+    dst.re[i1] = re0 - mul_re;
+    dst.im[i0] = im0 + mul_im;
+    dst.im[i1] = im0 - mul_im;
   }
 }
 
 template<typename V>
-void pass_vec(const Arg<typename V::T>& arg)
+void last_pass_vec(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  pass_impl(
+  last_pass_impl(
     arg.n / V::vec_size, arg.dft_size / V::vec_size,
     (ComplexPtrs<Vec>&) arg.src,
     (ComplexPtrs<Vec>&) arg.twiddle,
@@ -715,7 +704,7 @@ void init_steps(State<typename V::T>& state)
     {
       if(dft_size * 4 > state.n)
       {
-        step.fun_ptr = &pass_vec<V>;
+        step.fun_ptr = &last_pass_vec<V>;
         step.npasses = 1;
       }
       else
