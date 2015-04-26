@@ -1031,20 +1031,20 @@ void strided_copy(
 {
   VEC_TYPEDEFS(V);
   const Int vchunk_size = chunk_size / V::vec_size;
-  const Int vstride = stride / V::vec_size;
+  Int vstride = stride / V::vec_size;
 
   auto vstrided = (Vec*) strided;
   auto vcontiguous = (Vec*) contiguous;
-
   for(
     auto vend = vcontiguous + vchunk_size * n;
     vcontiguous < vend;
     vcontiguous += vchunk_size, vstrided += vstride)
   {
-    if(direction == 0)
-      *vcontiguous = *vstrided;
-    else
-      *vstrided = *vcontiguous;
+    for(Int i = 0; i < vchunk_size; i++)
+      if(direction == 0)
+        vcontiguous[i] = vstrided[i];
+      else
+        vstrided[i] = vcontiguous[i];
   }
 }
 
