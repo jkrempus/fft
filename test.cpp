@@ -3,6 +3,7 @@
 typedef long Int;
 
 #define FORCEINLINE __attribute__((always_inline)) inline
+#define NOINLINE __attribute__((noinline))
 
 template<typename T_>
 struct ComplexPtrs
@@ -74,6 +75,9 @@ struct Complex
   }
 };
 
+const Int max_passes_per_copy = 6;
+const Int copy_chunk_size = 32;
+
 template<typename T>
 struct Arg
 {
@@ -100,6 +104,8 @@ struct State
   Int n;
   ComplexPtrs<T> twiddle;
   ComplexPtrs<T> working;
+  ComplexPtrs<T> coppied_working0;
+  ComplexPtrs<T> coppied_working1;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
   Int num_copies;
@@ -366,7 +372,7 @@ struct AvxFloat
   typedef typename V::Vec Vec; \
   typedef Complex<typename V::Vec> C
 
-//#include <cstdio>
+#include <cstdio>
 
 template<typename V>
 void init_twiddle(State<typename V::T>& state)
@@ -899,6 +905,16 @@ void last_three_passes_vec(const Arg<typename V::T>& arg)
     (ComplexPtrs<Vec>&) arg.twiddle);
 }
 
+template<typename V, Int n>
+void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  last_three_passes_impl(
+    n / V::vec_size,
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle);
+}
+
 template<typename V>
 void init_steps(State<typename V::T>& state)
 {
@@ -914,7 +930,10 @@ void init_steps(State<typename V::T>& state)
     {
       if(dft_size * 8 == state.n)
       {
-        step.fun_ptr = &last_three_passes_vec<V>;
+        if(state.n == V::vec_size * 8)
+          step.fun_ptr = &last_three_passes_vec_ct_size<V, V::vec_size * 8>;
+        else
+          step.fun_ptr = &last_three_passes_vec<V>;
         step.npasses = 3;
         step.out_of_place = false;
       }
@@ -979,6 +998,77 @@ void init_steps(State<typename V::T>& state)
   }
 
   state.nsteps = step_index;
+
+  const Int large_fft_limit = 13;
+  if(state.n >= (Int(1) << large_fft_limit))
+  {
+    for(Int s0 = 0; s0 < state.nsteps;)
+    {
+      Int passes_per_copy = 0;
+      Int s1 = s0;
+      while(true)
+      {
+        if(s1 >= state.nsteps) break;
+        passes_per_copy += state.steps[s1].npasses;
+        if(passes_per_copy > max_passes_per_copy) break;
+        state.steps[s1].nsteps = 0;
+        s1++;
+      }
+
+      state.steps[s0].nsteps = s1 - s0;
+      s0 = s1;
+    }
+  }
+}
+
+//direction: 0 strided src, 1 strided dst
+template<typename V, Int direction, Int chunk_size>
+void strided_copy(
+  typename V::T* strided,
+  typename V::T* contiguous,
+  Int nchunks,
+  Int stride)
+{
+  VEC_TYPEDEFS(V);
+  const Int vchunk_size = chunk_size / V::vec_size;
+  const Int vstride = stride / V::vec_size;
+
+  auto vstrided = (Vec*) strided;
+  auto vcontiguous = (Vec*) contiguous;
+
+  for(
+    auto vend = vcontiguous + vchunk_size * n;
+    vcontiguous < vend;
+    vcontiguous += vchunk_size, vstrided += vstride)
+  {
+    if(direction == 0)
+      *vcontiguous = *vstrided;
+    else
+      *vstrided = *vcontiguous;
+  }
+}
+
+template<typename V>
+NOINLINE void coppied_fft_passes(
+  Arg<typename V::T>& arg_in,
+  Step<typename V::T>* steps,
+  ComplexPtrs<typename V::T> working0,
+  ComplexPtrs<typename V::T> working1)
+{
+  VEC_TYPEDEFS(V);
+
+  Int npasses = 0;
+  for(Int s = 0; s < steps[0].nsteps; s++) npasses += state.steps[s].npasses;
+
+  Int l = state.n >> npasses;
+  
+  const Int vchunk_size = copy_chunk_size / V::vec_size;
+  Int vdft_size = dft_size / V::vec_size;
+  Int vn = args.n / V::vec_size;
+  Int vl = l / V::vec_size;
+  auto vsrc = (ComplexPtrs<V>&) args.src;
+  auto vdst = (ComplexPtrs<V>&) args.dst;
+  
 }
 
 template<typename V>
