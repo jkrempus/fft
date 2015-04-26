@@ -700,23 +700,23 @@ void first_three_passes_ct_size(const Arg<typename V::T>& arg)
 template<typename T>
 FORCEINLINE void last_pass_impl(
   Int dft_size,
-  ComplexPtrs<T> twiddle,
-  ComplexPtrs<T> dst)
+  ComplexPtrs<T> data,
+  ComplexPtrs<T> twiddle)
 {
   for(Int i0 = 0, i1 = dft_size; i0 < dft_size; i0++, i1++)
   {
     T tw_re = twiddle.re[i0];
     T tw_im = twiddle.im[i0];
-    T re0 = dst.re[i0];
-    T im0 = dst.im[i0];
-    T re1 = dst.re[i1];
-    T im1 = dst.im[i1];
+    T re0 = data.re[i0];
+    T im0 = data.im[i0];
+    T re1 = data.re[i1];
+    T im1 = data.im[i1];
     T mul_re = tw_re * re1 - tw_im * im1;
     T mul_im = tw_re * im1 + tw_im * re1;
-    dst.re[i0] = re0 + mul_re;
-    dst.re[i1] = re0 - mul_re;
-    dst.im[i0] = im0 + mul_im;
-    dst.im[i1] = im0 - mul_im;
+    data.re[i0] = re0 + mul_re;
+    data.re[i1] = re0 - mul_re;
+    data.im[i0] = im0 + mul_im;
+    data.im[i1] = im0 - mul_im;
   }
 }
 
@@ -726,8 +726,8 @@ void last_pass_vec(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   last_pass_impl(
     arg.n / V::vec_size / 2,
-    (ComplexPtrs<Vec>&) arg.twiddle,
-    (ComplexPtrs<Vec>&) arg.src);
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle);
 }
 
 template<typename V, Int n>
@@ -736,8 +736,8 @@ void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   last_pass_impl(
     n / V::vec_size / 2,
-    (ComplexPtrs<Vec>&) arg.twiddle,
-    (ComplexPtrs<Vec>&) arg.src);
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle);
 }
 
 template<typename T>
@@ -784,108 +784,97 @@ FORCEINLINE void two_passes_impl(
 }
 
 template<typename T>
-FORCEINLINE void three_passes_impl(
-  Int n, Int dft_size,
-  ComplexPtrs<T> src,
-  ComplexPtrs<T> twiddle,
-  ComplexPtrs<T> dst)
+FORCEINLINE void last_three_passes_impl(
+  Int n,
+  ComplexPtrs<T> data,
+  ComplexPtrs<T> twiddle)
 {
   typedef Complex<T> C;
-  Int l = n / 8;
+  Int l1 = n / 8;
+  Int l2 = 2 * l1;
+  Int l3 = 3 * l1;
+  Int l4 = 4 * l1;
+  Int l5 = 5 * l1;
+  Int l6 = 6 * l1;
+  Int l7 = 7 * l1;
 
-  auto tw_ptrs = twiddle + n - 8 * dft_size;
+  auto tw_ptrs = twiddle;
 
-  for(Int src_i = 0; src_i != l;)
+  for(auto end = data.re + l1;;)
   {
-    Int tw_off = 0;
-    Int dst_i = src_i * 8;
-    for(auto end1 = src_i + dft_size;;)
+    C a0, a1, a2, a3, a4, a5, a6, a7;
+
     {
-      C a0, a1, a2, a3, a4, a5, a6, a7;
+      C tw0 = C::load(tw_ptrs, 0);
+      C tw1 = C::load(tw_ptrs, 1);
+      C tw2 = C::load(tw_ptrs, 2);
 
       {
-        C tw0 = C::load(tw_ptrs, tw_off); tw_off++; 
-        C tw1 = C::load(tw_ptrs, tw_off); tw_off++; 
-        C tw2 = C::load(tw_ptrs, tw_off); tw_off++; 
+        C mul0 =       C::load(data, 0);
+        C mul1 = tw0 * C::load(data, l2);
+        C mul2 = tw1 * C::load(data, l4);
+        C mul3 = tw2 * C::load(data, l6);
 
-        {
-          auto src_off = src_i;
-          C mul0 =       C::load(src, src_off); src_off += 2 * l;
-          C mul1 = tw0 * C::load(src, src_off); src_off += 2 * l;
-          C mul2 = tw1 * C::load(src, src_off); src_off += 2 * l;
-          C mul3 = tw2 * C::load(src, src_off);
+        C sum02 = mul0 + mul2;
+        C dif02 = mul0 - mul2;
+        C sum13 = mul1 + mul3;
+        C dif13 = mul1 - mul3;
 
-          C sum02 = mul0 + mul2;
-          C dif02 = mul0 - mul2;
-          C sum13 = mul1 + mul3;
-          C dif13 = mul1 - mul3;
-
-          a0 = sum02 + sum13; 
-          a1 = dif02 + dif13.mul_neg_i();
-          a2 = sum02 - sum13;
-          a3 = dif02 - dif13.mul_neg_i();
-        }
-
-        {
-          auto src_off = src_i + l;
-          C mul0 =       C::load(src, src_off); src_off += 2 * l;
-          C mul1 = tw0 * C::load(src, src_off); src_off += 2 * l;
-          C mul2 = tw1 * C::load(src, src_off); src_off += 2 * l;
-          C mul3 = tw2 * C::load(src, src_off);
-
-          C sum02 = mul0 + mul2;
-          C dif02 = mul0 - mul2;
-          C sum13 = mul1 + mul3;
-          C dif13 = mul1 - mul3;
-
-          a4 = sum02 + sum13;
-          a5 = dif02 + dif13.mul_neg_i();
-          a6 = sum02 - sum13;
-          a7 = dif02 - dif13.mul_neg_i();
-        }
+        a0 = sum02 + sum13; 
+        a1 = dif02 + dif13.mul_neg_i();
+        a2 = sum02 - sum13;
+        a3 = dif02 - dif13.mul_neg_i();
       }
 
       {
-        auto dst_off0 = dst_i;
-        auto dst_off1 = dst_i + 4 * dft_size;
+        C mul0 =       C::load(data, l1);
+        C mul1 = tw0 * C::load(data, l3);
+        C mul2 = tw1 * C::load(data, l5);
+        C mul3 = tw2 * C::load(data, l7);
 
-        C tw3 = C::load(tw_ptrs, tw_off); tw_off++; 
-        C tw4 = C::load(tw_ptrs, tw_off); tw_off++; 
-        {
-          auto mul = tw3 * a4;
-          (a0 + mul).store(dst, dst_off0);
-          (a0 - mul).store(dst, dst_off1);
-        }
+        C sum02 = mul0 + mul2;
+        C dif02 = mul0 - mul2;
+        C sum13 = mul1 + mul3;
+        C dif13 = mul1 - mul3;
 
-        dst_off0 += dft_size;
-        dst_off1 += dft_size;
-        {
-          auto mul = tw4 * a5;
-          (a1 + mul).store(dst, dst_off0);
-          (a1 - mul).store(dst, dst_off1);
-        }
-
-        dst_off0 += dft_size;
-        dst_off1 += dft_size;
-        {
-          auto mul = tw3.mul_neg_i() * a6;
-          (a2 + mul).store(dst, dst_off0);
-          (a2 - mul).store(dst, dst_off1);
-        }
-
-        dst_off0 += dft_size;
-        dst_off1 += dft_size;
-        {
-          auto mul = tw4.mul_neg_i() * a7;
-          (a3 + mul).store(dst, dst_off0);
-          (a3 - mul).store(dst, dst_off1);
-        }
+        a4 = sum02 + sum13;
+        a5 = dif02 + dif13.mul_neg_i();
+        a6 = sum02 - sum13;
+        a7 = dif02 - dif13.mul_neg_i();
       }
-
-      src_i++;
-      dst_i++;
-      if(src_i == end1) break;
     }
+
+    {
+      C tw3 = C::load(tw_ptrs, 3);
+      C tw4 = C::load(tw_ptrs, 4);
+      {
+        auto mul = tw3 * a4;
+        (a0 + mul).store(data, 0);
+        (a0 - mul).store(data, l4);
+      }
+
+      {
+        auto mul = tw4 * a5;
+        (a1 + mul).store(data, l1);
+        (a1 - mul).store(data, l5);
+      }
+
+      {
+        auto mul = tw3.mul_neg_i() * a6;
+        (a2 + mul).store(data, l2);
+        (a2 - mul).store(data, l6);
+      }
+
+      {
+        auto mul = tw4.mul_neg_i() * a7;
+        (a3 + mul).store(data, l3);
+        (a3 - mul).store(data, l7);
+      }
+    }
+
+    data += 1;
+    tw_ptrs += 5;
+    if(data.re == end) break;
   }
 }
 
@@ -901,14 +890,13 @@ void two_passes_vec(const Arg<typename V::T>& arg)
 }
 
 template<typename V>
-void three_passes_vec(const Arg<typename V::T>& arg)
+void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  three_passes_impl(
-    arg.n / V::vec_size, arg.dft_size / V::vec_size,
+  last_three_passes_impl(
+    arg.n / V::vec_size,
     (ComplexPtrs<Vec>&) arg.src,
-    (ComplexPtrs<Vec>&) arg.twiddle,
-    (ComplexPtrs<Vec>&) arg.dst);
+    (ComplexPtrs<Vec>&) arg.twiddle);
 }
 
 template<typename V>
@@ -924,12 +912,13 @@ void init_steps(State<typename V::T>& state)
     step.out_of_place = true;
     if(dft_size >= V::vec_size)
     {
-      /*if(dft_size * 8 <= state.n)
+      if(dft_size * 8 == state.n)
       {
-        step.fun_ptr = &three_passes_vec<V>;
+        step.fun_ptr = &last_three_passes_vec<V>;
         step.npasses = 3;
+        step.out_of_place = false;
       }
-      else */if(dft_size * 4 <= state.n)
+      else if(dft_size * 4 <= state.n)
       {
         step.fun_ptr = &two_passes_vec<V>;
         step.npasses = 2;
