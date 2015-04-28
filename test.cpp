@@ -1030,11 +1030,11 @@ void init_steps(State<typename V::T>& state)
         step.npasses = 3;
         step.out_of_place = false;
       }
-      else if(dft_size * 16 <= state.n)
+      /*else if(dft_size * 16 <= state.n)
       {
         step.fun_ptr = &four_passes_vec<V>;
         step.npasses = 4;
-      }
+      }*/
       else if(dft_size * 4 <= state.n)
       {
         step.fun_ptr = &two_passes_vec<V>;
@@ -1140,7 +1140,7 @@ void fft(
     arg.twiddle = twiddle_end - next_dft_size;
     state.steps[step].fun_ptr(arg);
     arg.dft_size = next_dft_size;
-    
+
     if(state.steps[step].out_of_place)
     {
       swap(next_dst, arg.dst);
@@ -1180,6 +1180,15 @@ void print_vec(T a)
   printf("\n"); 
 }
 
+template<typename T>
+ComplexPtrs<T> alloc_complex_ptrs(Int n)
+{
+  ComplexPtrs<T> r;
+  r.re = (T*) valloc(2 * n * sizeof(T));
+  r.im = r.re + n;
+  return r;
+}
+
 int main(int argc, char** argv)
 {
   typedef AvxFloat V;
@@ -1190,17 +1199,14 @@ int main(int argc, char** argv)
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
 
-  ComplexPtrs<T> src = {new T[n], new T[n]};
-  ComplexPtrs<T> working = {new T[n], new T[n]};
-  ComplexPtrs<T> dst = {new T[n], new T[n]};
+  ComplexPtrs<T> src = alloc_complex_ptrs<T>(n);
+  ComplexPtrs<T> working = alloc_complex_ptrs<T>(n);
+  ComplexPtrs<T> dst = alloc_complex_ptrs<T>(n);
 
   State<T> state;
   state.n = n;
-  state.working = {new T[n], new T[n]};
-  state.twiddle = {new T[n], new T[n]};
-  Int ncopied = copy_chunk_size << max_passes_per_copy;
-  state.copied_working0 = {new T[ncopied], new T[ncopied]};
-  state.copied_working1 = {new T[ncopied], new T[ncopied]};
+  state.working = alloc_complex_ptrs<T>(n);
+  state.twiddle = alloc_complex_ptrs<T>(n);
   init_steps<V>(state);
   init_twiddle<V>(state);
 
