@@ -90,8 +90,8 @@ struct Complex
   }
 };
 
-const Int max_passes_per_copy = 6;
-const Int copy_chunk_size = 32;
+const Int max_passes_per_copy = 5;
+const Int copy_chunk_size = 8;
 
 template<typename T>
 struct Arg
@@ -107,7 +107,6 @@ template<typename T>
 struct Step
 {
   short npasses;
-  short nsteps;
   bool out_of_place;
   void (*fun_ptr)(const Arg<T>&);
 };
@@ -476,46 +475,6 @@ void init_twiddle(State<typename V::T>& state)
 
     dft_size <<= step.npasses;
   }
-
-  copy(dst.re, n, state.working.re); 
-  copy(dst.im, n, state.working.im);
-
-  dft_size = 1;
-  for(Int s = 0; s < state.nsteps; s += state.steps[s].nsteps)
-  {
-    Int chunk_size = copy_chunk_size;
-    Int next_dft_size = dft_size;
-    for(Int i = s; i < s + state.steps[s].nsteps; i++)
-      next_dft_size <<= state.steps[s].npasses;
-
-    if(state.steps[s].nsteps > 1 && dft_size > chunk_size)
-    {
-      auto dst_tw = dst + n - next_dft_size;
-      for(Int i = 0; i < dft_size / chunk_size; i++)
-      {
-        Int inner_dft_size = dft_size;
-        for(Int s1 = s; s1 < s + state.steps[s].nsteps; s1++)
-        {
-          auto npasses = state.steps[s1].npasses;
-          auto te = twiddle_elements(npasses);
-          auto next_inner_dft_size = inner_dft_size << npasses;
-          auto src_tw = state.working + n - next_inner_dft_size;
-          for(Int j = 0; j < inner_dft_size / dft_size; j++)
-          {
-            auto dst_ptrs = dst_tw + j * chunk_size;
-            auto src_ptrs = src_tw + j * dft_size * te + i * chunk_size * te;
-            copy(src_ptrs.re, chunk_size * te, dst_ptrs.re);
-            copy(src_ptrs.im, chunk_size * te, dst_ptrs.im);
-          }
-
-          dst_tw += inner_dft_size / (dft_size / chunk_size) *te;
-          inner_dft_size = next_inner_dft_size;
-        }
-      }
-    }
-
-    dft_size = next_dft_size;
-  }
 }
 
 template<typename T>
@@ -532,16 +491,6 @@ template<typename T_> void dump(T_* ptr, Int n, const char* name);
 
 template<typename T> T min(T a, T b){ a < b ? a : b; }
 template<typename T> T max(T a, T b){ a > b ? a : b; }
-
-#if 0
-template<long chunk_size> 
-void strided_copy(V* src, V* dst, long n, long stride)
-{
-  for(long i = 0, j = 0; i < n * chunk_size; i += chunk_size, j += stride)
-    for(long k = 0; k < chunk_size; k++)
-      dst[i + k] = src[j + k];
-}
-#endif
 
 template<typename T>
 FORCEINLINE T cmul_re(T a_re, T a_im, T b_re, T b_im)
@@ -970,7 +919,6 @@ void init_steps(State<typename V::T>& state)
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
-    step.nsteps = 1;
     step.out_of_place = true;
     if(dft_size >= V::vec_size)
     {
@@ -1045,53 +993,10 @@ void init_steps(State<typename V::T>& state)
 
   state.nsteps = step_index;
 
-  const Int large_fft_limit = 13;
-  if(state.n >= (Int(1) << large_fft_limit))
-  {
-    for(Int s0 = 0; s0 < state.nsteps;)
-    {
-      Int passes_per_copy = 0;
-      Int s1 = s0;
-      while(true)
-      {
-        if(s1 >= state.nsteps) break;
-        passes_per_copy += state.steps[s1].npasses;
-        if(passes_per_copy > max_passes_per_copy) break;
-        state.steps[s1].nsteps = 0;
-        s1++;
-      }
-
-      state.steps[s0].nsteps = s1 - s0;
-      s0 = s1;
-    }
-  }
-}
-
-//direction: 0 strided src, 1 strided dst
-template<typename V, Int direction, Int chunk_size>
-void strided_copy(
-  typename V::T* strided,
-  typename V::T* contiguous,
-  Int nchunks,
-  Int stride)
-{
-  VEC_TYPEDEFS(V);
-  const Int vchunk_size = chunk_size / V::vec_size;
-  Int vstride = stride / V::vec_size;
-
-  auto vstrided = (Vec*) strided;
-  auto vcontiguous = (Vec*) contiguous;
-  for(
-    auto vend = vcontiguous + vchunk_size * nchunks;
-    vcontiguous < vend;
-    vcontiguous += vchunk_size, vstrided += vstride)
-  {
-    for(Int i = 0; i < vchunk_size; i++)
-      if(direction == 0)
-        vcontiguous[i] = vstrided[i];
-      else
-        vstrided[i] = vcontiguous[i];
-  }
+#if 0
+  for(Int i = 0; i < state.nsteps; i++)
+    printf("npasses %d\n", state.steps[i].npasses);
+#endif
 }
 
 Int log2(Int a)
@@ -1104,89 +1009,6 @@ Int log2(Int a)
   }
 
   return r;
-}
-
-template<typename V>
-NOINLINE void copied_fft_passes(
-  Arg<typename V::T>& arg_in,
-  Step<typename V::T>* steps,
-  ComplexPtrs<typename V::T> working0,
-  ComplexPtrs<typename V::T> working1)
-{
-  VEC_TYPEDEFS(V);
-  const Int chunk_size = copy_chunk_size;
-
-  auto n = arg_in.n;
-  Int nchunks, stride;
-  {
-    Int npasses = 0;
-    for(Int s = 0; s < steps[0].nsteps; s++) npasses += steps[s].npasses;
-    stride = n >> npasses;
-    nchunks = Int(1) << npasses;
-  }
-
-  if(arg_in.dft_size <= chunk_size)
-    for(Int i = 0; i < stride / chunk_size; i++)
-    {
-      Arg<T> arg;
-      arg.n = chunk_size * nchunks;
-      arg.src = working0;
-      arg.dst = working1;
-
-      strided_copy<V, 0, chunk_size>(
-        arg_in.src.re + i * chunk_size, arg.src.re, nchunks, stride);
-      
-      strided_copy<V, 0, chunk_size>(
-        arg_in.src.im + i * chunk_size, arg.src.im, nchunks, stride);
-
-      arg.dft_size = arg_in.dft_size;
-      for(Int s = 0; s < steps[0].nsteps; s++)
-      {
-        auto next_dft_size = arg.dft_size << steps[s].npasses;
-        arg.twiddle = arg_in.twiddle + n - next_dft_size;
-        steps[s].fun_ptr(arg);
-        arg.dft_size = next_dft_size;
-      }
-
-      copy(arg.src.re, arg.n, arg_in.dst.re + arg.n * i);
-      copy(arg.src.im, arg.n, arg_in.dst.im + arg.n * i);
-    }
-  else
-    for(Int i0 = 0; i0 < stride / arg_in.dft_size; i0++)
-    {
-      auto twiddle = arg_in.twiddle + n - arg_in.dft_size * nchunks;
-      for(Int i1 = 0; i1 < arg_in.dft_size / chunk_size; i1++)
-      {
-        Arg<T> arg;
-        arg.n = chunk_size * nchunks;
-        arg.src = working0;
-        arg.dst = working1;
-
-        Int off = i0 * arg_in.dft_size + i1 * chunk_size;
-        strided_copy<V, 0, chunk_size>(
-          arg_in.src.re + off, arg.src.re, nchunks, stride);
-        
-        strided_copy<V, 0, chunk_size>(
-          arg_in.src.im + off, arg.src.im, nchunks, stride);
-
-        arg.dft_size = chunk_size;
-        for(Int s = 0; s < steps[0].nsteps; s++)
-        {
-          arg.twiddle = twiddle;
-          twiddle += twiddle_elements(steps[s].npasses) * arg.dft_size;
-          steps[s].fun_ptr(arg);
-          arg.dft_size <<= steps[s].npasses;
-        }
-
-        strided_copy<V, 0, chunk_size>(
-          arg_in.dst.re + i0 * arg_in.dft_size * nchunks + i1 * chunk_size,
-          arg.src.re, nchunks, arg_in.dft_size);
-        
-        strided_copy<V, 0, chunk_size>(
-          arg_in.dst.im + i0 * arg_in.dft_size * nchunks + i1 * chunk_size,
-          arg.src.im, nchunks, arg_in.dft_size);
-      }
-    }
 }
 
 template<typename V>
@@ -1208,18 +1030,13 @@ void fft(
   arg.dst = is_odd ? dst : state.working;
   auto next_dst = is_odd ? state.working : dst;
 
-  for(Int step = 0; step < state.nsteps; step += state.steps[step].nsteps)
+  for(Int step = 0; step < state.nsteps; step++)
   {
-    if(state.steps[step].nsteps == 1)
-    {
-      auto next_dft_size = arg.dft_size << state.steps[step].npasses;
-      arg.twiddle = twiddle_end - next_dft_size;
-      state.steps[step].fun_ptr(arg);
-      arg.dft_size = next_dft_size;
-    }
-    else
-      ASSERT(0);
-
+    auto next_dft_size = arg.dft_size << state.steps[step].npasses;
+    arg.twiddle = twiddle_end - next_dft_size;
+    state.steps[step].fun_ptr(arg);
+    arg.dft_size = next_dft_size;
+    
     if(state.steps[step].out_of_place)
     {
       swap(next_dst, arg.dst);
@@ -1277,6 +1094,9 @@ int main(int argc, char** argv)
   state.n = n;
   state.working = {new T[n], new T[n]};
   state.twiddle = {new T[n], new T[n]};
+  Int ncopied = copy_chunk_size << max_passes_per_copy;
+  state.copied_working0 = {new T[ncopied], new T[ncopied]};
+  state.copied_working1 = {new T[ncopied], new T[ncopied]};
   init_steps<V>(state);
   init_twiddle<V>(state);
 
