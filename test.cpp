@@ -5,6 +5,8 @@ typedef long Int;
 #define FORCEINLINE __attribute__((always_inline)) inline
 #define NOINLINE __attribute__((noinline))
 
+#define ASSERT(condition) ((condition) || *((volatile int*) 0))
+
 template<typename T_>
 struct ComplexPtrs
 {
@@ -104,8 +106,8 @@ struct State
   Int n;
   ComplexPtrs<T> twiddle;
   ComplexPtrs<T> working;
-  ComplexPtrs<T> coppied_working0;
-  ComplexPtrs<T> coppied_working1;
+  ComplexPtrs<T> copied_working0;
+  ComplexPtrs<T> copied_working1;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
   Int num_copies;
@@ -510,7 +512,7 @@ template<typename V, Int dft_size>
 void ct_dft_size_pass(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  ComplexPtrs<T> tw = arg.twiddle + arg.n - 2 * dft_size;
+  ComplexPtrs<T> tw = arg.twiddle;
   Int vn = arg.n / V::vec_size;
   auto vsrc0_re = (Vec*) arg.src.re;
   auto vsrc0_im = (Vec*) arg.src.im;
@@ -756,7 +758,6 @@ FORCEINLINE void two_passes_impl(
   typedef Complex<T> C;
   ComplexPtrs<T> src_ptrs = src;
   ComplexPtrs<T> dst_ptrs = dst;
-  ComplexPtrs<T> tw_ptrs = twiddle + n - 4 * dft_size;
   Int l = n / 4;
 
   for(T* end = src_ptrs.re + l; src_ptrs.re < end;)
@@ -764,9 +765,9 @@ FORCEINLINE void two_passes_impl(
     for(T* end1 = src_ptrs.re + dft_size;;)
     {
       C mul0 = C::load(src_ptrs);
-      C mul1 = C::load(tw_ptrs) * C::load(src_ptrs + l);
-      C mul2 = C::load(tw_ptrs + 1) * C::load(src_ptrs + 2 * l);
-      C mul3 = C::load(tw_ptrs + 2) * C::load(src_ptrs + 3 * l);
+      C mul1 = C::load(twiddle) * C::load(src_ptrs + l);
+      C mul2 = C::load(twiddle + 1) * C::load(src_ptrs + 2 * l);
+      C mul3 = C::load(twiddle + 2) * C::load(src_ptrs + 3 * l);
 
       C sum02 = mul0 + mul2;
       C dif02 = mul0 - mul2;
@@ -780,12 +781,12 @@ FORCEINLINE void two_passes_impl(
 
       src_ptrs += 1;
       dst_ptrs += 1;
-      tw_ptrs += 3;
+      twiddle += 3;
       if(!(src_ptrs.re < end1)) break;
     }
 
     dst_ptrs += 3 * dft_size;
-    tw_ptrs -= 3 * dft_size;
+    twiddle -= 3 * dft_size;
   }
 }
 
@@ -804,16 +805,14 @@ FORCEINLINE void last_three_passes_impl(
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
 
-  auto tw_ptrs = twiddle;
-
   for(auto end = data.re + l1;;)
   {
     C a0, a1, a2, a3, a4, a5, a6, a7;
 
     {
-      C tw0 = C::load(tw_ptrs, 0);
-      C tw1 = C::load(tw_ptrs, 1);
-      C tw2 = C::load(tw_ptrs, 2);
+      C tw0 = C::load(twiddle, 0);
+      C tw1 = C::load(twiddle, 1);
+      C tw2 = C::load(twiddle, 2);
 
       {
         C mul0 =       C::load(data, 0);
@@ -851,8 +850,8 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw3 = C::load(tw_ptrs, 3);
-      C tw4 = C::load(tw_ptrs, 4);
+      C tw3 = C::load(twiddle, 3);
+      C tw4 = C::load(twiddle, 4);
       {
         auto mul = tw3 * a4;
         (a0 + mul).store(data, 0);
@@ -879,7 +878,7 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     data += 1;
-    tw_ptrs += 5;
+    twiddle += 5;
     if(data.re == end) break;
   }
 }
@@ -999,6 +998,7 @@ void init_steps(State<typename V::T>& state)
 
   state.nsteps = step_index;
 
+#if 0
   const Int large_fft_limit = 13;
   if(state.n >= (Int(1) << large_fft_limit))
   {
@@ -1019,6 +1019,7 @@ void init_steps(State<typename V::T>& state)
       s0 = s1;
     }
   }
+#endif
 }
 
 //direction: 0 strided src, 1 strided dst
@@ -1036,7 +1037,7 @@ void strided_copy(
   auto vstrided = (Vec*) strided;
   auto vcontiguous = (Vec*) contiguous;
   for(
-    auto vend = vcontiguous + vchunk_size * n;
+    auto vend = vcontiguous + vchunk_size * nchunks;
     vcontiguous < vend;
     vcontiguous += vchunk_size, vstrided += vstride)
   {
@@ -1048,8 +1049,9 @@ void strided_copy(
   }
 }
 
+#if 0
 template<typename V>
-NOINLINE void coppied_fft_passes(
+NOINLINE void copied_fft_passes(
   Arg<typename V::T>& arg_in,
   Step<typename V::T>* steps,
   ComplexPtrs<typename V::T> working0,
@@ -1060,15 +1062,41 @@ NOINLINE void coppied_fft_passes(
   Int npasses = 0;
   for(Int s = 0; s < steps[0].nsteps; s++) npasses += state.steps[s].npasses;
 
-  Int l = state.n >> npasses;
+  Int stride = state.n >> npasses;
   
   const Int vchunk_size = copy_chunk_size / V::vec_size;
-  Int vdft_size = dft_size / V::vec_size;
-  Int vn = args.n / V::vec_size;
-  Int vl = l / V::vec_size;
-  auto vsrc = (ComplexPtrs<V>&) args.src;
-  auto vdst = (ComplexPtrs<V>&) args.dst;
+  Arg<T> arg;
+  arg.n = arg_in.n;
+  arg.dft_size = arg_in.dft_size;
+  arg.offset = 0;
+  arg.src = working0;
+  arg.twiddle = arg_in.twiddle;
+  arg.dst = working1;
   
+  for(Int off = 0; off < l; off += chunk_size)
+  {
+    strided_copy<V, 0, chunk_size>(
+      arg_in.src.re, arg.src.re, Int(1) << npasses, stride)
+    
+    strided_copy<V, 0, chunk_size>(
+      arg_in.src.im, arg.src.im, Int(1) << npasses, stride)
+
+
+
+  }
+}
+#endif
+
+Int log2(Int a)
+{
+  Int r = 0;
+  while(a > 1)
+  {
+    r++;
+    a >>= 1; 
+  }
+
+  return r;
 }
 
 template<typename V>
@@ -1084,7 +1112,8 @@ void fft(
   arg.n = state.n;
   arg.dft_size = 1;
   arg.src = src;
-  arg.twiddle = state.twiddle;
+  
+  auto twiddle_end = state.twiddle + state.n;
   
   auto is_odd = bool(state.num_copies & 1);
   arg.dst = is_odd ? dst : state.working;
@@ -1094,11 +1123,13 @@ void fft(
   {
     if(state.steps[step].nsteps == 1)
     {
+      auto next_dft_size = arg.dft_size << state.steps[step].npasses;
+      arg.twiddle = twiddle_end - next_dft_size;
       state.steps[step].fun_ptr(arg);
-      arg.dft_size <<= state.steps[step].npasses;
+      arg.dft_size = next_dft_size;
     }
     else
-      *((volatile int*) 0) = 0; // not implemented
+      ASSERT(0);
 
     if(state.steps[step].out_of_place)
     {
