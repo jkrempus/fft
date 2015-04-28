@@ -395,6 +395,18 @@ Int twiddle_elements(Int npasses)
     npasses == 3 ? 5 : max_int;
 }
 
+template<typename T>
+void store_two_pass_twiddle(
+  Complex<T> first,
+  ComplexPtrs<T> dst)
+{
+  first.store(dst);
+  auto second = first * first;
+  auto third = second * first;
+  second.store(dst + 1);
+  third.store(dst + 2);
+}
+
 template<typename V>
 void init_twiddle(State<typename V::T>& state)
 {
@@ -427,6 +439,9 @@ void init_twiddle(State<typename V::T>& state)
     }
   }
 
+  copy(dst.re, n, state.working.re);
+  copy(dst.im, n, state.working.im);
+
   int dft_size = 1;
   for(Int s = 0; s < state.nsteps; s++)
   {
@@ -437,40 +452,41 @@ void init_twiddle(State<typename V::T>& state)
 
     if(step.npasses == 2 && dft_size >= V::vec_size)
     {
-      auto working = (ComplexPtrs<Vec>&) state.working;
-      auto row0 = ((ComplexPtrs<Vec>&) dst) + vn - 4 * vdft_size;
+      auto src_row0 = ((ComplexPtrs<Vec>&) state.working) + vn - 4 * vdft_size;
+      auto dst_row0 = ((ComplexPtrs<Vec>&) dst) + vn - 4 * vdft_size;
       for(Int i = 0; i < vdft_size; i++)
-      {
-        Complex<Vec> w1 = Complex<Vec>::load(row0, i);
-        Complex<Vec> w2 = w1 * w1;
-        Complex<Vec> w3 = w2 * w1;
-        w1.store(working, 3 * i);
-        w2.store(working, 3 * i + 1);
-        w3.store(working, 3 * i + 2);
-      }
-      
-      for(Int i = 0; i < 3 * vdft_size; i++)
-        Complex<Vec>::load(working, i).store(row0, i);
+        store_two_pass_twiddle(
+          Complex<Vec>::load(src_row0, i), dst_row0 + 3 * i);
     }
     else if(step.npasses == 3 && dft_size >= V::vec_size)
     {
-      auto working = (ComplexPtrs<Vec>&) state.working;
-      auto row0 = ((ComplexPtrs<Vec>&) dst) + vn - 4 * vdft_size;
-      auto row1 = ((ComplexPtrs<Vec>&) dst) + vn - 8 * vdft_size;
+      auto src_row0 = ((ComplexPtrs<Vec>&) state.working) + vn - 4 * vdft_size;
+      auto src_row1 = ((ComplexPtrs<Vec>&) state.working) + vn - 8 * vdft_size;
+      auto dst_row1 = ((ComplexPtrs<Vec>&) dst) + vn - 8 * vdft_size;
       for(Int i = 0; i < vdft_size; i++)
       {
-        Complex<Vec> w1 = Complex<Vec>::load(row0, i);
-        Complex<Vec> w2 = w1 * w1;
-        Complex<Vec> w3 = w2 * w1;
-        w1.store(working, 5 * i);
-        w2.store(working, 5 * i + 1);
-        w3.store(working, 5 * i + 2);
-        Complex<Vec>::load(row1, i).store(working, 5 * i + 3);
-        Complex<Vec>::load(row1, i + vdft_size).store(working, 5 * i + 4);
-      }
+        store_two_pass_twiddle(
+          Complex<Vec>::load(src_row0, i), dst_row1 + 5 * i);
 
-      for(Int i = 0; i < 5 * vdft_size; i++)
-        Complex<Vec>::load(working, i).store(row1, i);
+        Complex<Vec>::load(src_row1, i).store(dst_row1, 5 * i + 3);
+        Complex<Vec>::load(src_row1, i + vdft_size).store(dst_row1, 5 * i + 4);
+      }
+    } 
+    else if(step.npasses == 4 && dft_size >= V::vec_size)
+    {
+      auto src_row0 = ((ComplexPtrs<Vec>&) state.working) + vn - 4 * vdft_size;
+      auto src_row2 = ((ComplexPtrs<Vec>&) state.working) + vn - 16 * vdft_size;
+      auto dst_row2 = ((ComplexPtrs<Vec>&) dst) + vn - 16 * vdft_size;
+      for(Int i = 0; i < vdft_size; i++)
+      {
+        store_two_pass_twiddle(
+          Complex<Vec>::load(src_row0, i), dst_row2 + 15 * i);
+
+        for(Int j = 0; j < 4; j++)
+          store_two_pass_twiddle(
+            Complex<Vec>::load(src_row2 + j * vdft_size, i),
+            dst_row2 + 15 * i + 3 * (j + 1));
+      }
     }
 
     dft_size <<= step.npasses;
@@ -745,6 +761,33 @@ void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
 }
 
 template<typename T>
+FORCEINLINE void two_passes_inner(
+  ComplexPtrs<T> src_ptrs,
+  ComplexPtrs<T> dst_ptrs,
+  Int src_stride,
+  Int dst_stride,
+  Complex<T> tw0,
+  Complex<T> tw1,
+  Complex<T> tw2)
+{
+  typedef Complex<T> C;
+  C mul0 =       C::load(src_ptrs);
+  C mul1 = tw0 * C::load(src_ptrs + src_stride);
+  C mul2 = tw1 * C::load(src_ptrs + 2 * src_stride);
+  C mul3 = tw2 * C::load(src_ptrs + 3 * src_stride);
+
+  C sum02 = mul0 + mul2;
+  C dif02 = mul0 - mul2;
+  C sum13 = mul1 + mul3;
+  C dif13 = mul1 - mul3;
+
+  (sum02 + sum13).store(dst_ptrs); 
+  (sum02 - sum13).store(dst_ptrs + 2 * dst_stride);
+  (dif02 + dif13.mul_neg_i()).store(dst_ptrs + dst_stride);
+  (dif02 - dif13.mul_neg_i()).store(dst_ptrs + 3 * dst_stride); 
+}
+
+template<typename T>
 FORCEINLINE void two_passes_impl(
   Int n, Int dft_size,
   ComplexPtrs<T> src,
@@ -760,20 +803,8 @@ FORCEINLINE void two_passes_impl(
   {
     for(T* end1 = src_ptrs.re + dft_size;;)
     {
-      C mul0 = C::load(src_ptrs);
-      C mul1 = C::load(twiddle) * C::load(src_ptrs + l);
-      C mul2 = C::load(twiddle + 1) * C::load(src_ptrs + 2 * l);
-      C mul3 = C::load(twiddle + 2) * C::load(src_ptrs + 3 * l);
-
-      C sum02 = mul0 + mul2;
-      C dif02 = mul0 - mul2;
-      C sum13 = mul1 + mul3;
-      C dif13 = mul1 - mul3;
-
-      (sum02 + sum13).store(dst_ptrs); 
-      (sum02 - sum13).store(dst_ptrs + 2 * dft_size);
-      (dif02 + dif13.mul_neg_i()).store(dst_ptrs + dft_size);
-      (dif02 - dif13.mul_neg_i()).store(dst_ptrs + 3 * dft_size); 
+      two_passes_inner(src_ptrs, dst_ptrs, l, dft_size,
+        C::load(twiddle), C::load(twiddle + 1), C::load(twiddle + 2));
 
       src_ptrs += 1;
       dst_ptrs += 1;
@@ -783,6 +814,63 @@ FORCEINLINE void two_passes_impl(
 
     dst_ptrs += 3 * dft_size;
     twiddle -= 3 * dft_size;
+  }
+}
+
+template<typename T>
+FORCEINLINE void four_passes_impl(
+  Int n, Int dft_size,
+  ComplexPtrs<T> src,
+  ComplexPtrs<T> twiddle,
+  ComplexPtrs<T> dst)
+{
+  typedef Complex<T> C;
+  Int l = n / 16;
+
+  T mem_re[16];
+  T mem_im[16];
+  ComplexPtrs<T> working = {mem_re, mem_im};
+
+  for(T* end = src.re + l; src.re < end;)
+  {
+    for(T* end1 = src.re + dft_size;;)
+    {
+#if 0
+      const int a = 0;
+      __builtin_prefetch(dst.re + a);
+      __builtin_prefetch(dst.im + a);
+      __builtin_prefetch(src.re + a);
+      __builtin_prefetch(src.im + a);
+      __builtin_prefetch(twiddle.re + 15 * a);
+      __builtin_prefetch(twiddle.im + 15 * a);
+#endif
+
+      {
+        C tw0 = C::load(twiddle + 0);
+        C tw1 = C::load(twiddle + 1);
+        C tw2 = C::load(twiddle + 2);
+        for(Int i = 0; i < 4; i++)
+          two_passes_inner(
+            src + i * l, working + 4 * i, 4 * l, 1, tw0, tw1, tw2);
+      }
+
+      for(int i = 0; i < 4; i++)
+      {
+        C tw0 = C::load(twiddle + 3 * (i + 1) + 0);
+        C tw1 = C::load(twiddle + 3 * (i + 1) + 1);
+        C tw2 = C::load(twiddle + 3 * (i + 1) + 2);
+        two_passes_inner(
+          working + i, dst + i * dft_size, 4, dft_size * 4, tw0, tw1, tw2);
+      }
+
+      src += 1;
+      dst += 1;
+      twiddle += 15;
+      if(!(src.re < end1)) break;
+    }
+
+    dst += 15 * dft_size;
+    twiddle -= 15 * dft_size;
   }
 }
 
@@ -900,6 +988,17 @@ void last_three_passes_vec(const Arg<typename V::T>& arg)
     (ComplexPtrs<Vec>&) arg.twiddle);
 }
 
+template<typename V>
+void four_passes_vec(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  four_passes_impl(
+    arg.n / V::vec_size, arg.dft_size / V::vec_size,
+    (ComplexPtrs<Vec>&) arg.src,
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
+}
+
 template<typename V, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
 {
@@ -930,6 +1029,11 @@ void init_steps(State<typename V::T>& state)
           step.fun_ptr = &last_three_passes_vec<V>;
         step.npasses = 3;
         step.out_of_place = false;
+      }
+      else if(dft_size * 16 <= state.n)
+      {
+        step.fun_ptr = &four_passes_vec<V>;
+        step.npasses = 4;
       }
       else if(dft_size * 4 <= state.n)
       {
@@ -993,7 +1097,7 @@ void init_steps(State<typename V::T>& state)
 
   state.nsteps = step_index;
 
-#if 0
+#if 1
   for(Int i = 0; i < state.nsteps; i++)
     printf("npasses %d\n", state.steps[i].npasses);
 #endif
