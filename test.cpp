@@ -908,7 +908,7 @@ FORCEINLINE void two_passes_strided_impl(
 
   printf("log2stride %d chunk_size %d\n", l2s, chunk_size);
   printf("compact_l %d\n", compact_l);
-  printf("compact_dft_size %d\n", compact_dft_size);
+  printf("dft_size %d compact_dft_size %d\n", dft_size, compact_dft_size);
 
   auto twiddle = twiddle_start + n - 4 * dft_size;
 
@@ -969,7 +969,7 @@ FORCEINLINE void four_passes_impl(
   const Int nchunks = 16;
   Int stride = n / nchunks;
   C working[chunk_size * nchunks];
-  printf("size %d\n", sizeof(working) / sizeof(working[0]));
+  printf("\n\n\nn %d nstrided %d\n", n, sizeof(working) / sizeof(working[0]));
 
   for(Int i = 0; i < stride; i += chunk_size)
   {
@@ -977,7 +977,7 @@ FORCEINLINE void four_passes_impl(
       n, dft_size, stride, i, src, twiddle, working);
 
     two_passes_strided_impl<chunk_size * 4, true, false>(
-      n, 4 * dft_size, stride * 4, i, working, twiddle, dst);
+      n, 4 * dft_size, stride * 4, 4 * i, working, twiddle, dst);
   }
 #else
   C working[128];
@@ -1258,7 +1258,6 @@ void fft(
 
   for(Int step = 0; step < state.nsteps; step++)
   {
-    printf("step %d\n", step);
     auto next_dft_size = arg.dft_size << state.steps[step].npasses;
     arg.twiddle = state.twiddle;
     state.steps[step].fun_ptr(arg);
