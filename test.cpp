@@ -10,6 +10,18 @@ const Int max_int = Int(Uint(-1) >> 1);
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
+#if 0
+#include <cstdio>
+template<typename T>
+void print_vec(T a)
+{
+  for(Int i = 0; i < sizeof(T) / sizeof(float); i++)
+    printf("%f ", ((float*)&a)[i]);
+
+  printf("\n"); 
+}
+#endif
+
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
 {
@@ -405,8 +417,6 @@ struct AvxFloat
   typedef typename V::Vec Vec; \
   typedef Complex<typename V::Vec> C
 
-#include <cstdio>
-
 Int twiddle_elements(Int npasses)
 {
   return
@@ -532,7 +542,7 @@ void swap(T& a, T& b)
 }
 
 extern "C" int sprintf(char* s, const char* fmt, ...);
-template<typename T_> void dump(T_* ptr, Int n, const char* name);
+template<typename T_> void dump(T_* ptr, Int n, const char* name, ...);
 
 template<typename T> T min(T a, T b){ a < b ? a : b; }
 template<typename T> T max(T a, T b){ a > b ? a : b; }
@@ -823,7 +833,7 @@ FORCEINLINE void two_passes_impl(
   typedef Complex<T> C;
   auto csrc = (C*) src.re;
   auto cdst = (C*) dst.re;
-  auto ctwiddle = (C*) twiddle.re;
+  auto ctwiddle = ((C*) twiddle.re) + n - 4 * dft_size;
   Int l = n / 4;
 
   for(C* end = csrc + l; csrc < end;)
@@ -995,7 +1005,7 @@ FORCEINLINE void last_three_passes_impl(
 
     csrc += 1;
     dst += 1;
-    twiddle += 5;
+    ctwiddle += 5;
     if(csrc == end) break;
   }
 }
@@ -1045,6 +1055,8 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
     (ComplexPtrs<Vec>&) arg.twiddle,
     (ComplexPtrs<Vec>&) arg.dst);
 }
+
+#include <cstdio>
 
 template<typename V>
 void init_steps(State<typename V::T>& state)
@@ -1165,7 +1177,7 @@ void fft(
   arg.dft_size = 1;
   arg.src = src;
   
-  auto twiddle_end = state.twiddle + state.n;
+  //auto twiddle_end = state.twiddle + state.n;
   
   auto is_odd = bool(state.num_copies & 1);
   arg.dst = is_odd ? dst : state.working;
@@ -1174,7 +1186,17 @@ void fft(
   for(Int step = 0; step < state.nsteps; step++)
   {
     auto next_dft_size = arg.dft_size << state.steps[step].npasses;
-    arg.twiddle = twiddle_end - next_dft_size;
+    //arg.twiddle = state.twiddle + 2 * state.n - 2 * next_dft_size;
+#if 0
+    arg.twiddle.re =
+      (T*)(
+        ((Complex<Vec>*) state.twiddle.re)
+        + state.n / V::vec_size
+        - next_dft_size / V::vec_size);
+#else
+    arg.twiddle = state.twiddle;
+#endif
+
     state.steps[step].fun_ptr(arg);
     arg.dft_size = next_dft_size;
 
@@ -1203,18 +1225,16 @@ double get_time()
 }
 
 template<typename T_>
-void dump(T_* ptr, Int n, const char* name)
+void dump(T_* ptr, Int n, const char* name, ...)
 {
-  std::ofstream(name, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
-}
+  char buf[1 << 10];
 
-template<typename T>
-void print_vec(T a)
-{
-  for(Int i = 0; i < sizeof(T) / sizeof(float); i++)
-    printf("%f ", ((float*)&a)[i]);
+  va_list args;
+  va_start(args, name);
+  vsprintf(buf, name, args);
+  va_end(args); 
 
-  printf("\n"); 
+  std::ofstream(buf, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
 }
 
 template<typename T>
