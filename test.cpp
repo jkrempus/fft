@@ -6,6 +6,7 @@ typedef unsigned long Uint;
 const Int max_int = Int(Uint(-1) >> 1);
 
 #define FORCEINLINE __attribute__((always_inline)) inline
+#define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
@@ -693,7 +694,7 @@ FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
       c3 = b1 - b3.mul_neg_i();
     }
 
-    C c4, c5, c6, c7;
+    C mul0, mul1, mul2, mul3;
     {
       C a0 = {sre[l],     sim[l]};
       C a1 = {sre[3 * l], sim[3 * l]};
@@ -703,37 +704,28 @@ FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
       C b3 = a1 - a3; 
-      c4 = b0 + b2; 
-      c6 = b0 - b2;
-      c5 = b1 + b3.mul_neg_i();
-      c7 = b1 - b3.mul_neg_i();
+      C c4 = b0 + b2; 
+      C c6 = b0 - b2;
+      C c5 = b1 + b3.mul_neg_i();
+      C c7 = b1 - b3.mul_neg_i();
+
+      mul0 = c4;
+      mul1 = {invsqrt2 * (c5.re + c5.im), invsqrt2 * (c5.im - c5.re)};
+      mul2 = c6.mul_neg_i();
+      mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
     }
 
     sre++;
     sim++;
 
-    C mul0 = c4;
-    C d0 = c0 + mul0;
-    C d4 = c0 - mul0;
-
-    C mul1 = {invsqrt2 * (c5.re + c5.im), invsqrt2 * (c5.im - c5.re)};
-    C d1 = c1 + mul1;
-    C d5 = c1 - mul1;
-
-    C mul2 = c6.mul_neg_i();
-    C d2 = c2 + mul2;
-    C d6 = c2 - mul2;
-
-    C mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
-    C d3 = c3 + mul3;
-    C d7 = c3 - mul3;
-
     V::transpose(
-      d0.re, d1.re, d2.re, d3.re, d4.re, d5.re, d6.re, d7.re,
+      c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
+      c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
       d[0].re, d[1].re, d[2].re, d[3].re, d[4].re, d[5].re, d[6].re, d[7].re);
 
     V::transpose(
-      d0.im, d1.im, d2.im, d3.im, d4.im, d5.im, d6.im, d7.im,
+      c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
+      c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
       d[0].im, d[1].im, d[2].im, d[3].im, d[4].im, d[5].im, d[6].im, d[7].im);
 
     d += 8;
@@ -854,7 +846,6 @@ FORCEINLINE void two_passes_impl(
   }
 }
 
-#if 0
 template<typename T>
 FORCEINLINE void four_passes_impl(
   Int n, Int dft_size,
@@ -865,13 +856,15 @@ FORCEINLINE void four_passes_impl(
   typedef Complex<T> C;
   Int l = n / 16;
 
-  T mem_re[16];
-  T mem_im[16];
-  ComplexPtrs<T> working = {mem_re, mem_im};
+  auto csrc = (C*) src.re;
+  auto cdst = (C*) dst.re;
+  auto ctwiddle = ((C*) twiddle.re) + n - 16 * dft_size;
 
-  for(T* end = src.re + l; src.re < end;)
+  C working[16];
+
+  for(C* end = csrc + l; csrc < end;)
   {
-    for(T* end1 = src.re + dft_size;;)
+    for(C* end1 = csrc + dft_size;;)
     {
 #if 0
       const int a = 0;
@@ -884,34 +877,33 @@ FORCEINLINE void four_passes_impl(
 #endif
 
       {
-        C tw0 = C::load(twiddle + 0);
-        C tw1 = C::load(twiddle + 1);
-        C tw2 = C::load(twiddle + 2);
+        C tw0 = ctwiddle[0];
+        C tw1 = ctwiddle[1];
+        C tw2 = ctwiddle[2];
         for(Int i = 0; i < 4; i++)
           two_passes_inner(
-            src + i * l, working + 4 * i, 4 * l, 1, tw0, tw1, tw2);
+            csrc + i * l, working + 4 * i, 4 * l, 1, tw0, tw1, tw2);
       }
 
       for(int i = 0; i < 4; i++)
       {
-        C tw0 = C::load(twiddle + 3 * (i + 1) + 0);
-        C tw1 = C::load(twiddle + 3 * (i + 1) + 1);
-        C tw2 = C::load(twiddle + 3 * (i + 1) + 2);
+        C tw0 = ctwiddle[3 * (i + 1) + 0];
+        C tw1 = ctwiddle[3 * (i + 1) + 1];
+        C tw2 = ctwiddle[3 * (i + 1) + 2];
         two_passes_inner(
-          working + i, dst + i * dft_size, 4, dft_size * 4, tw0, tw1, tw2);
+          working + i, cdst + i * dft_size, 4, dft_size * 4, tw0, tw1, tw2);
       }
 
-      src += 1;
-      dst += 1;
-      twiddle += 15;
-      if(!(src.re < end1)) break;
+      csrc += 1;
+      cdst += 1;
+      ctwiddle += 15;
+      if(!(csrc < end1)) break;
     }
 
-    dst += 15 * dft_size;
-    twiddle -= 15 * dft_size;
+    cdst += 15 * dft_size;
+    ctwiddle -= 15 * dft_size;
   }
 }
-#endif
 
 template<typename T>
 FORCEINLINE void last_three_passes_impl(
@@ -934,6 +926,7 @@ FORCEINLINE void last_three_passes_impl(
 
   for(auto end = csrc + l1;;)
   {
+    C a[8];
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
       C tw0 = ctwiddle[0];
@@ -977,7 +970,6 @@ FORCEINLINE void last_three_passes_impl(
 
     {
       C tw3 = ctwiddle[3];
-      C tw4 = ctwiddle[4];
       {
         auto mul = tw3 * a4;
         (a0 + mul).store(dst, 0);
@@ -985,15 +977,18 @@ FORCEINLINE void last_three_passes_impl(
       }
 
       {
-        auto mul = tw4 * a5;
-        (a1 + mul).store(dst, l1);
-        (a1 - mul).store(dst, l5);
-      }
-
-      {
         auto mul = tw3.mul_neg_i() * a6;
         (a2 + mul).store(dst, l2);
         (a2 - mul).store(dst, l6);
+      }
+    }
+
+    {
+      C tw4 = ctwiddle[4];
+      {
+        auto mul = tw4 * a5;
+        (a1 + mul).store(dst, l1);
+        (a1 - mul).store(dst, l5);
       }
 
       {
@@ -1032,7 +1027,6 @@ void last_three_passes_vec(const Arg<typename V::T>& arg)
     (ComplexPtrs<Vec>&) arg.dst);
 }
 
-#if 0
 template<typename V>
 void four_passes_vec(const Arg<typename V::T>& arg)
 {
@@ -1043,7 +1037,6 @@ void four_passes_vec(const Arg<typename V::T>& arg)
     (ComplexPtrs<Vec>&) arg.twiddle,
     (ComplexPtrs<Vec>&) arg.dst);
 }
-#endif
 
 template<typename V, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
@@ -1079,11 +1072,13 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 3;
       }
-      /*else if(dft_size * 16 <= state.n)
+#if 0
+      else if(dft_size * 16 <= state.n)
       {
         step.fun_ptr = &four_passes_vec<V>;
         step.npasses = 4;
-      }*/
+      }
+#endif
       else if(dft_size * 4 <= state.n)
       {
         step.fun_ptr = &two_passes_vec<V>;
