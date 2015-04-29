@@ -20,6 +20,26 @@ FORCEINLINE void copy(const T* src, Int n, T* dst)
 #endif
 }
 
+template<typename T>
+void interleave(const T* src0, const T* src1, Int n, T* dst)
+{
+  for(Int i = 0; i < n; i++)
+  {
+    dst[2 * i] = src0[i];
+    dst[2 * i + 1] = src1[i];
+  }
+}
+
+template<typename T>
+void deinterleave(const T* src, Int n, T* dst0, T* dst1)
+{
+  for(Int i = 0; i < n; i++)
+  {
+    dst0[i] = src[2 * i];
+    dst1[i] = src[2 * i + 1];
+  }
+}
+
 template<typename T_>
 struct ComplexPtrs
 {
@@ -447,6 +467,7 @@ void init_twiddle(State<typename V::T>& state)
   {
     auto step = state.steps[s];
     //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
+
     Int vn = n / V::vec_size;
     Int vdft_size = dft_size / V::vec_size;
 
@@ -491,6 +512,14 @@ void init_twiddle(State<typename V::T>& state)
 
     dft_size <<= step.npasses;
   }
+
+  copy(dst.re, n, state.working.re);
+  copy(dst.im, n, state.working.im);
+
+  interleave(
+    (Vec*) state.working.re, (Vec*) state.working.im,
+    n / V::vec_size,
+    (Vec*) dst.re);
 }
 
 template<typename T>
@@ -634,10 +663,8 @@ FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
   Vec* sre = (Vec*) arg.src.re;
   Vec* sim = (Vec*) arg.src.im;
 
-  Vec* dre = (Vec*) arg.dst.re;
-  Vec* dim = (Vec*) arg.dst.im;
+  auto d = (Complex<Vec>*) arg.dst.re;
 
-  //for(Int i = 0; i < l; i++)
   for(auto end = sre + l;;)
   {
     C c0, c1, c2, c3;
@@ -693,14 +720,13 @@ FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
 
     V::transpose(
       d0.re, d1.re, d2.re, d3.re, d4.re, d5.re, d6.re, d7.re,
-      dre[0], dre[1], dre[2], dre[3], dre[4], dre[5], dre[6], dre[7]);
+      d[0].re, d[1].re, d[2].re, d[3].re, d[4].re, d[5].re, d[6].re, d[7].re);
 
     V::transpose(
       d0.im, d1.im, d2.im, d3.im, d4.im, d5.im, d6.im, d7.im,
-      dim[0], dim[1], dim[2], dim[3], dim[4], dim[5], dim[6], dim[7]);
+      d[0].im, d[1].im, d[2].im, d[3].im, d[4].im, d[5].im, d[6].im, d[7].im);
 
-    dre += 8;
-    dim += 8;
+    d += 8;
     if(sre == end) break;
   }
 }
@@ -762,8 +788,8 @@ void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
 
 template<typename T>
 FORCEINLINE void two_passes_inner(
-  ComplexPtrs<T> src_ptrs,
-  ComplexPtrs<T> dst_ptrs,
+  Complex<T>* src,
+  Complex<T>* dst,
   Int src_stride,
   Int dst_stride,
   Complex<T> tw0,
@@ -771,20 +797,20 @@ FORCEINLINE void two_passes_inner(
   Complex<T> tw2)
 {
   typedef Complex<T> C;
-  C mul0 =       C::load(src_ptrs);
-  C mul1 = tw0 * C::load(src_ptrs + src_stride);
-  C mul2 = tw1 * C::load(src_ptrs + 2 * src_stride);
-  C mul3 = tw2 * C::load(src_ptrs + 3 * src_stride);
+  C mul0 =       src[0];
+  C mul1 = tw0 * src[src_stride];
+  C mul2 = tw1 * src[2 * src_stride];
+  C mul3 = tw2 * src[3 * src_stride];
 
   C sum02 = mul0 + mul2;
   C dif02 = mul0 - mul2;
   C sum13 = mul1 + mul3;
   C dif13 = mul1 - mul3;
 
-  (sum02 + sum13).store(dst_ptrs); 
-  (sum02 - sum13).store(dst_ptrs + 2 * dst_stride);
-  (dif02 + dif13.mul_neg_i()).store(dst_ptrs + dst_stride);
-  (dif02 - dif13.mul_neg_i()).store(dst_ptrs + 3 * dst_stride); 
+  dst[0] = sum02 + sum13;
+  dst[2 * dst_stride] = sum02 - sum13;
+  dst[dst_stride] = dif02 + dif13.mul_neg_i();
+  dst[3 * dst_stride] = dif02 - dif13.mul_neg_i();
 }
 
 template<typename T>
@@ -795,28 +821,30 @@ FORCEINLINE void two_passes_impl(
   ComplexPtrs<T> dst)
 {
   typedef Complex<T> C;
-  ComplexPtrs<T> src_ptrs = src;
-  ComplexPtrs<T> dst_ptrs = dst;
+  auto csrc = (C*) src.re;
+  auto cdst = (C*) dst.re;
+  auto ctwiddle = (C*) twiddle.re;
   Int l = n / 4;
 
-  for(T* end = src_ptrs.re + l; src_ptrs.re < end;)
+  for(C* end = csrc + l; csrc < end;)
   {
-    for(T* end1 = src_ptrs.re + dft_size;;)
+    for(C* end1 = csrc + dft_size;;)
     {
-      two_passes_inner(src_ptrs, dst_ptrs, l, dft_size,
-        C::load(twiddle), C::load(twiddle + 1), C::load(twiddle + 2));
+      two_passes_inner(csrc, cdst, l, dft_size,
+        ctwiddle[0], ctwiddle[1], ctwiddle[2]);
 
-      src_ptrs += 1;
-      dst_ptrs += 1;
-      twiddle += 3;
-      if(!(src_ptrs.re < end1)) break;
+      csrc += 1;
+      cdst += 1;
+      ctwiddle += 3;
+      if(!(csrc < end1)) break;
     }
 
-    dst_ptrs += 3 * dft_size;
-    twiddle -= 3 * dft_size;
+    cdst += 3 * dft_size;
+    ctwiddle -= 3 * dft_size;
   }
 }
 
+#if 0
 template<typename T>
 FORCEINLINE void four_passes_impl(
   Int n, Int dft_size,
@@ -873,12 +901,14 @@ FORCEINLINE void four_passes_impl(
     twiddle -= 15 * dft_size;
   }
 }
+#endif
 
 template<typename T>
 FORCEINLINE void last_three_passes_impl(
   Int n,
-  ComplexPtrs<T> data,
-  ComplexPtrs<T> twiddle)
+  ComplexPtrs<T> src,
+  ComplexPtrs<T> twiddle,
+  ComplexPtrs<T> dst)
 {
   typedef Complex<T> C;
   Int l1 = n / 8;
@@ -889,20 +919,22 @@ FORCEINLINE void last_three_passes_impl(
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
 
-  for(auto end = data.re + l1;;)
+  auto csrc = (C*) src.re;
+  auto ctwiddle = (C*) twiddle.re;
+
+  for(auto end = csrc + l1;;)
   {
     C a0, a1, a2, a3, a4, a5, a6, a7;
-
     {
-      C tw0 = C::load(twiddle, 0);
-      C tw1 = C::load(twiddle, 1);
-      C tw2 = C::load(twiddle, 2);
+      C tw0 = ctwiddle[0];
+      C tw1 = ctwiddle[1];
+      C tw2 = ctwiddle[2];
 
       {
-        C mul0 =       C::load(data, 0);
-        C mul1 = tw0 * C::load(data, l2);
-        C mul2 = tw1 * C::load(data, l4);
-        C mul3 = tw2 * C::load(data, l6);
+        C mul0 =       csrc[0];
+        C mul1 = tw0 * csrc[l2];
+        C mul2 = tw1 * csrc[l4];
+        C mul3 = tw2 * csrc[l6];
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -916,10 +948,10 @@ FORCEINLINE void last_three_passes_impl(
       }
 
       {
-        C mul0 =       C::load(data, l1);
-        C mul1 = tw0 * C::load(data, l3);
-        C mul2 = tw1 * C::load(data, l5);
-        C mul3 = tw2 * C::load(data, l7);
+        C mul0 =       csrc[l1];
+        C mul1 = tw0 * csrc[l3];
+        C mul2 = tw1 * csrc[l5];
+        C mul3 = tw2 * csrc[l7];
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -934,36 +966,37 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw3 = C::load(twiddle, 3);
-      C tw4 = C::load(twiddle, 4);
+      C tw3 = ctwiddle[3];
+      C tw4 = ctwiddle[4];
       {
         auto mul = tw3 * a4;
-        (a0 + mul).store(data, 0);
-        (a0 - mul).store(data, l4);
+        (a0 + mul).store(dst, 0);
+        (a0 - mul).store(dst, l4);
       }
 
       {
         auto mul = tw4 * a5;
-        (a1 + mul).store(data, l1);
-        (a1 - mul).store(data, l5);
+        (a1 + mul).store(dst, l1);
+        (a1 - mul).store(dst, l5);
       }
 
       {
         auto mul = tw3.mul_neg_i() * a6;
-        (a2 + mul).store(data, l2);
-        (a2 - mul).store(data, l6);
+        (a2 + mul).store(dst, l2);
+        (a2 - mul).store(dst, l6);
       }
 
       {
         auto mul = tw4.mul_neg_i() * a7;
-        (a3 + mul).store(data, l3);
-        (a3 - mul).store(data, l7);
+        (a3 + mul).store(dst, l3);
+        (a3 - mul).store(dst, l7);
       }
     }
 
-    data += 1;
+    csrc += 1;
+    dst += 1;
     twiddle += 5;
-    if(data.re == end) break;
+    if(csrc == end) break;
   }
 }
 
@@ -985,9 +1018,11 @@ void last_three_passes_vec(const Arg<typename V::T>& arg)
   last_three_passes_impl(
     arg.n / V::vec_size,
     (ComplexPtrs<Vec>&) arg.src,
-    (ComplexPtrs<Vec>&) arg.twiddle);
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
 }
 
+#if 0
 template<typename V>
 void four_passes_vec(const Arg<typename V::T>& arg)
 {
@@ -998,6 +1033,7 @@ void four_passes_vec(const Arg<typename V::T>& arg)
     (ComplexPtrs<Vec>&) arg.twiddle,
     (ComplexPtrs<Vec>&) arg.dst);
 }
+#endif
 
 template<typename V, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
@@ -1006,7 +1042,8 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
   last_three_passes_impl(
     n / V::vec_size,
     (ComplexPtrs<Vec>&) arg.src,
-    (ComplexPtrs<Vec>&) arg.twiddle);
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
 }
 
 template<typename V>
@@ -1027,8 +1064,8 @@ void init_steps(State<typename V::T>& state)
           step.fun_ptr = &last_three_passes_vec_ct_size<V, V::vec_size * 8>;
         else
           step.fun_ptr = &last_three_passes_vec<V>;
+
         step.npasses = 3;
-        step.out_of_place = false;
       }
       /*else if(dft_size * 16 <= state.n)
       {
