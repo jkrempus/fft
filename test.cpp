@@ -557,8 +557,8 @@ void swap(T& a, T& b)
 extern "C" int sprintf(char* s, const char* fmt, ...);
 template<typename T_> void dump(T_* ptr, Int n, const char* name, ...);
 
-template<typename T> T min(T a, T b){ a < b ? a : b; }
-template<typename T> T max(T a, T b){ a > b ? a : b; }
+template<typename T> T min(T a, T b){ return a < b ? a : b; }
+template<typename T> T max(T a, T b){ return a > b ? a : b; }
 
 template<typename T>
 FORCEINLINE T cmul_re(T a_re, T a_im, T b_re, T b_im)
@@ -876,62 +876,113 @@ Int compact_index(Int i, Int log2stride)
     return i;
 }
 
+Int to_strided_index(
+  Int i, Int n, Int nchunks, Int chunk_size, Int dft_size, Int npasses,
+  Int offset)
+{
+  if(chunk_size < dft_size)
+  {
+    Int ichunk = i / chunk_size;
+    Int chunk_offset = i % chunk_size;
+
+    Int dft_size_mul = 1 << npasses;
+    Int ifinal_dft = ichunk / dft_size_mul;
+    Int final_dft_offset = ichunk % dft_size_mul;
+
+    Int final_dft_stride = n / (nchunks / dft_size_mul);
+
+    Int offset0 = offset / dft_size;
+    Int offset1 = offset % dft_size;
+
+    return
+      ifinal_dft * final_dft_stride +
+      final_dft_offset * dft_size +
+      (dft_size_mul * dft_size) * offset0 +
+      chunk_offset + offset1;
+  }
+  else
+  {
+    Int contiguous_size = max(dft_size, chunk_size) << npasses;
+
+    Int icontiguous = i / contiguous_size;
+    Int contiguous_offset = i % contiguous_size;
+
+    Int stride = n / (nchunks * chunk_size / contiguous_size);
+
+    return
+      icontiguous * stride +
+      contiguous_offset +
+      offset / chunk_size * contiguous_size;
+  }
+}
+
+
 template<
+  Int npasses,
   Int chunk_size,
-  bool compact_src = false,
-  bool compact_dst = false,
+  bool strided_src,
+  bool strided_dst,
   typename T>
 FORCEINLINE void two_passes_strided_impl(
-  Int n, Int dft_size,
-  Int stride,
+  Int n,
+  Int nchunks,
+  Int initial_dft_size,
   Int offset,
-  Complex<T>* src0,
+  Complex<T>* src,
   Complex<T>* twiddle_start,
-  Complex<T>* dst0)
+  Complex<T>* dst)
 {
+  //printf("npasses %d offset %d\n", npasses, offset);
   typedef Complex<T> C;
-  
-  Int l = n / 4;
-  Int l2s = log2(stride);
+ 
+  Int l = nchunks * chunk_size / 4;
+  Int dft_size = initial_dft_size << npasses;
+  Int m = min(initial_dft_size, chunk_size) << npasses;
 
-  auto compact_l = compact_index<compact_src, chunk_size>(l, l2s);
-  auto src1 = src0 + compact_l;
-  auto src2 = src1 + compact_l;
-  auto src3 = src2 + compact_l;
+  C* twiddle = twiddle_start + n - 4 * dft_size;
 
-  auto compact_dft_size = compact_index<compact_src, 4 * chunk_size>(
-    dft_size, l2s + 2);
+  Int sstride =
+    strided_src ?
+      to_strided_index(
+        l, n, nchunks, chunk_size, initial_dft_size, npasses, offset) -
+      to_strided_index(
+        0, n, nchunks, chunk_size, initial_dft_size, npasses, offset) 
+    : l;
 
-  auto dst1 = dst0 + compact_dft_size;
-  auto dst2 = dst1 + compact_dft_size;
-  auto dst3 = dst2 + compact_dft_size;
+  Int dstride =
+    strided_dst ?
+      to_strided_index(
+        m, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset) -
+      to_strided_index(
+        0, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset) 
+    : m;
 
-  printf("log2stride %d chunk_size %d\n", l2s, chunk_size);
-  printf("compact_l %d\n", compact_l);
-  printf("dft_size %d compact_dft_size %d\n", dft_size, compact_dft_size);
+  for(Int i = 0; i < l; i += m)
+  {
+    Int s = i;
+    Int d = 4 * i;
 
-  auto twiddle = twiddle_start + n - 4 * dft_size;
+    if(strided_src)
+      s = to_strided_index(
+        s, n, nchunks, chunk_size, initial_dft_size, npasses, offset);
 
-  Int lo_mask = dft_size - 1;
+    if(strided_dst)
+      d = to_strided_index(
+        d, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset);
 
-  for(Int j = offset; j < l + offset; j += stride)
-    for(Int i = j; i < j + chunk_size; i++)
+    for(Int j = 0; j < m; j++)
     {
-      Int remainder = i & lo_mask;
-      Int multiple = i & ~lo_mask;
-      Int isrc = compact_index<compact_src, chunk_size>(i, l2s);
-      Int idst = compact_index<compact_dst, 4 * chunk_size>(
-        multiple * 4 + remainder, l2s + 2);
-
-      printf("%d%d isrc %d idst %d compact_idst %d\n",
-             compact_src, compact_dst, isrc, multiple * 4 + remainder, idst);
-
-      Int itwiddle = remainder * 3;
+      auto tw = twiddle + 3 * (s & (dft_size - 1));
+      
       two_passes_inner(
-        src0[isrc], src1[isrc], src2[isrc], src3[isrc],
-        dst0[idst], dst1[idst], dst2[idst], dst3[idst],
-        twiddle[itwiddle + 0], twiddle[itwiddle + 1], twiddle[itwiddle + 2]);
+        src[s], src[s + sstride], src[s + 2 * sstride], src[s + 3 * sstride],
+        dst[d], dst[d + dstride], dst[d + 2 * dstride], dst[d + 3 * dstride],
+        tw[0], tw[1], tw[2]);
+
+      s++;
+      d++;
     }
+  }
 }
 
 template<typename T>
@@ -969,16 +1020,17 @@ FORCEINLINE void four_passes_impl(
   const Int nchunks = 16;
   Int stride = n / nchunks;
   C working[chunk_size * nchunks];
-  printf("\n\n\nn %d nstrided %d\n", n, sizeof(working) / sizeof(working[0]));
+  //printf("\n\n\nn %d nstrided %d\n", n, sizeof(working) / sizeof(working[0]));
 
-  for(Int i = 0; i < stride; i += chunk_size)
+  for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-    two_passes_strided_impl<chunk_size, false, true>(
-      n, dft_size, stride, i, src, twiddle, working);
+    two_passes_strided_impl<0, chunk_size, true, false>(
+      n, nchunks, dft_size, offset, src, twiddle, working);
 
-    two_passes_strided_impl<chunk_size * 4, true, false>(
-      n, 4 * dft_size, stride * 4, 4 * i, working, twiddle, dst);
+    two_passes_strided_impl<2, chunk_size, false, true>(
+      n, nchunks, dft_size, offset, working, twiddle, dst);
   }
+
 #else
   C working[128];
   two_passes_impl(n, dft_size, src, twiddle, working);
@@ -1348,7 +1400,7 @@ int main(int argc, char** argv)
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
-  //for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
+  for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
     fft<V>(state, src, dst);
 
   printf("time %f\n", get_time() - t);
