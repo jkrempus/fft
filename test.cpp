@@ -496,6 +496,8 @@ void init_twiddle(State<typename V::T>& state)
       for(Int i = 0; i < 4 * vdft_size; i++)
         store_two_pass_twiddle(src_row2[i], dst_row2 + 3 * i);
     }
+    else
+      copy((Vec*) state.working, vn, (Vec*) dst);
 
     dft_size <<= step.npasses;
   }
