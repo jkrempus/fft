@@ -969,7 +969,7 @@ FORCEINLINE void two_passes_strided_impl(
       if(strided_src) s = ss;
       if(strided_dst) d = sd; 
 
-      auto tw = twiddle + 3 * (s & (dft_size - 1));
+      auto tw = twiddle + 3 * (ss & (dft_size - 1));
     
 #if 0  
       printf("%-4d%-4d%-4d%-4d    %-4d%-4d%-4d%-4d\n",
