@@ -949,10 +949,6 @@ FORCEINLINE void two_passes_strided_impl(
         0, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset) 
     : m;
 
-  printf(
-    "dft_size %d n %d npasses %d offset %d l %d m %d sstride %d dstride %d\n",
-    dft_size, n, npasses, offset, l, m, sstride, dstride);
-
   for(Int i = 0; i < l; i += m)
   {
     for(Int j = 0; j < m; j++)
@@ -971,12 +967,6 @@ FORCEINLINE void two_passes_strided_impl(
 
       auto tw = twiddle + 3 * (ss & (dft_size - 1));
     
-#if 0  
-      printf("%-4d%-4d%-4d%-4d    %-4d%-4d%-4d%-4d\n",
-             s, s + sstride, s + 2 * sstride, s + 3 * sstride,
-             d, d + dstride, d + 2 * dstride, d + 3 * dstride);
-#endif
-
       two_passes_inner(
         src[s], src[s + sstride], src[s + 2 * sstride], src[s + 3 * sstride],
         dst[d], dst[d + dstride], dst[d + 2 * dstride], dst[d + 3 * dstride],
@@ -1001,35 +991,18 @@ FORCEINLINE void four_passes_impl(
   auto dst = (C*) dst_ptrs.re;
   auto twiddle = (C*) twiddle_ptrs.re;
 
-#if 1
-  const Int chunk_size = 1;
-  //const Int nchunks = 16;
+  const Int chunk_size = 4;
   const Int nchunks = 16;
   Int stride = n / nchunks;
-  //C working[chunk_size * nchunks];
-  C working[1024];
+  C working[chunk_size * nchunks];
 
-#if 0
-  two_passes_impl(n, dft_size, src, twiddle, working);
-#else
   for(Int offset = 0; offset < stride; offset += chunk_size)
-    two_passes_strided_impl<0, chunk_size, true, true>(
+  {
+    two_passes_strided_impl<0, chunk_size, true, false>(
       n, nchunks, dft_size, offset, src, twiddle, working);
-#endif
-
-#if 0
-  two_passes_impl(n, 4 * dft_size, working, twiddle, dst);
-#else
-  for(Int offset = 0; offset < stride; offset += chunk_size)
-    two_passes_strided_impl<2, chunk_size, true, true>(
+    two_passes_strided_impl<2, chunk_size, false, true>(
       n, nchunks, dft_size, offset, working, twiddle, dst);
-#endif
-
-#else
-  C working[1024];
-  two_passes_impl(n, dft_size, src, twiddle, working);
-  two_passes_impl(n, 4 * dft_size, working, twiddle, dst);
-#endif
+  }
 }
 
 template<typename T>
@@ -1198,7 +1171,7 @@ void init_steps(State<typename V::T>& state)
         step.npasses = 3;
       }
 #if 1
-      else if(dft_size > V::vec_size && dft_size * 16 <= state.n)
+      else if(dft_size * 16 <= state.n)
       {
         step.fun_ptr = &four_passes_vec<V>;
         step.npasses = 4;
@@ -1390,7 +1363,7 @@ int main(int argc, char** argv)
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
-  //for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
+  for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
     fft<V>(state, src, dst);
 
   printf("time %f\n", get_time() - t);
