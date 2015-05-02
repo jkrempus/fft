@@ -23,6 +23,7 @@ void print_vec(T a)
 }
 #endif
 
+Int large_fft_size = 1 << 14;
 Int max_vec_size = 8;
 
 Int tiny_log2(Int a)
@@ -1154,12 +1155,12 @@ void init_steps(State<typename V::T>& state)
         step.npasses = 3;
       }
 #if 1
-      else if(dft_size * 16 == state.n)
+      else if(state.n >= large_fft_size && dft_size * 16 == state.n)
       {
         step.fun_ptr = &four_passes<V, ComplexFormat::split>;
         step.npasses = 4;
       }
-      else if(dft_size * 16 < state.n)
+      else if(state.n >= large_fft_size && dft_size * 16 < state.n)
       {
         step.fun_ptr = &four_passes<V, ComplexFormat::vec>;
         step.npasses = 4;
