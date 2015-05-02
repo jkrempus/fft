@@ -427,6 +427,7 @@ template<typename V>
 void init_twiddle(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
+
   auto dst = state.twiddle;
   auto n = state.n;
   auto end_re = dst + n;
@@ -772,9 +773,10 @@ FORCEINLINE void two_passes_impl(
   Int n, Int dft_size,
   Complex<typename V::Vec>* src,
   Complex<typename V::Vec>* twiddle,
-  Typename V::Vec* dst)
+  typename V::Vec* dst)
 {
-  typedef Complex<T> C;
+  VEC_TYPEDEFS(V);
+  typedef Complex<Vec> C;
 
   auto twiddle_row = twiddle + n - 4 * dft_size;
   Int l = n / 4;
@@ -790,7 +792,10 @@ FORCEINLINE void two_passes_impl(
         src[0], src[l], src[2 * l], src[3 * l], d0, d1, d2, d3,
         tw[0], tw[1], tw[2]);
 
-      store_comlplex<
+      store_complex<dst_cf, V>(d0, dst, n);
+      store_complex<dst_cf, V>(d1, dst + m, n);
+      store_complex<dst_cf, V>(d2, dst + 2 * m, n);
+      store_complex<dst_cf, V>(d3, dst + 3 * m, n);
 
       src += 1;
       dst += complex_element_size<dst_cf>();
@@ -1067,15 +1072,15 @@ FORCEINLINE void last_three_passes_impl(
   }
 }
 
-template<typename V>
-void two_passes_vec(const Arg<typename V::T>& arg)
+template<typename V, ComplexFormat dst_cf>
+void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  two_passes_impl(
+  two_passes_impl<V, dst_cf>(
     arg.n / V::vec_size, arg.dft_size / V::vec_size,
     (Complex<Vec>*) arg.src,
     (Complex<Vec>*) arg.twiddle,
-    (Complex<Vec>*) arg.dst);
+    (Vec*) arg.dst);
 }
 
 template<typename V>
@@ -1132,16 +1137,21 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 3;
       }
-#if 0
+#if 1
       else if(dft_size * 16 <= state.n)
       {
         step.fun_ptr = &four_passes_vec<V>;
         step.npasses = 4;
       }
 #endif
-      else if(dft_size * 4 <= state.n)
+      else if(dft_size * 4 == state.n)
       {
-        step.fun_ptr = &two_passes_vec<V>;
+        step.fun_ptr = &two_passes<V, ComplexFormat::split>;
+        step.npasses = 2;
+      }
+      else if(dft_size * 4 < state.n)
+      {
+        step.fun_ptr = &two_passes<V, ComplexFormat::interleaved_vec>;
         step.npasses = 2;
       }
       else
