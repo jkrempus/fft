@@ -627,27 +627,23 @@ void first_two_passes_ct_size(const Arg<typename V::T>& arg)
 }
 
 template<typename V>
-FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
+FORCEINLINE void first_three_passes_impl(
+  Int n,
+  typename V::Vec* src,
+  Complex<typename V::Vec>* dst)
 {
   VEC_TYPEDEFS(V);
-  
-  Int vn = n / V::vec_size;
-  Int l = vn / 8;
-  
+  Int l = n / 8;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
  
-  Vec* s = (Vec*) arg.src;
-
-  auto d = (Complex<Vec>*) arg.dst;
-
-  for(auto end = s + l;;)
+  for(auto end = src + l;;)
   {
     C c0, c1, c2, c3;
     {
-      C a0 = load_complex<ComplexFormat::split, V>(s + 0 * l, vn);
-      C a1 = load_complex<ComplexFormat::split, V>(s + 2 * l, vn);
-      C a2 = load_complex<ComplexFormat::split, V>(s + 4 * l, vn);
-      C a3 = load_complex<ComplexFormat::split, V>(s + 6 * l, vn);
+      C a0 = load_complex<ComplexFormat::split, V>(src + 0 * l, n);
+      C a1 = load_complex<ComplexFormat::split, V>(src + 2 * l, n);
+      C a2 = load_complex<ComplexFormat::split, V>(src + 4 * l, n);
+      C a3 = load_complex<ComplexFormat::split, V>(src + 6 * l, n);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -660,10 +656,10 @@ FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = load_complex<ComplexFormat::split, V>(s + 1 * l, vn);
-      C a1 = load_complex<ComplexFormat::split, V>(s + 3 * l, vn);
-      C a2 = load_complex<ComplexFormat::split, V>(s + 5 * l, vn);
-      C a3 = load_complex<ComplexFormat::split, V>(s + 7 * l, vn);
+      C a0 = load_complex<ComplexFormat::split, V>(src + 1 * l, n);
+      C a1 = load_complex<ComplexFormat::split, V>(src + 3 * l, n);
+      C a2 = load_complex<ComplexFormat::split, V>(src + 5 * l, n);
+      C a3 = load_complex<ComplexFormat::split, V>(src + 7 * l, n);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -679,33 +675,43 @@ FORCEINLINE void first_three_passes_impl(Int n, const Arg<typename V::T>& arg)
       mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
     }
 
-    s++;
+    src++;
 
     V::transpose(
       c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
       c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
-      d[0].re, d[1].re, d[2].re, d[3].re, d[4].re, d[5].re, d[6].re, d[7].re);
+      dst[0].re, dst[1].re, dst[2].re, dst[3].re,
+      dst[4].re, dst[5].re, dst[6].re, dst[7].re);
 
     V::transpose(
       c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
       c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
-      d[0].im, d[1].im, d[2].im, d[3].im, d[4].im, d[5].im, d[6].im, d[7].im);
+      dst[0].im, dst[1].im, dst[2].im, dst[3].im,
+      dst[4].im, dst[5].im, dst[6].im, dst[7].im);
 
-    d += 8;
-    if(s == end) break;
+    dst += 8;
+    if(src == end) break;
   }
 }
 
 template<typename V>
 void first_three_passes(const Arg<typename V::T>& arg)
 {
-  first_three_passes_impl<V>(arg.n, arg);
+  VEC_TYPEDEFS(V);
+  first_three_passes_impl<V>(
+    arg.n / V::vec_size,
+    (Vec*) arg.src,
+    (Complex<Vec>*) arg.dst);
 }
 
 template<typename V, Int n>
 void first_three_passes_ct_size(const Arg<typename V::T>& arg)
 {
-  first_three_passes_impl<V>(n, arg);
+  VEC_TYPEDEFS(V);
+  first_three_passes_impl<V>(
+    n / V::vec_size,
+    (Vec*) arg.src,
+    (Complex<Vec>*) arg.dst);
 }
 
 template<typename V>
@@ -996,6 +1002,34 @@ void four_passes(const Arg<typename V::T>& arg)
   }
 }
 
+#if 0
+template<typename V, ComplexFormat dst_cf>
+void first_five_passes(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  Int n = arg.n / V::vec_size;
+  Int dft_size = arg.dft_size / V::vec_size;
+  auto src = (Complex<Vec>*) arg.src;
+  auto twiddle = (Complex<Vec>*) arg.twiddle;
+  auto dst = (Vec*) arg.dst;
+  
+  typedef Complex<Vec> C;
+
+  const Int chunk_size = 16;
+  const Int nchunks = 16;
+  Int stride = n / nchunks;
+  Vec working[2 * chunk_size * nchunks];
+
+  for(Int offset = 0; offset < stride; offset += chunk_size)
+  {
+    first_three_passes
+    two_passes_strided_impl<3, chunk_size, false, true, dst_cf, V>(
+      n, nchunks, dft_size, offset, (C*) working, twiddle, dst);
+  }
+}
+#endif
+
+
 template<typename V>
 FORCEINLINE void last_three_passes_impl(
   Int n,
@@ -1253,14 +1287,6 @@ void fft(
       arg.src = next_dst;
     }
   }
-
-#if 0
-  deinterleave(
-    (Vec*) arg.src.re,
-    arg.n / V::vec_size,
-    (Vec*) arg.dst.re,
-    (Vec*) arg.dst.im);
-#endif
 }
 
 #include <string>
