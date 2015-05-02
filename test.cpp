@@ -894,17 +894,15 @@ Int to_strided_index(
   }
   else
   {
-    Int contiguous_size = max(dft_size, chunk_size) << npasses;
+    Int contiguous_size = chunk_size << npasses;
 
-    Int icontiguous = i / contiguous_size;
-    Int contiguous_offset = i % contiguous_size;
-
-    Int stride = n / (nchunks * chunk_size / contiguous_size);
+    Int contiguous_multiple = i & ~(contiguous_size - 1);
+    Int contiguous_offset = i & (contiguous_size - 1);
 
     return
-      icontiguous * stride +
+      contiguous_multiple * n / (nchunks * chunk_size) +
       contiguous_offset +
-      offset / chunk_size * contiguous_size;
+      (offset << npasses);
   }
 }
 
@@ -949,31 +947,65 @@ FORCEINLINE void two_passes_strided_impl(
         0, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset) 
     : m;
 
-  for(Int i = 0; i < l; i += m)
+  if(initial_dft_size >= chunk_size)
   {
-    for(Int j = 0; j < m; j++)
+    for(Int i = 0; i < l; i += m)
     {
-      Int s = i + j;
-      Int d = 4 * i + j;
+      for(Int j = 0; j < m; j += chunk_size)
+      {
+        Int s = i + j;
+        Int d = 4 * i + j;
 
-      Int ss = to_strided_index(
-        s, n, nchunks, chunk_size, initial_dft_size, npasses, offset);
+        Int ss = to_strided_index(
+          s, n, nchunks, chunk_size, initial_dft_size, npasses, offset);
 
-      Int sd = to_strided_index(
-        d, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset);
+        Int sd = to_strided_index(
+          d, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset);
 
-      if(strided_src) s = ss;
-      if(strided_dst) d = sd; 
+        if(strided_src) s = ss;
+        if(strided_dst) d = sd; 
 
-      auto tw = twiddle + 3 * (ss & (dft_size - 1));
-    
-      two_passes_inner(
-        src[s], src[s + sstride], src[s + 2 * sstride], src[s + 3 * sstride],
-        dst[d], dst[d + dstride], dst[d + 2 * dstride], dst[d + 3 * dstride],
-        tw[0], tw[1], tw[2]);
+        for(Int k = 0; k < chunk_size; k++)
+        {
+          auto tw = twiddle + 3 * (ss & (dft_size - 1));
+        
+          two_passes_inner(
+            src[s], src[s + sstride], src[s + 2 * sstride], src[s + 3 * sstride],
+            dst[d], dst[d + dstride], dst[d + 2 * dstride], dst[d + 3 * dstride],
+            tw[0], tw[1], tw[2]);
 
-      s++;
-      d++;
+          s += 1;
+          d += 1;
+          ss += 1;
+        }
+      }
+    }
+  }
+  else
+  {
+    for(Int i = 0; i < l; i += m)
+    {
+      for(Int j = 0; j < m; j++)
+      {
+        Int s = i + j;
+        Int d = 4 * i + j;
+
+        Int ss = to_strided_index(
+          s, n, nchunks, chunk_size, initial_dft_size, npasses, offset);
+
+        Int sd = to_strided_index(
+          d, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset);
+
+        if(strided_src) s = ss;
+        if(strided_dst) d = sd; 
+
+        auto tw = twiddle + 3 * (ss & (dft_size - 1));
+      
+        two_passes_inner(
+          src[s], src[s + sstride], src[s + 2 * sstride], src[s + 3 * sstride],
+          dst[d], dst[d + dstride], dst[d + 2 * dstride], dst[d + 3 * dstride],
+          tw[0], tw[1], tw[2]);
+      }
     }
   }
 }
@@ -991,7 +1023,7 @@ FORCEINLINE void four_passes_impl(
   auto dst = (C*) dst_ptrs.re;
   auto twiddle = (C*) twiddle_ptrs.re;
 
-  const Int chunk_size = 4;
+  const Int chunk_size = 16;
   const Int nchunks = 16;
   Int stride = n / nchunks;
   C working[chunk_size * nchunks];
