@@ -101,16 +101,16 @@ struct Complex
   }
 };
 
-enum class ComplexFormat { split, interleaved, interleaved_vec };
+enum class ComplexFormat { split, scalar, vec };
 
 template<ComplexFormat cf, typename V>
 FORCEINLINE Complex<typename V::Vec> load_complex(typename V::Vec* ptr, Int n)
 {
   if(cf == ComplexFormat::split)
     return {ptr[0], ptr[n]};
-  else if(cf == ComplexFormat::interleaved_vec)
+  else if(cf == ComplexFormat::vec)
     return {ptr[0], ptr[1]};
-  else if (cf == ComplexFormat::interleaved)
+  else if (cf == ComplexFormat::scalar)
     ASSERT(0); //TODO
 }
 
@@ -122,12 +122,12 @@ void store_complex(Complex<typename V::Vec> a, typename V::Vec* ptr, Int n)
     ptr[0] = a.re;
     ptr[n] = a.im;
   }
-  else if(cf == ComplexFormat::interleaved_vec)
+  else if(cf == ComplexFormat::vec)
   {
     ptr[0] = a.re;
     ptr[1] = a.im;
   }
-  else if (cf == ComplexFormat::interleaved)
+  else if (cf == ComplexFormat::scalar)
     ASSERT(0); //TODO
 }
 
@@ -136,9 +136,9 @@ FORCEINLINE Int complex_element_size()
 {
   if(cf == ComplexFormat::split)
     return 1;
-  else if(cf == ComplexFormat::interleaved_vec)
+  else if(cf == ComplexFormat::vec)
     return 2;
-  else if (cf == ComplexFormat::interleaved)
+  else if (cf == ComplexFormat::scalar)
     return 2;
 }
 
@@ -847,20 +847,22 @@ template<
   Int chunk_size,
   bool src_is_strided,
   bool dst_is_strided,
-  typename T>
+  ComplexFormat dst_cf,
+  typename V>
 FORCEINLINE void two_passes_strided_impl(
   Int n,
   Int nchunks,
   Int initial_dft_size,
   Int offset,
-  Complex<T>* src0,
-  Complex<T>* twiddle_start,
-  Complex<T>* dst0)
+  Complex<typename V::Vec>* src0,
+  Complex<typename V::Vec>* twiddle_start,
+  typename V::Vec* dst0)
 {
+  VEC_TYPEDEFS(V);
   namespace im = index_mapping;
 
   //printf("npasses %d offset %d\n", npasses, offset);
-  typedef Complex<T> C;
+  typedef Complex<Vec> C;
  
   Int l = nchunks * chunk_size / 4;
   Int dft_size = initial_dft_size << npasses;
@@ -887,9 +889,10 @@ FORCEINLINE void two_passes_strided_impl(
   C* src2 = src1 + sstride;
   C* src3 = src2 + sstride;
   
-  C* dst1 = dst0 + dstride;
-  C* dst2 = dst1 + dstride;
-  C* dst3 = dst2 + dstride;
+  const Int dst_elem_size = complex_element_size<dst_cf>();
+  Vec* dst1 = dst0 + dstride * dst_elem_size;
+  Vec* dst2 = dst1 + dstride * dst_elem_size;
+  Vec* dst3 = dst2 + dstride * dst_elem_size;
 
   if(is_large)
     for(Int i = 0; i < l; i += m)
@@ -911,10 +914,16 @@ FORCEINLINE void two_passes_strided_impl(
         for(Int k = 0; k < chunk_size; k++)
         {
           auto tw = twiddle + 3 * (strided_s & (dft_size - 1));
-        
+       
+          C d0, d1, d2, d3; 
           two_passes_inner(
-            src0[s], src1[s], src2[s], src3[s], dst0[d], dst1[d], dst2[d], dst3[d],
+            src0[s], src1[s], src2[s], src3[s], d0, d1, d2, d3,
             tw[0], tw[1], tw[2]);
+
+          store_complex<dst_cf, V>(d0, dst0 + d * dst_elem_size, n);  
+          store_complex<dst_cf, V>(d1, dst1 + d * dst_elem_size, n);  
+          store_complex<dst_cf, V>(d2, dst2 + d * dst_elem_size, n);  
+          store_complex<dst_cf, V>(d3, dst3 + d * dst_elem_size, n);  
 
           s += 1;
           d += 1;
@@ -941,9 +950,15 @@ FORCEINLINE void two_passes_strided_impl(
       {
         auto tw = twiddle + 3 * (strided_s & (dft_size - 1));
 
+        C d0, d1, d2, d3; 
         two_passes_inner(
-          src0[s], src1[s], src2[s], src3[s], dst0[d], dst1[d], dst2[d], dst3[d],
+          src0[s], src1[s], src2[s], src3[s], d0, d1, d2, d3,
           tw[0], tw[1], tw[2]);
+
+        store_complex<dst_cf, V>(d0, dst0 + d * dst_elem_size, n);  
+        store_complex<dst_cf, V>(d1, dst1 + d * dst_elem_size, n);  
+        store_complex<dst_cf, V>(d2, dst2 + d * dst_elem_size, n);  
+        store_complex<dst_cf, V>(d3, dst3 + d * dst_elem_size, n);  
 
         s++;
         d++;
@@ -952,26 +967,27 @@ FORCEINLINE void two_passes_strided_impl(
     }
 }
 
-template<typename T>
+template<typename V, ComplexFormat dst_cf>
 FORCEINLINE void four_passes_impl(
   Int n, Int dft_size,
-  Complex<T>* src,
-  Complex<T>* twiddle,
-  Complex<T>* dst)
+  Complex<typename V::Vec>* src,
+  Complex<typename V::Vec>* twiddle,
+  typename V::Vec* dst)
 {
-  typedef Complex<T> C;
+  VEC_TYPEDEFS(V);
+  typedef Complex<Vec> C;
 
   const Int chunk_size = 16;
   const Int nchunks = 16;
   Int stride = n / nchunks;
-  C working[chunk_size * nchunks];
+  Vec working[2 * chunk_size * nchunks];
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-    two_passes_strided_impl<0, chunk_size, true, false>(
+    two_passes_strided_impl<0, chunk_size, true, false, ComplexFormat::vec, V>(
       n, nchunks, dft_size, offset, src, twiddle, working);
-    two_passes_strided_impl<2, chunk_size, false, true>(
-      n, nchunks, dft_size, offset, working, twiddle, dst);
+    two_passes_strided_impl<2, chunk_size, false, true, dst_cf, V>(
+      n, nchunks, dft_size, offset, (C*) working, twiddle, dst);
   }
 }
 
@@ -1105,15 +1121,15 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
     (Vec*) arg.dst);
 }
 
-template<typename V>
-void four_passes_vec(const Arg<typename V::T>& arg)
+template<typename V, ComplexFormat dst_cf>
+void four_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  four_passes_impl(
+  four_passes_impl<V, dst_cf>(
     arg.n / V::vec_size, arg.dft_size / V::vec_size,
     (Complex<Vec>*) arg.src,
     (Complex<Vec>*) arg.twiddle,
-    (Complex<Vec>*) arg.dst);
+    (Vec*) arg.dst);
 }
 
 template<typename V>
@@ -1138,9 +1154,14 @@ void init_steps(State<typename V::T>& state)
         step.npasses = 3;
       }
 #if 1
-      else if(dft_size * 16 <= state.n)
+      else if(dft_size * 16 == state.n)
       {
-        step.fun_ptr = &four_passes_vec<V>;
+        step.fun_ptr = &four_passes<V, ComplexFormat::split>;
+        step.npasses = 4;
+      }
+      else if(dft_size * 16 < state.n)
+      {
+        step.fun_ptr = &four_passes<V, ComplexFormat::vec>;
         step.npasses = 4;
       }
 #endif
@@ -1151,7 +1172,7 @@ void init_steps(State<typename V::T>& state)
       }
       else if(dft_size * 4 < state.n)
       {
-        step.fun_ptr = &two_passes<V, ComplexFormat::interleaved_vec>;
+        step.fun_ptr = &two_passes<V, ComplexFormat::vec>;
         step.npasses = 2;
       }
       else
@@ -1193,11 +1214,11 @@ void init_steps(State<typename V::T>& state)
       if(V::vec_size > 1 && dft_size == 1)
         step.fun_ptr = &ct_dft_size_pass<V, 1, ComplexFormat::split>;
       else if(V::vec_size > 2 && dft_size == 2)
-        step.fun_ptr = &ct_dft_size_pass<V, 2, ComplexFormat::interleaved_vec>;
+        step.fun_ptr = &ct_dft_size_pass<V, 2, ComplexFormat::vec>;
       else if(V::vec_size > 4 && dft_size == 4)
-        step.fun_ptr = &ct_dft_size_pass<V, 4, ComplexFormat::interleaved_vec>;
+        step.fun_ptr = &ct_dft_size_pass<V, 4, ComplexFormat::vec>;
       else if(V::vec_size > 8 && dft_size == 8)
-        step.fun_ptr = &ct_dft_size_pass<V, 8, ComplexFormat::interleaved_vec>;
+        step.fun_ptr = &ct_dft_size_pass<V, 8, ComplexFormat::vec>;
 
       step.npasses = 1;
     }
