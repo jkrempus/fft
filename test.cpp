@@ -123,9 +123,6 @@ struct Complex
   }
 };
 
-const Int max_passes_per_copy = 5;
-const Int copy_chunk_size = 8;
-
 template<typename T>
 struct Arg
 {
@@ -760,23 +757,20 @@ void first_three_passes_ct_size(const Arg<typename V::T>& arg)
 template<typename T>
 FORCEINLINE void last_pass_impl(
   Int dft_size,
-  ComplexPtrs<T> data,
-  ComplexPtrs<T> twiddle)
+  ComplexPtrs<T> src_ptrs,
+  ComplexPtrs<T> twiddle_ptrs,
+  ComplexPtrs<T> dst)
 {
+  typedef Complex<T> C;
+  auto src = (C*) src_ptrs.re;
+  auto twiddle = (C*) twiddle_ptrs.re;
+
   for(Int i0 = 0, i1 = dft_size; i0 < dft_size; i0++, i1++)
   {
-    T tw_re = twiddle.re[i0];
-    T tw_im = twiddle.im[i0];
-    T re0 = data.re[i0];
-    T im0 = data.im[i0];
-    T re1 = data.re[i1];
-    T im1 = data.im[i1];
-    T mul_re = tw_re * re1 - tw_im * im1;
-    T mul_im = tw_re * im1 + tw_im * re1;
-    data.re[i0] = re0 + mul_re;
-    data.re[i1] = re0 - mul_re;
-    data.im[i0] = im0 + mul_im;
-    data.im[i1] = im0 - mul_im;
+    C a = src[i0];
+    C mul = src[i1] * twiddle[i0];
+    (a + mul).store(dst, i0);
+    (a - mul).store(dst, i1);
   }
 }
 
@@ -787,7 +781,8 @@ void last_pass_vec(const Arg<typename V::T>& arg)
   last_pass_impl(
     arg.n / V::vec_size / 2,
     (ComplexPtrs<Vec>&) arg.src,
-    (ComplexPtrs<Vec>&) arg.twiddle);
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
 }
 
 template<typename V, Int n>
@@ -797,7 +792,8 @@ void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
   last_pass_impl(
     n / V::vec_size / 2,
     (ComplexPtrs<Vec>&) arg.src,
-    (ComplexPtrs<Vec>&) arg.twiddle);
+    (ComplexPtrs<Vec>&) arg.twiddle,
+    (ComplexPtrs<Vec>&) arg.dst);
 }
 
 template<typename T>
@@ -835,11 +831,20 @@ FORCEINLINE void two_passes_impl(
   auto twiddle_row = twiddle + n - 4 * dft_size;
   Int l = n / 4;
 
+  Int s = 0;
+  Int d = 0;
+
+  if(dft_size == 16) printf("two_passes_impl\n");
   for(C* end = src + l; src < end;)
   {
     auto tw = twiddle_row;
     for(C* end1 = src + dft_size;;)
     {
+      if(dft_size == 16)
+        printf("%-4d%-4d%-4d%-4d    %-4d%-4d%-4d%-4d\n",
+               s, s + l, s + 2 * l, s + 3 * l,
+               d, d + dft_size, d + 2 * dft_size, d + 3 * dft_size);
+
       two_passes_inner(
         src[0], src[l], src[2 * l], src[3 * l],
         dst[0], dst[dft_size], dst[2 * dft_size], dst[3 * dft_size],
@@ -847,10 +852,13 @@ FORCEINLINE void two_passes_impl(
 
       src += 1;
       dst += 1;
+      s++;
+      d++;
       tw += 3;
       if(!(src < end1)) break;
     }
 
+    d += 3 * dft_size;
     dst += 3 * dft_size;
   }
 }
@@ -867,15 +875,6 @@ Int log2(Int a)
   return r;
 }
 
-template<bool enabled, Int chunk_size>
-Int compact_index(Int i, Int log2stride)
-{
-  if(enabled)
-    return (i >> log2stride) * chunk_size + (i & (chunk_size - 1));
-  else
-    return i;
-}
-
 Int to_strided_index(
   Int i, Int n, Int nchunks, Int chunk_size, Int dft_size, Int npasses,
   Int offset)
@@ -884,21 +883,14 @@ Int to_strided_index(
   {
     Int ichunk = i / chunk_size;
     Int chunk_offset = i % chunk_size;
-
     Int dft_size_mul = 1 << npasses;
-    Int ifinal_dft = ichunk / dft_size_mul;
-    Int final_dft_offset = ichunk % dft_size_mul;
-
-    Int final_dft_stride = n / (nchunks / dft_size_mul);
-
-    Int offset0 = offset / dft_size;
-    Int offset1 = offset % dft_size;
 
     return
-      ifinal_dft * final_dft_stride +
-      final_dft_offset * dft_size +
-      (dft_size_mul * dft_size) * offset0 +
-      chunk_offset + offset1;
+      (ichunk & ~(dft_size_mul - 1)) * n / nchunks +
+      (ichunk & (dft_size_mul - 1)) * dft_size +
+      chunk_offset +
+      dft_size_mul * (offset & ~(dft_size - 1)) +
+      (offset & (dft_size - 1));
   }
   else
   {
@@ -957,23 +949,34 @@ FORCEINLINE void two_passes_strided_impl(
         0, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset) 
     : m;
 
+  printf(
+    "dft_size %d n %d npasses %d offset %d l %d m %d sstride %d dstride %d\n",
+    dft_size, n, npasses, offset, l, m, sstride, dstride);
+
   for(Int i = 0; i < l; i += m)
   {
-    Int s = i;
-    Int d = 4 * i;
-
-    if(strided_src)
-      s = to_strided_index(
-        s, n, nchunks, chunk_size, initial_dft_size, npasses, offset);
-
-    if(strided_dst)
-      d = to_strided_index(
-        d, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset);
-
     for(Int j = 0; j < m; j++)
     {
+      Int s = i + j;
+      Int d = 4 * i + j;
+
+      Int ss = to_strided_index(
+        s, n, nchunks, chunk_size, initial_dft_size, npasses, offset);
+
+      Int sd = to_strided_index(
+        d, n, nchunks, chunk_size, initial_dft_size, npasses + 2, offset);
+
+      if(strided_src) s = ss;
+      if(strided_dst) d = sd; 
+
       auto tw = twiddle + 3 * (s & (dft_size - 1));
-      
+    
+#if 0  
+      printf("%-4d%-4d%-4d%-4d    %-4d%-4d%-4d%-4d\n",
+             s, s + sstride, s + 2 * sstride, s + 3 * sstride,
+             d, d + dstride, d + 2 * dstride, d + 3 * dstride);
+#endif
+
       two_passes_inner(
         src[s], src[s + sstride], src[s + 2 * sstride], src[s + 3 * sstride],
         dst[d], dst[d + dstride], dst[d + 2 * dstride], dst[d + 3 * dstride],
@@ -983,23 +986,6 @@ FORCEINLINE void two_passes_strided_impl(
       d++;
     }
   }
-}
-
-template<typename T>
-FORCEINLINE void two_passes_strided_wrapper(
-  Int n, Int dft_size,
-  ComplexPtrs<T> src,
-  ComplexPtrs<T> twiddle,
-  ComplexPtrs<T> dst)
-{
-  const Int chunk_size = 16;
-  Int stride = n / 16;
-  for(Int i = 0; i < stride; i += chunk_size)
-    two_passes_strided_impl<chunk_size>(
-      n, dft_size, stride, i,
-      ((Complex<T>*) src.re),
-      ((Complex<T>*) twiddle.re),
-      ((Complex<T>*) dst.re));
 }
 
 template<typename T>
@@ -1016,23 +1002,31 @@ FORCEINLINE void four_passes_impl(
   auto twiddle = (C*) twiddle_ptrs.re;
 
 #if 1
-  const Int chunk_size = 4;
+  const Int chunk_size = 1;
+  //const Int nchunks = 16;
   const Int nchunks = 16;
   Int stride = n / nchunks;
-  C working[chunk_size * nchunks];
-  //printf("\n\n\nn %d nstrided %d\n", n, sizeof(working) / sizeof(working[0]));
+  //C working[chunk_size * nchunks];
+  C working[1024];
 
+#if 0
+  two_passes_impl(n, dft_size, src, twiddle, working);
+#else
   for(Int offset = 0; offset < stride; offset += chunk_size)
-  {
-    two_passes_strided_impl<0, chunk_size, true, false>(
+    two_passes_strided_impl<0, chunk_size, true, true>(
       n, nchunks, dft_size, offset, src, twiddle, working);
+#endif
 
-    two_passes_strided_impl<2, chunk_size, false, true>(
+#if 0
+  two_passes_impl(n, 4 * dft_size, working, twiddle, dst);
+#else
+  for(Int offset = 0; offset < stride; offset += chunk_size)
+    two_passes_strided_impl<2, chunk_size, true, true>(
       n, nchunks, dft_size, offset, working, twiddle, dst);
-  }
+#endif
 
 #else
-  C working[128];
+  C working[1024];
   two_passes_impl(n, dft_size, src, twiddle, working);
   two_passes_impl(n, 4 * dft_size, working, twiddle, dst);
 #endif
@@ -1150,17 +1144,6 @@ void two_passes_vec(const Arg<typename V::T>& arg)
 }
 
 template<typename V>
-void two_passes_strided_vec(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  two_passes_strided_wrapper(
-    arg.n / V::vec_size, arg.dft_size / V::vec_size,
-    (ComplexPtrs<Vec>&) arg.src,
-    (ComplexPtrs<Vec>&) arg.twiddle,
-    (ComplexPtrs<Vec>&) arg.dst);
-}
-
-template<typename V>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
@@ -1215,7 +1198,7 @@ void init_steps(State<typename V::T>& state)
         step.npasses = 3;
       }
 #if 1
-      else if(dft_size * 16 <= state.n)
+      else if(dft_size > V::vec_size && dft_size * 16 <= state.n)
       {
         step.fun_ptr = &four_passes_vec<V>;
         step.npasses = 4;
@@ -1238,7 +1221,6 @@ void init_steps(State<typename V::T>& state)
           step.fun_ptr = &last_pass_vec<V>;
 
         step.npasses = 1;
-        step.out_of_place = false;
       }
     }
     else if(dft_size == 1 && state.n >= 8 * V::vec_size)
@@ -1321,6 +1303,14 @@ void fft(
       arg.src = next_dst;
     }
   }
+
+#if 0
+  deinterleave(
+    (Vec*) arg.src.re,
+    arg.n / V::vec_size,
+    (Vec*) arg.dst.re,
+    (Vec*) arg.dst.im);
+#endif
 }
 
 #include <string>
@@ -1400,7 +1390,7 @@ int main(int argc, char** argv)
   dump(src.im, n, "src_im.float32");
 
   double t = get_time();
-  for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
+  //for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
     fft<V>(state, src, dst);
 
   printf("time %f\n", get_time() - t);

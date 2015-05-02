@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstdlib>
 #include <algorithm>
 #include <vector>
 
@@ -15,27 +16,18 @@ Int to_strided_index(
   {
     Int ichunk = i / chunk_size;
     Int chunk_offset = i % chunk_size;
-
     Int dft_size_mul = 1 << npasses;
-    Int ifinal_dft = ichunk / dft_size_mul;
-    Int final_dft_offset = ichunk % dft_size_mul;
-
-    Int final_dft_stride = n / (nchunks / dft_size_mul);
-
-    Int offset0 = offset / dft_size;
-    Int offset1 = offset % dft_size;
 
     return
-      ifinal_dft * final_dft_stride +
-      final_dft_offset * dft_size +
-      (dft_size_mul * dft_size) * offset0 +
-      chunk_offset + offset1;
+      (ichunk & ~(dft_size_mul - 1)) * n / nchunks +
+      (ichunk & (dft_size_mul - 1)) * dft_size +
+      chunk_offset +
+      dft_size_mul * (offset & ~(dft_size - 1)) +
+      (offset & (dft_size - 1));
   }
   else
   {
-    Int dft_size_mul = 1 << npasses;
-    Int current_dft_size = dft_size << npasses;
-    Int contiguous_size = max(dft_size, chunk_size) << npasses;
+    Int contiguous_size = chunk_size << npasses;
 
     Int icontiguous = i / contiguous_size;
     Int contiguous_offset = i % contiguous_size;
@@ -99,17 +91,17 @@ void pnm_vertical_stripes(FILE* f, bool* data, Int len)
       fprintf(f, "%d ", data[j]);
 }
 
-int main()
+int main(int argc, const char** argv)
 {
-  Int n = 1 << 11;
+  Int n = 1 << 6;
   bool* a = new bool[n];
   std::fill_n(a, n, 0);
 
   Int nchunks = 16;
-  Int chunk_size = 4;
-  Int dft_size = 16;
+  Int chunk_size = 1;
+  Int dft_size = 4;
   Int npasses = 5;
-  Int offset = 4;
+  Int offset = argc == 1 ? 0 : atoi(argv[1]);
 
   std::vector<Int> mappings;
   index_mappings(n, nchunks, chunk_size, dft_size, npasses, offset, mappings);
@@ -117,9 +109,11 @@ int main()
   {
     for(Int j = 0; j < npasses; j++)
     {
-      printf("%ld\t", mappings[nchunks * chunk_size * j + i]);
-      printf("%ld\t", to_strided_index(
-        i, n, nchunks, chunk_size, dft_size, j, offset));
+      Int a = mappings[nchunks * chunk_size * j + i];
+      Int b = to_strided_index(
+        i, n, nchunks, chunk_size, dft_size, j, offset);
+
+      printf("%ld %ld\t", a, b - a);
     }
 
     printf("\n");
