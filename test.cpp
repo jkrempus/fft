@@ -770,13 +770,15 @@ FORCEINLINE void two_passes_inner(
 }
 
 template<typename V, ComplexFormat dst_cf>
-FORCEINLINE void two_passes_impl(
-  Int n, Int dft_size,
-  Complex<typename V::Vec>* src,
-  Complex<typename V::Vec>* twiddle,
-  typename V::Vec* dst)
+void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
+  Int n = arg.n / V::vec_size;
+  Int dft_size = arg.dft_size / V::vec_size;
+  auto src = (Complex<Vec>*) arg.src;
+  auto twiddle = (Complex<Vec>*) arg.twiddle;
+  auto dst = (Vec*) arg.dst;
+  
   typedef Complex<Vec> C;
 
   auto twiddle_row = twiddle + n - 4 * dft_size;
@@ -969,13 +971,15 @@ FORCEINLINE void two_passes_strided_impl(
 }
 
 template<typename V, ComplexFormat dst_cf>
-FORCEINLINE void four_passes_impl(
-  Int n, Int dft_size,
-  Complex<typename V::Vec>* src,
-  Complex<typename V::Vec>* twiddle,
-  typename V::Vec* dst)
+void four_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
+  Int n = arg.n / V::vec_size;
+  Int dft_size = arg.dft_size / V::vec_size;
+  auto src = (Complex<Vec>*) arg.src;
+  auto twiddle = (Complex<Vec>*) arg.twiddle;
+  auto dst = (Vec*) arg.dst;
+  
   typedef Complex<Vec> C;
 
   const Int chunk_size = 16;
@@ -1089,17 +1093,6 @@ FORCEINLINE void last_three_passes_impl(
   }
 }
 
-template<typename V, ComplexFormat dst_cf>
-void two_passes(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  two_passes_impl<V, dst_cf>(
-    arg.n / V::vec_size, arg.dft_size / V::vec_size,
-    (Complex<Vec>*) arg.src,
-    (Complex<Vec>*) arg.twiddle,
-    (Vec*) arg.dst);
-}
-
 template<typename V>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
@@ -1117,17 +1110,6 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   last_three_passes_impl<V>(
     n / V::vec_size,
-    (Complex<Vec>*) arg.src,
-    (Complex<Vec>*) arg.twiddle,
-    (Vec*) arg.dst);
-}
-
-template<typename V, ComplexFormat dst_cf>
-void four_passes(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  four_passes_impl<V, dst_cf>(
-    arg.n / V::vec_size, arg.dft_size / V::vec_size,
     (Complex<Vec>*) arg.src,
     (Complex<Vec>*) arg.twiddle,
     (Vec*) arg.dst);
