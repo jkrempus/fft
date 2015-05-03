@@ -1524,43 +1524,27 @@ struct TestWrapper
   }
 };
 
-template<typename T> struct FftTestWrapper {};
-
-template<> struct FftTestWrapper<float>
+template<typename T>
+struct InterleavedWrapperBase
 {
-  typedef float value_type;
   Int n;
-  fftwf_plan plan;
-  float* src;
-  float* dst;
-  FftTestWrapper(Int n) :
+  T* src;
+  T* dst;
+  
+  InterleavedWrapperBase(Int n) :
     n(n),
-    src((float*) valloc(2 * sizeof(float) * n)),
-    dst((float*) valloc(2 * sizeof(float) * n))
-  {
-    plan = fftwf_plan_dft_1d(
-      n, (fftwf_complex*) src, (fftwf_complex*) dst,
-      FFTW_FORWARD, FFTW_PATIENT);
-  }
-
-  ~FftTestWrapper()
-  {
-    fftwf_destroy_plan(plan);
-    free(src);
-    free(dst);
-  }
+    src((T*) valloc(2 * sizeof(T) * n)),
+    dst((T*) valloc(2 * sizeof(T) * n)) { }
 
   template<typename U>
   void set_input(const U* re, const U* im)
   {
     for(Int i = 0; i < n; i++)
     {
-      src[2 * i] = float(re[i]);
-      src[2 * i + 1] = float(im[i]);
+      src[2 * i] = T(re[i]);
+      src[2 * i + 1] = T(im[i]);
     }
   }
- 
-  void transform() { fftwf_execute(plan); }
 
   template<typename U>
   void get_output(U* re, U* im)
@@ -1569,6 +1553,79 @@ template<> struct FftTestWrapper<float>
     {
       re[i] = U(dst[2 * i]);
       im[i] = U(dst[2 * i + 1]);
+    }
+  }
+};
+
+template<typename T> struct FftTestWrapper {};
+
+template<> struct FftTestWrapper<float> : public InterleavedWrapperBase<float>
+{
+  typedef float value_type;
+  fftwf_plan plan;
+
+  FftTestWrapper(Int n) : InterleavedWrapperBase(n)
+  {
+    plan = fftwf_plan_dft_1d(
+      n, (fftwf_complex*) src, (fftwf_complex*) dst,
+      FFTW_FORWARD, FFTW_PATIENT);
+  }
+
+  ~FftTestWrapper() { fftwf_destroy_plan(plan); }
+
+  void transform() { fftwf_execute(plan); }
+};
+
+template<typename T>
+struct ReferenceFft : public InterleavedWrapperBase<T>
+{
+  typedef T value_type;
+  fftwf_plan plan;
+  Complex<T>* twiddle;
+  T* working;
+
+  ReferenceFft(Int n) : InterleavedWrapperBase<T>(n)
+  {
+    working = new T[2 * n];
+    twiddle = new Complex<T>[n / 2];
+    auto pi = std::acos(T(-1));
+    for(Int i = 0; i < n / 2; i++)
+    {
+      auto phi = -i * pi / (n / 2);
+      twiddle[i] = {std::cos(phi), std::sin(phi)};
+    }
+  }
+
+  ~ReferenceFft() { delete twiddle; }
+
+  void transform()
+  {
+    copy(this->src, 2 * this->n, this->dst);
+
+    for(Int dft_size = 1; dft_size < this->n; dft_size *= 2)
+    {
+      swap(this->dst, working);
+
+      Int twiddle_stride = this->n / 2 / dft_size;
+      auto cdst = (Complex<T>*) this->dst;
+      auto cworking = (Complex<T>*) working;
+      auto ctw = (Complex<T>*) twiddle;
+      for(Int i = 0; i < this->n / 2; i += dft_size)
+      {
+        Int src_i = i;
+        Int dst_i = 2 * i;
+        Int twiddle_i = 0;
+        for(; src_i < i + dft_size;)
+        {
+          auto a = cworking[src_i];
+          auto mul = ctw[twiddle_i] * cworking[src_i + this->n / 2];
+          cdst[dst_i] = a + mul;
+          cdst[dst_i + dft_size] = a - mul;
+          src_i++;
+          dst_i++;
+          twiddle_i+= twiddle_stride;
+        }  
+      }
     }
   }
 };
@@ -1630,6 +1687,13 @@ typename Fft0::value_type compare(Int n)
   return std::sqrt(diff_sumsq / sum_sumsq);
 }
 
+template<typename Fft>
+void test(Int n)
+{
+  //TODO: Use long double for ReferenceFft
+  printf("difference %e\n", compare<ReferenceFft<double>, Fft>(n));
+}
+
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
@@ -1642,10 +1706,7 @@ int main(int argc, char** argv)
   Int n = 1 << log2n;
 
 #if 1
-  //bench<TestWrapper<V, cf>>(n);
-  printf(
-    "difference %e\n",
-    compare<FftTestWrapper<float>, TestWrapper<V, cf>>(n));
+  test<TestWrapper<V, cf>>(n);
 
 #else
   T* src = alloc_complex_array<T>(n);
