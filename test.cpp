@@ -628,6 +628,8 @@ template<typename T_> void dump(T_* ptr, Int n, const char* name, ...);
 template<typename T> T min(T a, T b){ return a < b ? a : b; }
 template<typename T> T max(T a, T b){ return a > b ? a : b; }
 
+template<typename T> T sq(T a){ return a * a; }
+
 template<typename V, Int dft_size, ComplexFormat src_cf>
 void ct_dft_size_pass(const Arg<typename V::T>& arg)
 {
@@ -1481,29 +1483,92 @@ struct TestWrapper
     free(dst);
   }
 
-  void set_input(const T* re, const T* im)
+  template<typename U>
+  void set_input(const U* re, const U* im)
   {
-    auto vre = (const Vec*) re;
-    auto vim = (const Vec*) im;
-    auto vsrc = (Vec*) src;
-    Int vn = state->n / V::vec_size;
-    for(Int i = 0; i < vn; i++)
-      store_complex<cf, V>({vre[i], vim[i]}, vsrc + i, vn);
-  }
- 
-  void transform() { fft(state, src, dst); }
-
-  void get_output(T* re, T* im)
-  {
-    auto vre = (Vec*) re;
-    auto vim = (Vec*) im;
     auto vsrc = (Vec*) src;
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
-      auto c = load_complex<cf, V>(vsrc + i, vn);
-      vre[i] = c.re;   
-      vim[i] = c.im;   
+      Complex<Vec> a;
+      T* pre = (T*) &a.re;
+      T* pim = (T*) &a.im;
+      for(Int j = 0; j < V::vec_size; j++)
+      {
+        pre[j] = T(re[V::vec_size * i + j]);
+        pim[j] = T(im[V::vec_size * i + j]);
+      }
+
+      store_complex<cf, V>(a, vsrc + i, vn);
+    }
+  }
+ 
+  void transform() { fft(state, src, dst); }
+
+  template<typename U>
+  void get_output(U* re, U* im)
+  {
+    auto vdst = (Vec*) dst;
+    Int vn = state->n / V::vec_size;
+    for(Int i = 0; i < vn; i++)
+    {
+      auto c = load_complex<cf, V>(vdst + i, vn);
+      T* pre = (T*) &c.re;
+      T* pim = (T*) &c.im;
+      for(Int j = 0; j < V::vec_size; j++)
+      {
+        re[V::vec_size * i + j] = U(pre[j]);
+        im[V::vec_size * i + j] = U(pim[j]);
+      }
+    }
+  }
+};
+
+template<typename T> struct FftTestWrapper {};
+
+template<> struct FftTestWrapper<float>
+{
+  typedef float value_type;
+  Int n;
+  fftwf_plan plan;
+  float* src;
+  float* dst;
+  FftTestWrapper(Int n) :
+    n(n),
+    src((float*) valloc(2 * sizeof(float) * n)),
+    dst((float*) valloc(2 * sizeof(float) * n))
+  {
+    plan = fftwf_plan_dft_1d(
+      n, (fftwf_complex*) src, (fftwf_complex*) dst,
+      FFTW_FORWARD, FFTW_PATIENT);
+  }
+
+  ~FftTestWrapper()
+  {
+    fftwf_destroy_plan(plan);
+    free(src);
+    free(dst);
+  }
+
+  template<typename U>
+  void set_input(const U* re, const U* im)
+  {
+    for(Int i = 0; i < n; i++)
+    {
+      src[2 * i] = float(re[i]);
+      src[2 * i + 1] = float(im[i]);
+    }
+  }
+ 
+  void transform() { fftwf_execute(plan); }
+
+  template<typename U>
+  void get_output(U* re, U* im)
+  {
+    for(Int i = 0; i < n; i++)
+    {
+      re[i] = U(dst[2 * i]);
+      im[i] = U(dst[2 * i + 1]);
     }
   }
 };
@@ -1530,6 +1595,41 @@ void bench(Int n)
   printf("%f gflops\n", double(operations) * 1e-9 / (t1 - t0));
 }
 
+template<typename Fft0, typename Fft1>
+typename Fft0::value_type compare(Int n)
+{
+  typedef typename Fft0::value_type T;
+  Fft0 fft0(n);
+  Fft1 fft1(n);
+  T* src = alloc_complex_array<T>(n);
+  T* dst0 = alloc_complex_array<T>(n);
+  T* dst1 = alloc_complex_array<T>(n);
+  
+  std::mt19937 mt;
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+
+  fft0.set_input(src, src + n);
+  fft1.set_input(src, src + n);
+
+  fft0.transform();
+  fft1.transform();
+
+  fft0.get_output(dst0, dst0 + n);
+  fft1.get_output(dst1, dst1 + n);
+
+  auto sum_sumsq = T(0);
+  auto diff_sumsq = T(0);
+  for(Int i = 0; i < 2 * n; i++)
+  {
+    sum_sumsq += sq(dst0[i]);
+    sum_sumsq += sq(dst1[i]);
+    diff_sumsq += sq(dst1[i] - dst0[i]);
+  }
+
+  return std::sqrt(diff_sumsq / sum_sumsq);
+}
+
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
@@ -1542,7 +1642,11 @@ int main(int argc, char** argv)
   Int n = 1 << log2n;
 
 #if 1
-  bench<TestWrapper<V, cf>>(n); 
+  //bench<TestWrapper<V, cf>>(n);
+  printf(
+    "difference %e\n",
+    compare<FftTestWrapper<float>, TestWrapper<V, cf>>(n));
+
 #else
   T* src = alloc_complex_array<T>(n);
   T* dst = alloc_complex_array<T>(n);
@@ -1589,8 +1693,8 @@ int main(int argc, char** argv)
   double t = get_time();
   for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
   {
-    fft(state, src, dst);
-    //fftwf_execute(plan);
+    //fft(state, src, dst);
+    fftwf_execute(plan);
   }
 
   printf("time %f\n", get_time() - t);
