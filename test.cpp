@@ -408,30 +408,27 @@ struct AvxFloat
     r3 = _mm256_permute2f128_ps(c2, c3, _MM_SHUFFLE(0, 3, 0, 1));
   }
 
-  static void FORCEINLINE transpose_impl(
-    Vec a0, Vec a1, Vec a2, Vec a3,
-    Vec a4, Vec a5, Vec a6, Vec a7,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
-    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
-  {
-    transpose4x4_two(a0, a1, a2, a3);
-    transpose4x4_two(a4, a5, a6, a7);
-    
-    transpose_128(a0, a4, r0, r4);
-    transpose_128(a1, a5, r1, r5);
-    transpose_128(a2, a6, r2, r6);
-    transpose_128(a3, a7, r3, r7);
-  }
-
+  template<bool interleave_rearrange>
   static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
     Vec& r0, Vec& r1, Vec& r2, Vec& r3,
     Vec& r4, Vec& r5, Vec& r6, Vec& r7)
   {
-    transpose_impl(
-      a0, a1, a4, a5, a2, a3, a6, a7,
-      r0, r1, r4, r5, r2, r3, r6, r7);
+    if(interleave_rearrange)
+      transpose<false>(
+        a0, a1, a4, a5, a2, a3, a6, a7,
+        r0, r1, r4, r5, r2, r3, r6, r7);
+    else
+    {
+      transpose4x4_two(a0, a1, a2, a3);
+      transpose4x4_two(a4, a5, a6, a7);
+
+      transpose_128(a0, a4, r0, r4);
+      transpose_128(a1, a5, r1, r5);
+      transpose_128(a2, a6, r2, r6);
+      transpose_128(a3, a7, r3, r7);
+    }
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
@@ -778,13 +775,13 @@ FORCEINLINE void first_three_passes_impl(
 
     src += src_elem_size;
 
-    V::transpose(
+    V::template transpose<src_cf == ComplexFormat::scalar>(
       c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
       c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
       dst[0].re, dst[1].re, dst[2].re, dst[3].re,
       dst[4].re, dst[5].re, dst[6].re, dst[7].re);
 
-    V::transpose(
+    V::template transpose<src_cf == ComplexFormat::scalar>(
       c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
       c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
       dst[0].im, dst[1].im, dst[2].im, dst[3].im,
@@ -1407,7 +1404,7 @@ T* alloc_complex_array(Int n)
 
 int main(int argc, char** argv)
 {
-  const auto cf = ComplexFormat::scalar;
+  const auto cf = ComplexFormat::split;
   typedef AvxFloat V;
   //typedef SseFloat V;
   //typedef Scalar<float> V;
