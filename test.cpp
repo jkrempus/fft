@@ -1,4 +1,5 @@
 #include <string>
+#include <cstring>
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
@@ -277,75 +278,12 @@ int main(int argc, char** argv)
 
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
-
-#if 1
-  test<TestWrapper<V, cf>>(n);
-
-#else
-  T* src = alloc_complex_array<T>(n);
-  T* dst = alloc_complex_array<T>(n);
-
-  fftwf_plan plan;
-  if(cf == ComplexFormat::scalar)
-    plan = fftwf_plan_dft_1d(n, (fftwf_complex*) src, (fftwf_complex*) dst,
-      FFTW_FORWARD, FFTW_PATIENT);
+  bool is_test = argc == 3 && strcmp(argv[2], "t") == 0;
+ 
+  if(is_test) 
+    test<TestWrapper<V, cf>>(n);
   else
-  {
-    fftw_iodim dim;
-    dim.n = n;
-    dim.is = 1;
-    dim.os = 1; 
-    plan = fftwf_plan_guru_split_dft(
-      1, &dim,
-      0, NULL,
-      src, src + n, dst, dst + n,
-      FFTW_MEASURE);
-  }
-
-  auto state = fft_state<V, cf>(n, valloc(fft_state_memory_size<V>(n)));
-  
-  std::fill_n(dst, n, T(0));
-  std::fill_n(dst + n, n, T(0));
-
-  std::mt19937 mt;
-  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
-  auto tmp_re = alloc_complex_array<T>(n / 2);
-  auto tmp_im = alloc_complex_array<T>(n / 2);
-
-  if(cf == ComplexFormat::scalar)
-    deinterleave(src, n, tmp_re, tmp_im);
-  else
-  {
-    copy(src, n, tmp_re);
-    copy(src + n, n, tmp_im);
-  }
-
-  dump(tmp_re, n, "src_re.float32");
-  dump(tmp_im, n, "src_im.float32");
-
-  double t = get_time();
-  for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
-  {
-    //fft(state, src, dst);
-    fftwf_execute(plan);
-  }
-
-  printf("time %f\n", get_time() - t);
-
-  if(cf == ComplexFormat::scalar)
-    deinterleave(dst, n, tmp_re, tmp_im);
-  else
-  {
-    copy(dst, n, tmp_re);
-    copy(dst + n, n, tmp_im);
-  }
-
-  dump(tmp_re, n, "dst_re.float32");
-  dump(tmp_im, n, "dst_im.float32");
-
-  free(fft_state_memory_ptr(state));
-#endif
+    bench<TestWrapper<V, cf>>(n);
 
   return 0;
 }
