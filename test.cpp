@@ -346,8 +346,18 @@ struct AvxFloat
     Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     if(elements_per_vec == 8)
+    {
+#if 1
       transpose_128(
         _mm256_unpacklo_ps(a0, a1), _mm256_unpackhi_ps(a0, a1), r0, r1);
+#else
+      Vec b0, b1;
+      transpose_128(a0, a1, b0, b1);
+      __v8si off = {0, 4, 1, 5, 2, 6, 3, 7};
+      r0 = _mm256_permutevar8x32_ps(b0, (__m256i) off);
+      r1 = _mm256_permutevar8x32_ps(b1, (__m256i) off);
+#endif
+    }
     else if(elements_per_vec == 4)
       transpose_128(
         _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)), 
@@ -359,10 +369,17 @@ struct AvxFloat
 
   static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
+#if 0
     Vec b0, b1;
     transpose_128(a0, a1, b0, b1);
     r0 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
     r1 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
+#else
+    __v8si off = {0, 2, 4, 6, 1, 3, 5, 7};
+    Vec b0 = _mm256_permutevar8x32_ps(a0, (__m256i) off);
+    Vec b1 = _mm256_permutevar8x32_ps(a1, (__m256i) off);
+    transpose_128(b0, b1, r0, r1);
+#endif
   }
   
   // The input matrix has 4 rows and vec_size columns
