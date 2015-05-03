@@ -120,7 +120,8 @@ FORCEINLINE Complex<typename V::Vec> load_complex(typename V::Vec* ptr, Int n)
 }
 
 template<ComplexFormat cf, typename V>
-void store_complex(Complex<typename V::Vec> a, typename V::Vec* ptr, Int n)
+FORCEINLINE void store_complex(
+  Complex<typename V::Vec> a, typename V::Vec* ptr, Int n)
 {
   if(cf == ComplexFormat::split)
   {
@@ -880,40 +881,49 @@ template<typename V, ComplexFormat dst_cf>
 void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
+  typedef Complex<Vec> C;
+  const Int dst_elem_size = complex_element_size<dst_cf>();
+
   Int n = arg.n / V::vec_size;
   Int dft_size = arg.dft_size / V::vec_size;
   auto src = (Complex<Vec>*) arg.src;
-  auto twiddle = (Complex<Vec>*) arg.twiddle;
+  auto tw = (Complex<Vec>*) arg.twiddle + n - 4 * dft_size;
   auto dst = (Vec*) arg.dst;
-  
-  typedef Complex<Vec> C;
 
-  auto twiddle_row = twiddle + n - 4 * dft_size;
-  Int l = n / 4;
-  Int m = dft_size * complex_element_size<dst_cf>();
+  Int l1 = n / 4;
+  Int l2 = 2 * l1;
+  Int l3 = 3 * l1;
 
-  for(C* end = src + l; src < end;)
+  Int m1 = dft_size * dst_elem_size;
+  Int m2 = 2 * m1;
+  Int m3 = 3 * m1;
+
+  for(C* end = src + dft_size; src < end;)
   {
-    auto tw = twiddle_row;
-    for(C* end1 = src + dft_size;;)
+    auto s = src;
+    auto d = dst;
+    auto tw0 = tw[0];
+    auto tw1 = tw[1];
+    auto tw2 = tw[2]; 
+    
+    for(C* end1 = s + l1;;)
     {
       C d0, d1, d2, d3;
-      two_passes_inner(
-        src[0], src[l], src[2 * l], src[3 * l], d0, d1, d2, d3,
-        tw[0], tw[1], tw[2]);
+      two_passes_inner(s[0], s[l1], s[l2], s[l3], d0, d1, d2, d3, tw0, tw1, tw2);
+      s += dft_size;
 
-      store_complex<dst_cf, V>(d0, dst, n);
-      store_complex<dst_cf, V>(d1, dst + m, n);
-      store_complex<dst_cf, V>(d2, dst + 2 * m, n);
-      store_complex<dst_cf, V>(d3, dst + 3 * m, n);
+      store_complex<dst_cf, V>(d0, d, n);
+      store_complex<dst_cf, V>(d1, d + m1, n);
+      store_complex<dst_cf, V>(d2, d + m2, n);
+      store_complex<dst_cf, V>(d3, d + m3, n);
 
-      src += 1;
-      dst += complex_element_size<dst_cf>();
-      tw += 3;
-      if(!(src < end1)) break;
+      d += m1 + m3;
+      if(!(s < end1)) break;
     }
 
-    dst += 3 * m;
+    src += 1;
+    tw += 3;
+    dst += dst_elem_size;
   }
 }
 
