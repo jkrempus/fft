@@ -134,7 +134,7 @@ void store_complex(Complex<typename V::Vec> a, typename V::Vec* ptr, Int n)
   }
   else if (cf == ComplexFormat::scalar)
   {
-    V::template interleave<V::vec_size>(a.re, a.im, ptr[0], ptr[1]);
+    V::interleave(a.re, a.im, ptr[0], ptr[1]);
   }
 }
 
@@ -243,6 +243,12 @@ struct Scalar
   const static Int vec_size = 1;
   
   template<Int elements_per_vec>
+  static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    r0 = a0;
+    r1 = a1;
+  }
+  
   static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = a0;
@@ -285,7 +291,7 @@ struct SseFloat
   const static Int vec_size = 4;
   
   template<Int elements_per_vec>
-  static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     if(elements_per_vec == 4)
     {
@@ -297,6 +303,12 @@ struct SseFloat
         r0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0));
         r1 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2));
     }
+  }
+
+  static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    r0 = _mm_unpacklo_ps(a0, a1);
+    r1 = _mm_unpackhi_ps(a0, a1);
   }
   
   static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
@@ -342,21 +354,15 @@ struct AvxFloat
   const static Int vec_size = 8;
 
   template<Int elements_per_vec>
-  static FORCEINLINE void interleave(
+  static FORCEINLINE void interleave_multi(
     Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     if(elements_per_vec == 8)
     {
-#if 1
       transpose_128(
-        _mm256_unpacklo_ps(a0, a1), _mm256_unpackhi_ps(a0, a1), r0, r1);
-#else
-      Vec b0, b1;
-      transpose_128(a0, a1, b0, b1);
-      __v8si off = {0, 4, 1, 5, 2, 6, 3, 7};
-      r0 = _mm256_permutevar8x32_ps(b0, (__m256i) off);
-      r1 = _mm256_permutevar8x32_ps(b1, (__m256i) off);
-#endif
+        _mm256_unpacklo_ps(a0, a1),
+        _mm256_unpackhi_ps(a0, a1),
+        r0, r1);
     }
     else if(elements_per_vec == 4)
       transpose_128(
@@ -367,22 +373,20 @@ struct AvxFloat
       transpose_128(a0, a1, r0, r1);
   }
 
+  static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    r0 = _mm256_unpacklo_ps(a0, a1);
+    r1 = _mm256_unpackhi_ps(a0, a1);
+  }
+
   static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
-#if 0
-    Vec b0, b1;
-    transpose_128(a0, a1, b0, b1);
-    r0 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
-    r1 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
-#else
-    __v8si off = {0, 2, 4, 6, 1, 3, 5, 7};
-    Vec b0 = _mm256_permutevar8x32_ps(a0, (__m256i) off);
-    Vec b1 = _mm256_permutevar8x32_ps(a1, (__m256i) off);
-    transpose_128(b0, b1, r0, r1);
-#endif
+    r0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(2, 0, 2, 0));
+    r1 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 1, 3, 1));
   }
   
   // The input matrix has 4 rows and vec_size columns
+  // TODO: this needs to be updated to support different element order
   static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec& r0, Vec& r1, Vec& r2, Vec& r3)
@@ -403,7 +407,7 @@ struct AvxFloat
     r3 = _mm256_permute2f128_ps(c2, c3, _MM_SHUFFLE(0, 3, 0, 1));
   }
 
-  static void FORCEINLINE transpose(
+  static void FORCEINLINE transpose_impl(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
     Vec& r0, Vec& r1, Vec& r2, Vec& r3,
@@ -416,6 +420,17 @@ struct AvxFloat
     transpose_128(a1, a5, r1, r5);
     transpose_128(a2, a6, r2, r6);
     transpose_128(a3, a7, r3, r7);
+  }
+
+  static void FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec a4, Vec a5, Vec a6, Vec a7,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
+    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
+  {
+    transpose_impl(
+      a0, a1, a4, a5, a2, a3, a6, a7,
+      r0, r1, r4, r5, r2, r3, r6, r7);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
@@ -467,7 +482,50 @@ void store_two_pass_twiddle(
   dst[2] = third;
 }
 
-template<typename V>
+template<typename T>
+void swap(T& a, T& b)
+{
+  T tmpa = a;
+  T tmpb = b;
+  a = tmpb;
+  b = tmpa;
+}
+
+template<typename V, ComplexFormat cf>
+void rearrange_vector_elements_like_load(typename V::Vec* p, Int len)
+{
+  VEC_TYPEDEFS(V);
+  Vec a[2];
+  
+  for(auto end = p + len; p < end; p += 2)
+  {
+    T* src = (T*) p;
+    T* dst = (T*) a;
+
+    //Get it into the source format
+    for(Int i = 0; i < V::vec_size; i++)
+    {
+      if(cf == ComplexFormat::scalar)
+      {
+        dst[2 * i] = src[i];
+        dst[2 * i + 1] = src[i + V::vec_size];
+      }
+      else
+      {
+        dst[2 * i] = src[2 * i];
+        dst[2 * i + 1] = src[2 * i + 1];
+      }
+    }
+
+    //load it like we would during fft computation
+    Complex<Vec> c = load_complex<cf, V>(a, 1);
+    //store it as ComplexFormat::vec
+    p[0] = c.re;
+    p[1] = c.im; 
+  }
+}
+
+template<typename V, ComplexFormat cf>
 void init_twiddle(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
@@ -561,15 +619,10 @@ void init_twiddle(State<typename V::T>& state)
 
     dft_size <<= step.npasses;
   }
-}
 
-template<typename T>
-void swap(T& a, T& b)
-{
-  T tmpa = a;
-  T tmpb = b;
-  a = tmpb;
-  b = tmpa;
+  rearrange_vector_elements_like_load<V, cf>((Vec*) dst, 2 * n / V::vec_size);
+  rearrange_vector_elements_like_load<V, cf>(
+    (Vec*) state.tiny_twiddle, 2 * tiny_log2(V::vec_size));
 }
 
 extern "C" int sprintf(char* s, const char* fmt, ...);
@@ -608,8 +661,8 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
     }
 
     const Int nelem = V::vec_size / dft_size;
-    V::template interleave<nelem>(b0.re, b1.re, vdst[0].re, vdst[1].re);
-    V::template interleave<nelem>(b0.im, b1.im, vdst[0].im, vdst[1].im);
+    V::template interleave_multi<nelem>(b0.re, b1.re, vdst[0].re, vdst[1].re);
+    V::template interleave_multi<nelem>(b0.im, b1.im, vdst[0].im, vdst[1].im);
 
     vsrc0 += src_elem_size;
     vsrc1 += src_elem_size;
@@ -1346,6 +1399,7 @@ T* alloc_complex_array(Int n)
 
 int main(int argc, char** argv)
 {
+  const auto cf = ComplexFormat::scalar;
   typedef AvxFloat V;
   //typedef SseFloat V;
   //typedef Scalar<float> V;
@@ -1365,8 +1419,8 @@ int main(int argc, char** argv)
   state.tiny_twiddle = alloc_complex_array<T>(
     max_vec_size * tiny_log2(max_vec_size));
 
-  init_steps<V, ComplexFormat::scalar>(state);
-  init_twiddle<V>(state);
+  init_steps<V, cf>(state);
+  init_twiddle<V, cf>(state);
 
   std::fill_n(dst, n, T(0));
   std::fill_n(dst + n, n, T(0));
