@@ -1461,6 +1461,75 @@ T* alloc_complex_array(Int n)
   return (T*) valloc(2 * n * sizeof(T));
 }
 
+template<typename V, ComplexFormat cf>
+struct TestWrapper
+{
+  VEC_TYPEDEFS(V);
+  typedef T value_type;
+  State<T>* state;
+  T* src;
+  T* dst;
+  TestWrapper(Int n) :
+    state(fft_state<V, cf>(n, valloc(fft_state_memory_size<V>(n)))),
+    src((T*) valloc(2 * sizeof(T) * n)),
+    dst((T*) valloc(2 * sizeof(T) * n)) { }
+
+  ~TestWrapper()
+  {
+    free(fft_state_memory_ptr(state));
+    free(src);
+    free(dst);
+  }
+
+  void set_input(const T* re, const T* im)
+  {
+    auto vre = (const Vec*) re;
+    auto vim = (const Vec*) im;
+    auto vsrc = (Vec*) src;
+    Int vn = state->n / V::vec_size;
+    for(Int i = 0; i < vn; i++)
+      store_complex<cf, V>({vre[i], vim[i]}, vsrc + i, vn);
+  }
+ 
+  void transform() { fft(state, src, dst); }
+
+  void get_output(T* re, T* im)
+  {
+    auto vre = (Vec*) re;
+    auto vim = (Vec*) im;
+    auto vsrc = (Vec*) src;
+    Int vn = state->n / V::vec_size;
+    for(Int i = 0; i < vn; i++)
+    {
+      auto c = load_complex<cf, V>(vsrc + i, vn);
+      vre[i] = c.re;   
+      vim[i] = c.im;   
+    }
+  }
+};
+
+template<typename Fft>
+void bench(Int n)
+{
+  typedef typename Fft::value_type T;
+  Fft fft(n);
+  T* src = alloc_complex_array<T>(n);
+  T* dst = alloc_complex_array<T>(n);
+  
+  std::mt19937 mt;
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+
+  auto iter = max<Int>(100LL*1000*1000*1000 / (5 * n * log2(n)), 1);
+  auto operations = iter * (5 * n * log2(n));
+
+  double t0 = get_time();
+  for(int i = 0; i < iter; i++) fft.transform();
+  double t1 = get_time(); 
+
+  printf("%f gflops\n", double(operations) * 1e-9 / (t1 - t0));
+}
+
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
@@ -1472,8 +1541,10 @@ int main(int argc, char** argv)
   Int log2n = atoi(argv[1]);
   Int n = 1 << log2n;
 
+#if 1
+  bench<TestWrapper<V, cf>>(n); 
+#else
   T* src = alloc_complex_array<T>(n);
-  T* working = alloc_complex_array<T>(n);
   T* dst = alloc_complex_array<T>(n);
 
   fftwf_plan plan;
@@ -1490,7 +1561,7 @@ int main(int argc, char** argv)
       1, &dim,
       0, NULL,
       src, src + n, dst, dst + n,
-      FFTW_PATIENT);
+      FFTW_MEASURE);
   }
 
   auto state = fft_state<V, cf>(n, valloc(fft_state_memory_size<V>(n)));
@@ -1536,6 +1607,7 @@ int main(int argc, char** argv)
   dump(tmp_im, n, "dst_im.float32");
 
   free(fft_state_memory_ptr(state));
+#endif
 
   return 0;
 }
