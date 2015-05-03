@@ -161,23 +161,22 @@ struct Arg
   T* dst;
 };
 
+
 template<typename T>
 struct Step
 {
+  typedef void (*pass_fun_t)(const Arg<T>&);
   short npasses;
-  bool out_of_place;
-  void (*fun_ptr)(const Arg<T>&);
+  pass_fun_t fun_ptr;
 };
 
 template<typename T>
 struct State
 {
   Int n;
+  T* working;
   T* twiddle;
   T* tiny_twiddle;
-  T* working;
-  T* copied_working0;
-  T* copied_working1;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
   Int num_copies;
@@ -874,6 +873,18 @@ FORCEINLINE void two_passes_inner(
   dst3 = dif02 - dif13.mul_neg_i();
 }
 
+template<
+  typename T,
+  void (*fun0)(const Arg<T>& a),
+  void (*fun1)(const Arg<T>& a)>
+void two_steps(const Arg<T>& arg_in)
+{
+  Arg<T> arg = arg_in;
+  fun0(arg);
+  swap(arg.src, arg.dst);
+  fun1(arg); 
+}
+
 template<typename V, ComplexFormat dst_cf>
 void two_passes(const Arg<typename V::T>& arg)
 {
@@ -1236,10 +1247,26 @@ void init_steps(State<typename V::T>& state)
   Int step_index = 0;
   state.num_copies = 0;
 
+  if(false && state.n == 64)
+  {
+    state.nsteps = 2;
+    state.steps[0].npasses = 3;
+    state.steps[0].fun_ptr = &two_steps<
+      T, 
+      first_three_passes_ct_size<V, cfmt, 8 * V::vec_size>,
+      last_three_passes_vec_ct_size<V, cfmt, V::vec_size * 8>>;
+
+    state.steps[1].npasses = 3;
+    state.steps[1].fun_ptr = nullptr;
+    
+    state.num_copies = 2;
+
+    return;
+  }
+
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
-    step.out_of_place = true;
     if(dft_size >= V::vec_size)
     {
       if(dft_size * 8 == state.n)
@@ -1321,8 +1348,7 @@ void init_steps(State<typename V::T>& state)
 
     state.steps[step_index] = step;
     dft_size <<= step.npasses;
-    if(step.out_of_place)
-      state.num_copies++;
+    state.num_copies++;
   }
 
   state.nsteps = step_index;
@@ -1333,36 +1359,69 @@ void init_steps(State<typename V::T>& state)
 #endif
 }
 
+Int align_size(Int size, Int alignment)
+{
+  return (size + alignment - 1) & ~(alignment - 1);
+};
+
 template<typename V>
-void fft(
-  const State<typename V::T>& state,
-  typename V::T* src,
-  typename V::T* dst)
+Int state_struct_offset(Int n)
 {
   VEC_TYPEDEFS(V);
+  return align_size(
+    sizeof(T) * 2 * n +                                     //working
+    sizeof(T) * 2 * n +                                     //twiddle
+    sizeof(Vec) * 2 * tiny_log2(V::vec_size),   //tiny_twiddle
+    alignof(State<T>));
+}
 
+template<typename V>
+Int fft_state_memory_size(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return state_struct_offset<V>(n) + sizeof(State<T>);
+}
+
+template<typename V, ComplexFormat cf>
+State<typename V::T>* fft_state(Int n, void* ptr)
+{
+  VEC_TYPEDEFS(V);
+  auto state = (State<T>*)(Uint(ptr) + Uint(state_struct_offset<V>(n)));
+  state->n = n;
+  state->working = (T*) ptr;
+  state->twiddle = state->working + 2 * n;
+  state->tiny_twiddle = state->twiddle + 2 * n;
+  init_steps<V, cf>(*state);
+  init_twiddle<V, cf>(*state);
+  return state;
+}
+
+template<typename T>
+void* fft_state_memory_ptr(State<T>* state) { return state->working; }
+
+template<typename T>
+void fft(const State<T>* state, T* src, T* dst)
+{
   Arg<T> arg;
-  arg.n = state.n;
+  arg.n = state->n;
   arg.dft_size = 1;
   arg.src = src;
-  arg.twiddle = state.twiddle;
-  arg.tiny_twiddle = state.tiny_twiddle;
+  arg.twiddle = state->twiddle;
+  arg.tiny_twiddle = state->tiny_twiddle;
   
-  auto is_odd = bool(state.num_copies & 1);
-  arg.dst = is_odd ? dst : state.working;
-  auto next_dst = is_odd ? state.working : dst;
+  auto is_odd = bool(state->num_copies & 1);
+  arg.dst = is_odd ? dst : state->working;
+  auto next_dst = is_odd ? state->working : dst;
 
-  for(Int step = 0; step < state.nsteps; step++)
+  for(Int step = 0; step < state->nsteps; step++)
   {
-    auto next_dft_size = arg.dft_size << state.steps[step].npasses;
-    state.steps[step].fun_ptr(arg);
+    auto next_dft_size = arg.dft_size << state->steps[step].npasses;
+    if(!state->steps[step].fun_ptr) break;
+    state->steps[step].fun_ptr(arg);
     arg.dft_size = next_dft_size;
 
-    if(state.steps[step].out_of_place)
-    {
-      swap(next_dst, arg.dst);
-      arg.src = next_dst;
-    }
+    swap(next_dst, arg.dst);
+    arg.src = next_dst;
   }
 }
 
@@ -1434,16 +1493,8 @@ int main(int argc, char** argv)
       FFTW_PATIENT);
   }
 
-  State<T> state;
-  state.n = n;
-  state.working = alloc_complex_array<T>(n);
-  state.twiddle = alloc_complex_array<T>(n);
-  state.tiny_twiddle = alloc_complex_array<T>(
-    max_vec_size * tiny_log2(max_vec_size));
-
-  init_steps<V, cf>(state);
-  init_twiddle<V, cf>(state);
-
+  auto state = fft_state<V, cf>(n, valloc(fft_state_memory_size<V>(n)));
+  
   std::fill_n(dst, n, T(0));
   std::fill_n(dst + n, n, T(0));
 
@@ -1467,7 +1518,7 @@ int main(int argc, char** argv)
   double t = get_time();
   for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
   {
-    fft<V>(state, src, dst);
+    fft(state, src, dst);
     //fftwf_execute(plan);
   }
 
@@ -1483,6 +1534,8 @@ int main(int argc, char** argv)
 
   dump(tmp_re, n, "dst_re.float32");
   dump(tmp_im, n, "dst_im.float32");
+
+  free(fft_state_memory_ptr(state));
 
   return 0;
 }
