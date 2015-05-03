@@ -905,7 +905,10 @@ void two_passes(const Arg<typename V::T>& arg)
     auto tw0 = tw[0];
     auto tw1 = tw[1];
     auto tw2 = tw[2]; 
-    
+    src += 1;
+    tw += 3;
+    dst += dst_elem_size;
+
     for(C* end1 = s + l1;;)
     {
       C d0, d1, d2, d3;
@@ -920,10 +923,6 @@ void two_passes(const Arg<typename V::T>& arg)
       d += m1 + m3;
       if(!(s < end1)) break;
     }
-
-    src += 1;
-    tw += 3;
-    dst += dst_elem_size;
   }
 }
 
@@ -1255,7 +1254,6 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 3;
       }
-#if 1
       else if(state.n >= large_fft_size && dft_size * 16 == state.n)
       {
         step.fun_ptr = &four_passes<V, cfmt>;
@@ -1266,7 +1264,6 @@ void init_steps(State<typename V::T>& state)
         step.fun_ptr = &four_passes<V, ComplexFormat::vec>;
         step.npasses = 4;
       }
-#endif
       else if(dft_size * 4 == state.n)
       {
         step.fun_ptr = &two_passes<V, cfmt>;
@@ -1380,6 +1377,7 @@ void fft(
 #include <fstream>
 #include <unistd.h>
 #include <random>
+#include "fftw3.h"
 
 double get_time()
 {
@@ -1422,6 +1420,23 @@ int main(int argc, char** argv)
   T* working = alloc_complex_array<T>(n);
   T* dst = alloc_complex_array<T>(n);
 
+  fftwf_plan plan;
+  if(cf == ComplexFormat::scalar)
+    plan = fftwf_plan_dft_1d(n, (fftwf_complex*) src, (fftwf_complex*) dst,
+      FFTW_FORWARD, FFTW_PATIENT);
+  else
+  {
+    fftw_iodim dim;
+    dim.n = n;
+    dim.is = 1;
+    dim.os = 1; 
+    plan = fftwf_plan_guru_split_dft(
+      1, &dim,
+      0, NULL,
+      src, src + n, dst, dst + n,
+      FFTW_PATIENT);
+  }
+
   State<T> state;
   state.n = n;
   state.working = alloc_complex_array<T>(n);
@@ -1437,44 +1452,38 @@ int main(int argc, char** argv)
 
   std::mt19937 mt;
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  for(Int i = 0; i < n; i++)
-  {
-    //src.im[i] = 0;
-    //T x = std::min(i, n - i) / T(n);
-    //src.re[i] = T(1) / (1 + 100 * x * x);
-#if 1
-    src[2 * i] = dist(mt);
-    src[2 * i + 1] = dist(mt);
-#else
-    //src[i] = dist(mt);
-    //src[i + n] = dist(mt);
-#endif
-  }
-
+  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
   auto tmp_re = alloc_complex_array<T>(n / 2);
   auto tmp_im = alloc_complex_array<T>(n / 2);
 
-#if 1
-  deinterleave(src, n, tmp_re, tmp_im);
-#else
-  copy(src, n, tmp_re);
-  copy(src + n, n, tmp_re);
-#endif
+  if(cf == ComplexFormat::scalar)
+    deinterleave(src, n, tmp_re, tmp_im);
+  else
+  {
+    copy(src, n, tmp_re);
+    copy(src + n, n, tmp_im);
+  }
+
   dump(tmp_re, n, "src_re.float32");
   dump(tmp_im, n, "src_im.float32");
 
   double t = get_time();
   for(int i = 0; i < 100LL*1000*1000*1000 / (5 * n * log2n); i++)
+  {
     fft<V>(state, src, dst);
+    //fftwf_execute(plan);
+  }
 
   printf("time %f\n", get_time() - t);
 
-#if 1
-  deinterleave(dst, n, tmp_re, tmp_im);
-#else
-  copy(dst, n, tmp_re);
-  copy(dst + n, n, tmp_re);
-#endif
+  if(cf == ComplexFormat::scalar)
+    deinterleave(dst, n, tmp_re, tmp_im);
+  else
+  {
+    copy(dst, n, tmp_re);
+    copy(dst + n, n, tmp_im);
+  }
+
   dump(tmp_re, n, "dst_re.float32");
   dump(tmp_im, n, "dst_im.float32");
 
