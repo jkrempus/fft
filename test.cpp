@@ -7,9 +7,12 @@
 #include <fstream>
 #include <unistd.h>
 #include <random>
+#include <cstdint>
 #include "fftw3.h"
 
 #include "fft_core.h"
+
+extern "C" void* valloc(size_t);
 
 double get_time()
 {
@@ -170,7 +173,11 @@ struct ReferenceFft : public InterleavedWrapperBase<T>
     }
   }
 
-  ~ReferenceFft() { delete twiddle; }
+  ~ReferenceFft()
+  {
+    delete twiddle;
+    delete working;
+  }
 
   void transform()
   {
@@ -205,7 +212,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T>
 };
 
 template<typename Fft>
-void bench(Int n)
+void bench(Int n, uint64_t requested_operations)
 {
   typedef typename Fft::value_type T;
   Fft fft(n);
@@ -216,7 +223,7 @@ void bench(Int n)
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
 
-  auto iter = max<Int>(100LL*1000*1000*1000 / (5 * n * log2(n)), 1);
+  auto iter = max<uint64_t>(requested_operations / (5 * n * log2(n)), 1);
   auto operations = iter * (5 * n * log2(n));
 
   double t0 = get_time();
@@ -261,6 +268,8 @@ typename Fft0::value_type compare(Int n)
   return std::sqrt(diff_sumsq / sum_sumsq);
 }
 
+extern "C" void* aligned_alloc(size_t, size_t);
+
 template<typename Fft>
 void test(Int n)
 {
@@ -271,9 +280,13 @@ void test(Int n)
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
-  typedef AvxFloat V;
-  //typedef SseFloat V;
+#ifdef __arm__
+  typedef Neon V;
+#else
+  //typedef AvxFloat V;
+  typedef SseFloat V;
   //typedef Scalar<float> V;
+#endif
   VEC_TYPEDEFS(V);
 
   Int log2n = atoi(argv[1]);
@@ -283,7 +296,7 @@ int main(int argc, char** argv)
   if(is_test) 
     test<TestWrapper<V, cf>>(n);
   else
-    bench<TestWrapper<V, cf>>(n);
-
+    bench<TestWrapper<V, cf>>(n, 10LL * 1000 * 1000 * 1000);
+  
   return 0;
 }

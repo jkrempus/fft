@@ -1,5 +1,3 @@
-#include <immintrin.h>
-
 typedef long Int;
 typedef unsigned long Uint;
 
@@ -228,13 +226,6 @@ float SinCosTable<float>::cos[64] = {
   0x1p+0, 0x1p+0, 0x1p+0, 0x1p+0, 
   0x1p+0, 0x1p+0, 0x1p+0, 0x1p+0};
 
-template<typename First, typename Second>
-struct pair
-{
-  First first;
-  Second second;
-};
-
 template<typename T_>
 struct Scalar
 {
@@ -266,11 +257,103 @@ struct Scalar
     Vec& r0, Vec& r1, Vec& r2, Vec& r3)
   {
     r0 = a0;
-    r1 = a2;
-    r2 = a1;
+    r1 = a1;
+    r2 = a2;
     r3 = a3;
   }
 
+  template<bool interleave_rearrange>
+  static void FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec a4, Vec a5, Vec a6, Vec a7,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
+    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
+  {
+    r0 = a0;
+    r1 = a1;
+    r2 = a2;
+    r3 = a3;
+    r4 = a4;
+    r5 = a5;
+    r6 = a6;
+    r7 = a7;
+    //transpose(a0, a1, a2, a3, r0, r2, r4, r6);
+    //transpose(a4, a5, a6, a7, r1, r3, r5, r7);
+  }
+
+  static Vec FORCEINLINE vec(T a){ return a; }
+};
+
+#ifdef __ARM_NEON__
+#include <arm_neon.h>
+
+struct Neon
+{
+  typedef float T;
+  typedef float32x4_t Vec;
+  const static Int vec_size = 4;
+  
+  template<Int elements_per_vec>
+  static FORCEINLINE void interleave_multi(
+    Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    if(elements_per_vec == 4)
+    {
+      auto r = vzipq_f32(a0, a1);
+      r0 = r.val[0];
+      r1 = r.val[1];    
+    }
+    else if(elements_per_vec == 2)
+    {
+      __asm__("vswp %f0, %e1" : "+w" (a0), "+w" (a1));
+      r0 = a0;
+      r1 = a1;
+    }
+  }
+
+  static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    auto r = vzipq_f32(a0, a1);
+    r0 = r.val[0];
+    r1 = r.val[1];
+  }
+
+  static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    auto r = vuzpq_f32(a0, a1);
+    r0 = r.val[0];
+    r1 = r.val[1];
+  }
+  
+  // The input matrix has 4 rows and vec_size columns
+  // TODO: this needs to be updated to support different element order
+  static void FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
+  {
+#if 1
+    //this seems to be slightly faster
+    __asm__(
+      "vtrn.32 %q0, %q1\n"
+      "vtrn.32 %q2, %q3\n"
+      "vswp %f0, %e2\n"
+      "vswp %f1, %e3\n"
+      : "+w" (a0), "+w" (a1), "+w" (a2), "+w" (a3));
+    r0 = a0;
+    r1 = a1;
+    r2 = a2;
+    r3 = a3;
+#else
+    auto b01 = vtrnq_f32(a0, a1);
+    auto b23 = vtrnq_f32(a2, a3);
+    r0 = vcombine_f32(vget_low_f32(b01.val[0]), vget_low_f32(b23.val[0]));
+    r2 = vcombine_f32(vget_high_f32(b01.val[0]), vget_high_f32(b23.val[0]));
+    r1 = vcombine_f32(vget_low_f32(b01.val[1]), vget_low_f32(b23.val[1]));
+    r3 = vcombine_f32(vget_high_f32(b01.val[1]), vget_high_f32(b23.val[1]));
+#endif
+  }
+
+  template<bool interleave_rearrange>
   static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
@@ -281,8 +364,12 @@ struct Scalar
     transpose(a4, a5, a6, a7, r1, r3, r5, r7);
   }
 
-  static Vec FORCEINLINE vec(T a){ return a; }
+  static Vec FORCEINLINE vec(T a){ return vdupq_n_f32(a); }
 };
+#endif
+
+#ifdef __SSE2__
+#include <immintrin.h>
 
 struct SseFloat
 {
@@ -300,8 +387,8 @@ struct SseFloat
     }
     if(elements_per_vec == 2)
     {
-        r0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0));
-        r1 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2));
+      r0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0));
+      r1 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2));
     }
   }
 
@@ -332,6 +419,7 @@ struct SseFloat
     r3 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
   
+  template<bool interleave_rearrange>
   static void FORCEINLINE transpose(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
@@ -344,8 +432,10 @@ struct SseFloat
   
   static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
 };
+#endif
 
 #ifdef __AVX__
+#include <immintrin.h>
 
 struct AvxFloat
 {
@@ -1269,7 +1359,27 @@ void init_steps(State<typename V::T>& state)
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
-    if(dft_size >= V::vec_size)
+    if(dft_size == 1 && state.n >= 8 * V::vec_size)
+    {
+      if(state.n == 8 * V::vec_size)
+        step.fun_ptr = &first_three_passes_ct_size<V, cfmt, 8 * V::vec_size>;
+      else
+        step.fun_ptr = &first_three_passes<V, cfmt>;
+
+      step.npasses = 3;
+    }
+    else if(dft_size == 1 && state.n >= 4 * V::vec_size)
+    {
+      if(state.n == 4 * V::vec_size)
+        step.fun_ptr = &first_two_passes_ct_size<V, cfmt, 4 * V::vec_size>;
+      else if(state.n == 8 * V::vec_size)
+        step.fun_ptr = &first_two_passes_ct_size<V, cfmt, 8 * V::vec_size>;
+      else
+        step.fun_ptr = &first_two_passes<V, cfmt>;
+
+      step.npasses = 2;
+    }
+    else if(dft_size >= V::vec_size)
     {
       if(dft_size * 8 == state.n)
       {
@@ -1313,26 +1423,6 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 1;
       }
-    }
-    else if(dft_size == 1 && state.n >= 8 * V::vec_size)
-    {
-      if(state.n == 8 * V::vec_size)
-        step.fun_ptr = &first_three_passes_ct_size<V, cfmt, 8 * V::vec_size>;
-      else
-        step.fun_ptr = &first_three_passes<V, cfmt>;
-
-      step.npasses = 3;
-    }
-    else if(dft_size == 1 && state.n >= 4 * V::vec_size)
-    {
-      if(state.n == 4 * V::vec_size)
-        step.fun_ptr = &first_two_passes_ct_size<V, cfmt, 4 * V::vec_size>;
-      else if(state.n == 8 * V::vec_size)
-        step.fun_ptr = &first_two_passes_ct_size<V, cfmt, 8 * V::vec_size>;
-      else
-        step.fun_ptr = &first_two_passes<V, cfmt>;
-
-      step.npasses = 2;
     }
     else
     {
