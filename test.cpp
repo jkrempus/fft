@@ -280,13 +280,16 @@ void test(Int n)
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
-#ifdef __arm__
+#ifdef __ARM_NEON__
   typedef Neon V;
-#else
-  //typedef AvxFloat V;
+#elif defined __AVX__
+  typedef AvxFloat V;
+#elif defined __SSE2__
   typedef SseFloat V;
-  //typedef Scalar<float> V;
+#else
+  typedef Scalar<float> V;
 #endif
+
   VEC_TYPEDEFS(V);
 
   Int log2n = atoi(argv[1]);
@@ -296,7 +299,7 @@ int main(int argc, char** argv)
   if(is_test) 
     test<TestWrapper<V, cf>>(n);
   else
-    bench<TestWrapper<V, cf>>(n, 10LL * 1000 * 1000 * 1000);
+    bench<TestWrapper<V, cf>>(n, 100LL * 1000 * 1000 * 1000);
   
   return 0;
 }

@@ -1516,4 +1516,3 @@ void fft(const State<T>* state, T* src, T* dst)
     arg.src = next_dst;
   }
 }
-
