@@ -10,7 +10,10 @@ const Int max_int = Int(Uint(-1) >> 1);
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
 #if 1
+
 #include <cstdio>
+template<typename T_> void dump(T_* ptr, Int n, const char* name, ...);
+
 template<typename T>
 void print_vec(T a)
 {
@@ -51,7 +54,7 @@ template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
 {
 #if defined __GNUC__ || defined __clang__
-  __builtin_memcpy(dst, src, n * sizeof(T));
+  __builtin_memmove(dst, src, n * sizeof(T));
 #else
   for(Int i = 0; i < n; i++) dst[i] = src[i];
 #endif
@@ -83,6 +86,7 @@ struct Complex
   T re;
   T im;
   FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
+  FORCEINLINE Complex adj() { return {re, -im}; }
   FORCEINLINE Complex operator+(Complex other)
   {
     return {re + other.re, im + other.im};
@@ -99,15 +103,20 @@ struct Complex
       re * other.re - im * other.im,
       re * other.im + im * other.re};
   }
+  
+  FORCEINLINE Complex operator*(T other)
+  {
+    return {re * other, im * other};
+  }
 };
 
 enum class ComplexFormat { split, scalar, vec };
 
 template<ComplexFormat cf, typename V>
-FORCEINLINE Complex<typename V::Vec> load_complex(typename V::Vec* ptr, Int n)
+FORCEINLINE Complex<typename V::Vec> load_complex(typename V::Vec* ptr, Int off)
 {
   if(cf == ComplexFormat::split)
-    return {ptr[0], ptr[n]};
+    return {ptr[0], ptr[off]};
   else if(cf == ComplexFormat::vec)
     return {ptr[0], ptr[1]};
   else if (cf == ComplexFormat::scalar)
@@ -119,13 +128,32 @@ FORCEINLINE Complex<typename V::Vec> load_complex(typename V::Vec* ptr, Int n)
 }
 
 template<ComplexFormat cf, typename V>
+FORCEINLINE Complex<typename V::Vec> unaligned_load_complex(
+  typename V::T* ptr, Int off)
+{
+  if(cf == ComplexFormat::split)
+    return {V::unaligned_load(ptr), V::unaligned_load(ptr + off)};
+  else if(cf == ComplexFormat::vec)
+    return {V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
+  else if (cf == ComplexFormat::scalar)
+  {
+    Complex<typename V::Vec> r;
+    V::deinterleave(
+      V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size),
+      r.re, r.im);
+
+    return r;
+  }
+}
+
+template<ComplexFormat cf, typename V>
 FORCEINLINE void store_complex(
-  Complex<typename V::Vec> a, typename V::Vec* ptr, Int n)
+  Complex<typename V::Vec> a, typename V::Vec* ptr, Int off)
 {
   if(cf == ComplexFormat::split)
   {
     ptr[0] = a.re;
-    ptr[n] = a.im;
+    ptr[off] = a.im;
   }
   else if(cf == ComplexFormat::vec)
   {
@@ -138,15 +166,41 @@ FORCEINLINE void store_complex(
   }
 }
 
-template<ComplexFormat cf>
-FORCEINLINE Int complex_element_size()
+template<ComplexFormat cf, typename V>
+FORCEINLINE void unaligned_store_complex(
+  Complex<typename V::Vec> a, typename V::T* ptr, Int off)
 {
   if(cf == ComplexFormat::split)
-    return 1;
+  {
+    V::unaligned_store(a.re, ptr);
+    V::unaligned_store(a.im, ptr + off);
+  }
   else if(cf == ComplexFormat::vec)
-    return 2;
+  {
+    V::unaligned_store(a.re, ptr);
+    V::unaligned_store(a.im, ptr + V::vec_size);
+  }
   else if (cf == ComplexFormat::scalar)
-    return 2;
+  {
+    V::interleave(a.re, a.im, a.re, a.im);
+    V::unaligned_store(a.re, ptr);
+    V::unaligned_store(a.im, ptr + V::vec_size);
+  }
+}
+
+template<typename V>
+Complex<typename V::Vec> reverse_complex(Complex<typename V::Vec> a)
+{
+  return { V::reverse(a.re), V::reverse(a.im) };
+}
+
+template<ComplexFormat cf>
+FORCEINLINE constexpr Int complex_element_size()
+{
+  return
+    cf == ComplexFormat::split ? 1 :
+    cf == ComplexFormat::vec ? 2 :
+    cf == ComplexFormat::scalar ? 2 : 0;
 }
 
 template<typename T>
@@ -246,7 +300,7 @@ struct Scalar
     r0 = a0;
     r1 = a1;
   }
-  
+
   static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = a0;
@@ -278,11 +332,17 @@ struct Scalar
     r5 = a5;
     r6 = a6;
     r7 = a7;
-    //transpose(a0, a1, a2, a3, r0, r2, r4, r6);
-    //transpose(a4, a5, a6, a7, r1, r3, r5, r7);
   }
 
   static Vec FORCEINLINE vec(T a){ return a; }
+  
+  static Vec reverse(Vec v)
+  {
+    return v;
+  }
+
+  static Vec unaligned_load(T* p) { return *p; }
+  static void unaligned_store(Vec val, T* p) { *p = val; }
 };
 
 #ifdef __ARM_NEON__
@@ -468,10 +528,12 @@ struct AvxFloat
   {
     r0 = _mm256_unpacklo_ps(a0, a1);
     r1 = _mm256_unpackhi_ps(a0, a1);
+    transpose_128(r0, r1, r0, r1);
   }
 
   static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
+    transpose_128(a0, a1, a0, a1);
     r0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(2, 0, 2, 0));
     r1 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 1, 3, 1));
   }
@@ -505,11 +567,13 @@ struct AvxFloat
     Vec& r0, Vec& r1, Vec& r2, Vec& r3,
     Vec& r4, Vec& r5, Vec& r6, Vec& r7)
   {
+#if 0
     if(interleave_rearrange)
       transpose<false>(
         a0, a1, a4, a5, a2, a3, a6, a7,
         r0, r1, r4, r5, r2, r3, r6, r7);
     else
+#endif
     {
       transpose4x4_two(a0, a1, a2, a3);
       transpose4x4_two(a4, a5, a6, a7);
@@ -543,14 +607,14 @@ struct AvxFloat
     a3 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
   
-  Vec reverse(Vec v)
+  static Vec reverse(Vec v)
   {
     v = _mm256_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
     return _mm256_permute2f128_ps(v, v, _MM_SHUFFLE(0, 0, 0, 1));
   }
 
-  Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
-  void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
+  static Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
+  static void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
 };
 #endif
 
@@ -652,13 +716,14 @@ void compute_twiddle(
   auto end_re = dst_re + dst_size;
   auto end_im = dst_im + dst_size;
   end_re[-1] = T(1); 
-  end_re[-1] = T(0); 
+  end_im[-1] = T(0); 
 
   Int ratio = full_dst_size / dst_size;
-  for(Int size = 2; size < dst_size / 2; size++)
+  for(Int size = 2; size <= dst_size; size *= 2)
     compute_twiddle_step(
       end_re - size / 2, end_im - size / 2,
       size * ratio,
+      size,
       end_re - size, end_im - size);
 }
 
@@ -745,9 +810,6 @@ void init_twiddle(State<typename V::T>& state)
   rearrange_vector_elements_like_load<V, src_cf>(
     (Vec*) state.tiny_twiddle, 2 * tiny_log2(V::vec_size));
 }
-
-extern "C" int sprintf(char* s, const char* fmt, ...);
-template<typename T_> void dump(T_* ptr, Int n, const char* name, ...);
 
 template<typename T> T min(T a, T b){ return a < b ? a : b; }
 template<typename T> T max(T a, T b){ return a > b ? a : b; }
@@ -1366,35 +1428,12 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
     (Vec*) arg.dst);
 }
 
-template<typename V, ComplexFormat dst_cf>
-void real_last_pass(const Arg<typename V::T>& arg)
-{
-  
-}
-
 template<typename V, ComplexFormat src_cf, ComplexFormat dst_cf>
 void init_steps(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
   Int step_index = 0;
   state.num_copies = 0;
-
-  if(false && state.n == 64)
-  {
-    state.nsteps = 2;
-    state.steps[0].npasses = 3;
-    state.steps[0].fun_ptr = &two_steps<
-      T, 
-      first_three_passes_ct_size<V, src_cf, 8 * V::vec_size>,
-      last_three_passes_vec_ct_size<V, src_cf, V::vec_size * 8>>;
-
-    state.steps[1].npasses = 3;
-    state.steps[1].fun_ptr = nullptr;
-    
-    state.num_copies = 2;
-
-    return;
-  }
 
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
@@ -1491,9 +1530,11 @@ void init_steps(State<typename V::T>& state)
 #endif
 }
 
-Int align_size(Int size, Int alignment)
+template<typename T = char>
+Int align_size(Int size)
 {
-  return (size + alignment - 1) & ~(alignment - 1);
+  static_assert(align_bytes % sizeof(T) == 0, "");
+  return (size + align_bytes / sizeof(T) - 1) & ~(align_bytes / sizeof(T) - 1);
 };
 
 template<typename V>
@@ -1503,8 +1544,7 @@ Int state_struct_offset(Int n)
   return align_size(
     sizeof(T) * 2 * n +                                     //working
     sizeof(T) * 2 * n +                                     //twiddle
-    sizeof(Vec) * 2 * tiny_log2(V::vec_size),   //tiny_twiddle
-    alignof(State<T>));
+    sizeof(Vec) * 2 * tiny_log2(V::vec_size));              //tiny_twiddle
 }
 
 template<typename V>
@@ -1557,26 +1597,76 @@ void fft(const State<T>* state, T* src, T* dst)
   }
 }
 
+template<typename V, ComplexFormat dst_cf>
+void real_last_pass(
+  Int n, typename V::T* src, typename V::T* twiddle, typename V::T* dst)
+{
+  VEC_TYPEDEFS(V);
+  typedef Complex<Vec> C;
+  Int src_off = n / 2;
+  Int vsrc_off = src_off / V::vec_size;
+  Int dst_off = align_size<T>(n / 2 + 1);
+  Int vdst_off = dst_off / V::vec_size;
+
+  const Int dst_es = complex_element_size<dst_cf>();
+
+  Vec half = V::vec(0.5);
+
+  Complex<T> middle = {src[n / 4], src[src_off + n / 4]};
+
+  for(
+    Int i0 = 1, i1 = n / 2 - V::vec_size, iw = 0; 
+    i0 <= i1; 
+    i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
+  {
+    C w = load_complex<ComplexFormat::split, V>((Vec*)(twiddle + iw), vsrc_off);
+    C s0 = unaligned_load_complex<ComplexFormat::split, V>(src +  i0, src_off);
+    C s1 = reverse_complex<V>(
+        load_complex<ComplexFormat::split, V>((Vec*)(src + i1), vsrc_off));
+
+    //printf("%f %f %f %f %f %f\n", w.re, w.im, s0.re, s0.im, s1.re, s1.im);
+
+    C a = (s0 + s1.adj()) * half;
+    C b = ((s0 - s1.adj()) * w.adj()) * half;
+
+    C d0 = a + b.mul_neg_i();
+    C d1 = a.adj() + b.adj().mul_neg_i();
+
+    unaligned_store_complex<dst_cf, V>(d0, dst + i0 * dst_es, dst_off);
+    store_complex<dst_cf, V>(
+      reverse_complex<V>(d1), (Vec*)(dst + i1 * dst_es), vdst_off);
+  }
+
+  // fixes the aliasing bug
+  store_complex<dst_cf, Scalar<T>>(middle.adj(), dst + n / 4, dst_off);
+
+  {
+    Complex<T> r0 = {src[0], src[src_off]};
+    store_complex<dst_cf, Scalar<T>>({r0.re + r0.im, 0}, dst, dst_off);
+    store_complex<dst_cf, Scalar<T>>({r0.re - r0.im, 0}, dst + n / 2, dst_off);
+  }
+}
+
 template<typename T>
 struct RealState
 {
   State<T>* state;
-  T* twiddle; 
+  T* twiddle;
+  void (*last_pass)(Int, T*, T*, T*);
 };
 
 template<typename V>
 Int real_state_twiddle_offset(Int n)
 {
   VEC_TYPEDEFS(V);
-  return align_size(fft_state_memory_size<V>(n), align_bytes);
+  return align_size(fft_state_memory_size<V>(n / 2));
 }
 
 template<typename V>
 Int real_state_struct_offset(Int n)
 {
   VEC_TYPEDEFS(V);
-  return align_size(real_state_twiddle_offset<V>(n) + sizeof(T) * n,
-    alignof(RealState<T>));
+  return align_size(real_state_twiddle_offset<V>(n) + sizeof(T) * n);
 }
 
 template<typename V>
@@ -1591,9 +1681,17 @@ RealState<typename V::T>* rfft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
   RealState<T>* r = (RealState<T>*)(Uint(ptr) + real_state_struct_offset<V>(n));
-  r->state = fft_state<V, ComplexFormat::scalar, dst_cf>(n, ptr);
+  r->state = fft_state<V, ComplexFormat::scalar, ComplexFormat::split>(
+    n / 2, ptr);
+
+  r->state->num_copies++; // causes fft() to put the result in state->working
   r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
-  compute_twiddle(n, n / 2, r->twiddle, r->twiddle + n / 2);
+  r->last_pass = &real_last_pass<V, dst_cf>;
+  
+  Int m =  n / 2;
+  compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+  copy(r->twiddle + 1, m - 1, r->twiddle);
+  copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
   return r;
 }
 
@@ -1601,5 +1699,17 @@ template<typename T>
 void* rfft_state_memory_ptr(RealState<T>* state)
 {
   return fft_state_memory_ptr(state->state);
+}
+
+template<typename T>
+void rfft(const RealState<T>* state, T* src, T* dst)
+{
+  fft(state->state, src, dst); // the intermediate result is now in state->working
+  dump(state->state->working, state->state->n * 2, "w.float32");
+  state->last_pass(
+    state->state->n * 2,
+    state->state->working,
+    state->twiddle,
+    dst);
 }
 

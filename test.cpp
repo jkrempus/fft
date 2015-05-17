@@ -43,6 +43,7 @@ T* alloc_complex_array(Int n)
 template<typename V, ComplexFormat cf>
 struct TestWrapper
 {
+  enum { is_real = false };
   VEC_TYPEDEFS(V);
   typedef T value_type;
   State<T>* state;
@@ -76,7 +77,7 @@ struct TestWrapper
         pim[j] = T(im[V::vec_size * i + j]);
       }
 
-      store_complex<cf, V>(a, vsrc + i, vn);
+      store_complex<cf, V>(a, vsrc + i * complex_element_size<cf>(), vn);
     }
   }
  
@@ -89,13 +90,74 @@ struct TestWrapper
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
-      auto c = load_complex<cf, V>(vdst + i, vn);
+      auto c = load_complex<cf, V>(vdst + i * complex_element_size<cf>(), vn);
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
       for(Int j = 0; j < V::vec_size; j++)
       {
         re[V::vec_size * i + j] = U(pre[j]);
         im[V::vec_size * i + j] = U(pim[j]);
+      }
+    }
+  }
+};
+
+template<typename V, ComplexFormat cf>
+struct RealTestWrapper
+{
+  enum { is_real = true };
+  VEC_TYPEDEFS(V);
+  typedef T value_type;
+  RealState<T>* state;
+  Int n;
+  Int im_offset;
+  T* src;
+  T* dst;
+  RealTestWrapper(Int n) :
+    state(rfft_state<V, cf>(n, valloc(rfft_state_memory_size<V>(n)))),
+    n(n),
+    im_offset(align_size<T>(n / 2 + 1))
+  {
+    src = (T*) valloc(n * sizeof(T));
+    dst = (T*) valloc(2 * im_offset * sizeof(T));
+  }
+
+  ~RealTestWrapper()
+  {
+    free(rfft_state_memory_ptr(state));
+    free(src);
+    free(dst);
+  }
+
+  template<typename U>
+  void set_input(const U* re, const U* im) { std::copy_n(re, n, src); }
+ 
+  void transform() { rfft(state, src, dst); }
+
+  template<typename U>
+  void get_output(U* re, U* im)
+  {
+    auto vdst = (Vec*) dst;
+    for(Int i = 0; i < n / V::vec_size / 2 + 1; i++)
+    {
+      auto c = load_complex<cf, V>(
+        vdst + i * complex_element_size<cf>(), im_offset / V::vec_size);
+
+      T* pre = (T*) &c.re;
+      T* pim = (T*) &c.im;
+      for(Int j = 0; j < V::vec_size; j++)
+      {
+        Int k = V::vec_size * i + j;
+        if(k <= n / 2)
+        {
+          re[k] = U(pre[j]);
+          im[k] = U(pim[j]);
+          if(k > 0)
+          {
+            re[n - k] = U(pre[j]);
+            im[n - k] = -U(pim[j]);
+          }
+        }
       }
     }
   }
@@ -138,6 +200,7 @@ template<typename T> struct FftTestWrapper {};
 
 template<> struct FftTestWrapper<float> : public InterleavedWrapperBase<float>
 {
+  enum { is_real = false };
   typedef float value_type;
   fftwf_plan plan;
 
@@ -156,6 +219,7 @@ template<> struct FftTestWrapper<float> : public InterleavedWrapperBase<float>
 template<typename T>
 struct ReferenceFft : public InterleavedWrapperBase<T>
 {
+  enum { is_real = false };
   typedef T value_type;
   fftwf_plan plan;
   Complex<T>* twiddle;
@@ -212,25 +276,24 @@ struct ReferenceFft : public InterleavedWrapperBase<T>
 };
 
 template<typename Fft>
-void bench(Int n, uint64_t requested_operations)
+void bench(Int n, double requested_operations)
 {
   typedef typename Fft::value_type T;
   Fft fft(n);
   T* src = alloc_complex_array<T>(n);
   T* dst = alloc_complex_array<T>(n);
   
-  std::mt19937 mt;
-  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+  for(Int i = 0; i < n * 2; i++) src[i] = 0.0f;
 
-  auto iter = max<uint64_t>(requested_operations / (5 * n * log2(n)), 1);
-  auto operations = iter * (5 * n * log2(n));
+  double const_part = Fft::is_real ? 2.5 : 5.0;
+  auto iter = max<uint64_t>(requested_operations / (const_part * n * log2(n)), 1);
+  auto operations = iter * (const_part * n * log2(n));
 
   double t0 = get_time();
   for(int i = 0; i < iter; i++) fft.transform();
   double t1 = get_time(); 
 
-  printf("%f gflops\n", double(operations) * 1e-9 / (t1 - t0));
+  printf("%f gflops\n", operations * 1e-9 / (t1 - t0));
 }
 
 template<typename Fft0, typename Fft1>
@@ -245,7 +308,18 @@ typename Fft0::value_type compare(Int n)
   
   std::mt19937 mt;
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+  T pi = T(2) * std::asin(T(1));
+  for(Int i = 0; i < n; i++)
+  {
+    Int j = std::min(i & ~1, n - (i & ~1));
+    src[i] = exp(- j * j / float(4 * 4 * 2));
+  }
+
+  //for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+  //for(Int i = 0; i < n * 2; i++) src[i] = std::cos(
+  //  15 * 2 * pi * T(i&~1) / n) * ((i&1) ? 1 : 1);
+  if(Fft0::is_real || Fft1::is_real)
+    for(Int i = n; i < n * 2; i++) src[i] = T(0);
 
   fft0.set_input(src, src + n);
   fft1.set_input(src, src + n);
@@ -255,6 +329,11 @@ typename Fft0::value_type compare(Int n)
 
   fft0.get_output(dst0, dst0 + n);
   fft1.get_output(dst1, dst1 + n);
+
+  dump(fft1.state->twiddle, n, "t.float32");
+  dump(fft1.state->state->working, n, "i.float32");
+  dump(dst0, 2 * n, "a.float64");
+  dump(dst1, 2 * n, "b.float64");
 
   auto sum_sumsq = T(0);
   auto diff_sumsq = T(0);
@@ -280,7 +359,7 @@ void test(Int n)
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
-#if 0
+#if 1
   typedef Scalar<float> V;
 #elif defined __ARM_NEON__
   typedef Neon V;
@@ -299,9 +378,9 @@ int main(int argc, char** argv)
   bool is_test = argc == 3 && strcmp(argv[2], "t") == 0;
  
   if(is_test) 
-    test<TestWrapper<V, cf>>(n);
+    test<RealTestWrapper<V, cf>>(n);
   else
-    bench<TestWrapper<V, cf>>(n, 100LL * 1000 * 1000 * 1000);
+    bench<RealTestWrapper<V, cf>>(n, 1e11);
   
   return 0;
 }
