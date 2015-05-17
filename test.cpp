@@ -49,7 +49,7 @@ struct TestWrapper
   T* src;
   T* dst;
   TestWrapper(Int n) :
-    state(fft_state<V, cf>(n, valloc(fft_state_memory_size<V>(n)))),
+    state(fft_state<V, cf, cf>(n, valloc(fft_state_memory_size<V>(n)))),
     src((T*) valloc(2 * sizeof(T) * n)),
     dst((T*) valloc(2 * sizeof(T) * n)) { }
 
@@ -280,7 +280,9 @@ void test(Int n)
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
-#ifdef __ARM_NEON__
+#if 0
+  typedef Scalar<float> V;
+#elif defined __ARM_NEON__
   typedef Neon V;
 #elif defined __AVX__
   typedef AvxFloat V;

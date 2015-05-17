@@ -23,6 +23,7 @@ void print_vec(T a)
 
 Int large_fft_size = 1 << 14;
 Int max_vec_size = 8;
+const Int align_bytes = 64;
 
 Int tiny_log2(Int a)
 {
@@ -541,6 +542,15 @@ struct AvxFloat
     a2 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
     a3 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
+  
+  Vec reverse(Vec v)
+  {
+    v = _mm256_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
+    return _mm256_permute2f128_ps(v, v, _MM_SHUFFLE(0, 0, 0, 1));
+  }
+
+  Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
+  void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
 };
 #endif
 
@@ -612,7 +622,47 @@ void rearrange_vector_elements_like_load(typename V::Vec* p, Int len)
   }
 }
 
-template<typename V, ComplexFormat cf>
+template<typename T>
+void compute_twiddle_step(
+  T* src_re, T* src_im,
+  Int full_dst_size,
+  Int dst_size,
+  T* dst_re, T* dst_im)
+{
+  Int table_index = log2(full_dst_size);
+  auto c = SinCosTable<T>::cos[table_index];
+  auto s = SinCosTable<T>::sin[table_index];
+
+  for(Int j = 0; j < dst_size / 2; j++)
+  {
+    T re = src_re[j];
+    T im = src_im[j];
+    dst_re[2 * j] = re;
+    dst_im[2 * j] = im;
+    dst_re[2 * j + 1] = re * c + im * s;
+    dst_im[2 * j + 1] = im * c - re * s;
+  }
+}
+
+template<typename T>
+void compute_twiddle(
+  Int full_dst_size, Int dst_size,
+  T* dst_re, T* dst_im)
+{
+  auto end_re = dst_re + dst_size;
+  auto end_im = dst_im + dst_size;
+  end_re[-1] = T(1); 
+  end_re[-1] = T(0); 
+
+  Int ratio = full_dst_size / dst_size;
+  for(Int size = 2; size < dst_size / 2; size++)
+    compute_twiddle_step(
+      end_re - size / 2, end_im - size / 2,
+      size * ratio,
+      end_re - size, end_im - size);
+}
+
+template<typename V, ComplexFormat src_cf, ComplexFormat dst_cf>
 void init_twiddle(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
@@ -621,42 +671,26 @@ void init_twiddle(State<typename V::T>& state)
   auto n = state.n;
   auto end_re = dst + n;
   auto end_im = dst + 2 * n;
-  Int table_index = 0;
   end_re[-1] = T(0);
   end_im[-1] = T(0);
   end_re[-2] = T(1);
   end_im[-2] = T(0);
 
   for(Int size = 2; size < n; size *= 2)
+    compute_twiddle_step(
+      end_re - size, end_im - size,
+      size, size,
+      end_re - 2 * size, end_im - 2 * size);
+
+  for(Int size = 2; size < V::vec_size; size *= 2)
   {
-    table_index++;
-    auto c = SinCosTable<T>::cos[table_index];
-    auto s = SinCosTable<T>::sin[table_index];
+    auto re = state.tiny_twiddle + 2 * V::vec_size * tiny_log2(size);
+    auto im = re + V::vec_size;
 
-    auto prev_re = end_re - size;
-    auto prev_im = end_im - size;
-    auto current_re = end_re - 2 * size;
-    auto current_im = end_im - 2 * size;
-    for(Int j = 0; j < size / 2; j++)
+    for(Int j = 0; j < V::vec_size; j++)
     {
-      T re = prev_re[j];
-      T im = prev_im[j];
-      current_re[2 * j] = re;
-      current_im[2 * j] = im;
-      current_re[2 * j + 1] = re * c + im * s;
-      current_im[2 * j + 1] = im * c - re * s;
-    }
-
-    if(size < V::vec_size)
-    {
-      auto re = state.tiny_twiddle + 2 * V::vec_size * tiny_log2(size);
-      auto im = re + V::vec_size;
-
-      for(Int j = 0; j < V::vec_size; j++)
-      {
-        re[j] = current_re[j & (size - 1)];
-        im[j] = current_im[j & (size - 1)];
-      }
+      re[j] = (end_re - 2 * size)[j & (size - 1)];
+      im[j] = (end_im - 2 * size)[j & (size - 1)];
     }
   }
 
@@ -707,8 +741,8 @@ void init_twiddle(State<typename V::T>& state)
     dft_size <<= step.npasses;
   }
 
-  rearrange_vector_elements_like_load<V, cf>((Vec*) dst, 2 * n / V::vec_size);
-  rearrange_vector_elements_like_load<V, cf>(
+  rearrange_vector_elements_like_load<V, src_cf>((Vec*) dst, 2 * n / V::vec_size);
+  rearrange_vector_elements_like_load<V, src_cf>(
     (Vec*) state.tiny_twiddle, 2 * tiny_log2(V::vec_size));
 }
 
@@ -1332,7 +1366,13 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
     (Vec*) arg.dst);
 }
 
-template<typename V, ComplexFormat cfmt>
+template<typename V, ComplexFormat dst_cf>
+void real_last_pass(const Arg<typename V::T>& arg)
+{
+  
+}
+
+template<typename V, ComplexFormat src_cf, ComplexFormat dst_cf>
 void init_steps(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
@@ -1345,8 +1385,8 @@ void init_steps(State<typename V::T>& state)
     state.steps[0].npasses = 3;
     state.steps[0].fun_ptr = &two_steps<
       T, 
-      first_three_passes_ct_size<V, cfmt, 8 * V::vec_size>,
-      last_three_passes_vec_ct_size<V, cfmt, V::vec_size * 8>>;
+      first_three_passes_ct_size<V, src_cf, 8 * V::vec_size>,
+      last_three_passes_vec_ct_size<V, src_cf, V::vec_size * 8>>;
 
     state.steps[1].npasses = 3;
     state.steps[1].fun_ptr = nullptr;
@@ -1362,20 +1402,20 @@ void init_steps(State<typename V::T>& state)
     if(dft_size == 1 && state.n >= 8 * V::vec_size)
     {
       if(state.n == 8 * V::vec_size)
-        step.fun_ptr = &first_three_passes_ct_size<V, cfmt, 8 * V::vec_size>;
+        step.fun_ptr = &first_three_passes_ct_size<V, src_cf, 8 * V::vec_size>;
       else
-        step.fun_ptr = &first_three_passes<V, cfmt>;
+        step.fun_ptr = &first_three_passes<V, src_cf>;
 
       step.npasses = 3;
     }
     else if(dft_size == 1 && state.n >= 4 * V::vec_size)
     {
       if(state.n == 4 * V::vec_size)
-        step.fun_ptr = &first_two_passes_ct_size<V, cfmt, 4 * V::vec_size>;
+        step.fun_ptr = &first_two_passes_ct_size<V, src_cf, 4 * V::vec_size>;
       else if(state.n == 8 * V::vec_size)
-        step.fun_ptr = &first_two_passes_ct_size<V, cfmt, 8 * V::vec_size>;
+        step.fun_ptr = &first_two_passes_ct_size<V, src_cf, 8 * V::vec_size>;
       else
-        step.fun_ptr = &first_two_passes<V, cfmt>;
+        step.fun_ptr = &first_two_passes<V, src_cf>;
 
       step.npasses = 2;
     }
@@ -1384,15 +1424,15 @@ void init_steps(State<typename V::T>& state)
       if(dft_size * 8 == state.n)
       {
         if(state.n == V::vec_size * 8)
-          step.fun_ptr = &last_three_passes_vec_ct_size<V, cfmt, V::vec_size * 8>;
+          step.fun_ptr = &last_three_passes_vec_ct_size<V, dst_cf, V::vec_size * 8>;
         else
-          step.fun_ptr = &last_three_passes_vec<V, cfmt>;
+          step.fun_ptr = &last_three_passes_vec<V, dst_cf>;
 
         step.npasses = 3;
       }
       else if(state.n >= large_fft_size && dft_size * 16 == state.n)
       {
-        step.fun_ptr = &four_passes<V, cfmt>;
+        step.fun_ptr = &four_passes<V, dst_cf>;
         step.npasses = 4;
       }
       else if(state.n >= large_fft_size && dft_size * 16 < state.n)
@@ -1402,7 +1442,7 @@ void init_steps(State<typename V::T>& state)
       }
       else if(dft_size * 4 == state.n)
       {
-        step.fun_ptr = &two_passes<V, cfmt>;
+        step.fun_ptr = &two_passes<V, dst_cf>;
         step.npasses = 2;
       }
       else if(dft_size * 4 < state.n)
@@ -1413,13 +1453,13 @@ void init_steps(State<typename V::T>& state)
       else
       {
         if(state.n == 2 * V::vec_size)
-          step.fun_ptr = &last_pass_vec_ct_size<V, cfmt, 2 * V::vec_size>;
+          step.fun_ptr = &last_pass_vec_ct_size<V, dst_cf, 2 * V::vec_size>;
         else if(state.n == 4 * V::vec_size)
-          step.fun_ptr = &last_pass_vec_ct_size<V, cfmt, 4 * V::vec_size>;
+          step.fun_ptr = &last_pass_vec_ct_size<V, dst_cf, 4 * V::vec_size>;
         else if(state.n == 8 * V::vec_size)
-          step.fun_ptr = &last_pass_vec_ct_size<V, cfmt, 8 * V::vec_size>;
+          step.fun_ptr = &last_pass_vec_ct_size<V, dst_cf, 8 * V::vec_size>;
         else
-          step.fun_ptr = &last_pass_vec<V, cfmt>;
+          step.fun_ptr = &last_pass_vec<V, dst_cf>;
 
         step.npasses = 1;
       }
@@ -1427,7 +1467,7 @@ void init_steps(State<typename V::T>& state)
     else
     {
       if(V::vec_size > 1 && dft_size == 1)
-        step.fun_ptr = &ct_dft_size_pass<V, 1, cfmt>;
+        step.fun_ptr = &ct_dft_size_pass<V, 1, src_cf>;
       else if(V::vec_size > 2 && dft_size == 2)
         step.fun_ptr = &ct_dft_size_pass<V, 2, ComplexFormat::vec>;
       else if(V::vec_size > 4 && dft_size == 4)
@@ -1474,7 +1514,7 @@ Int fft_state_memory_size(Int n)
   return state_struct_offset<V>(n) + sizeof(State<T>);
 }
 
-template<typename V, ComplexFormat cf>
+template<typename V, ComplexFormat src_cf, ComplexFormat dst_cf>
 State<typename V::T>* fft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
@@ -1483,8 +1523,8 @@ State<typename V::T>* fft_state(Int n, void* ptr)
   state->working = (T*) ptr;
   state->twiddle = state->working + 2 * n;
   state->tiny_twiddle = state->twiddle + 2 * n;
-  init_steps<V, cf>(*state);
-  init_twiddle<V, cf>(*state);
+  init_steps<V, src_cf, dst_cf>(*state);
+  init_twiddle<V, src_cf, dst_cf>(*state);
   return state;
 }
 
@@ -1516,3 +1556,50 @@ void fft(const State<T>* state, T* src, T* dst)
     arg.src = next_dst;
   }
 }
+
+template<typename T>
+struct RealState
+{
+  State<T>* state;
+  T* twiddle; 
+};
+
+template<typename V>
+Int real_state_twiddle_offset(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return align_size(fft_state_memory_size<V>(n), align_bytes);
+}
+
+template<typename V>
+Int real_state_struct_offset(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return align_size(real_state_twiddle_offset<V>(n) + sizeof(T) * n,
+    alignof(RealState<T>));
+}
+
+template<typename V>
+Int rfft_state_memory_size(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return real_state_struct_offset<V>(n) + sizeof(RealState<T>);
+}
+
+template<typename V, ComplexFormat dst_cf>
+RealState<typename V::T>* rfft_state(Int n, void* ptr)
+{
+  VEC_TYPEDEFS(V);
+  RealState<T>* r = (RealState<T>*)(Uint(ptr) + real_state_struct_offset<V>(n));
+  r->state = fft_state<V, ComplexFormat::scalar, dst_cf>(n, ptr);
+  r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
+  compute_twiddle(n, n / 2, r->twiddle, r->twiddle + n / 2);
+  return r;
+}
+
+template<typename T>
+void* rfft_state_memory_ptr(RealState<T>* state)
+{
+  return fft_state_memory_ptr(state->state);
+}
+
