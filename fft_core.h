@@ -1627,7 +1627,7 @@ void real_last_pass(
     //printf("%f %f %f %f %f %f\n", w.re, w.im, s0.re, s0.im, s1.re, s1.im);
 
     C a = (s0 + s1.adj()) * half;
-    C b = ((s0 - s1.adj()) * w.adj()) * half;
+    C b = ((s0 - s1.adj()) * w) * half;
 
     C d0 = a + b.mul_neg_i();
     C d1 = a.adj() + b.adj().mul_neg_i();
@@ -1705,7 +1705,6 @@ template<typename T>
 void rfft(const RealState<T>* state, T* src, T* dst)
 {
   fft(state->state, src, dst); // the intermediate result is now in state->working
-  dump(state->state->working, state->state->n * 2, "w.float32");
   state->last_pass(
     state->state->n * 2,
     state->state->working,

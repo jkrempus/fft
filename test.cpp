@@ -308,16 +308,8 @@ typename Fft0::value_type compare(Int n)
   
   std::mt19937 mt;
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  T pi = T(2) * std::asin(T(1));
-  for(Int i = 0; i < n; i++)
-  {
-    Int j = std::min(i & ~1, n - (i & ~1));
-    src[i] = exp(- j * j / float(4 * 4 * 2));
-  }
 
-  //for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
-  //for(Int i = 0; i < n * 2; i++) src[i] = std::cos(
-  //  15 * 2 * pi * T(i&~1) / n) * ((i&1) ? 1 : 1);
+  for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
   if(Fft0::is_real || Fft1::is_real)
     for(Int i = n; i < n * 2; i++) src[i] = T(0);
 
@@ -330,10 +322,12 @@ typename Fft0::value_type compare(Int n)
   fft0.get_output(dst0, dst0 + n);
   fft1.get_output(dst1, dst1 + n);
 
+#if 0
   dump(fft1.state->twiddle, n, "t.float32");
   dump(fft1.state->state->working, n, "i.float32");
   dump(dst0, 2 * n, "a.float64");
   dump(dst1, 2 * n, "b.float64");
+#endif
 
   auto sum_sumsq = T(0);
   auto diff_sumsq = T(0);
@@ -359,7 +353,7 @@ void test(Int n)
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
-#if 1
+#if 0
   typedef Scalar<float> V;
 #elif defined __ARM_NEON__
   typedef Neon V;
