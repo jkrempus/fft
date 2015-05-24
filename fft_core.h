@@ -827,7 +827,7 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   Int n = arg.n;
   auto src0 = arg.src;
-  auto src1 = arg.src + n * SrcCf::stride / V::vec_size / 2;
+  auto src1 = arg.src + n * SrcCf::idx_ratio / 2;
   auto dst = arg.dst;
   auto tw = VecCf::load(arg.tiny_twiddle + tiny_log2(dft_size) * VecCf::stride, 0);
   for(auto end = src1; src0 < end;)
@@ -865,7 +865,7 @@ template<typename V, typename SrcCf>
 void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int l = n * SrcCf::stride / V::vec_size / 4;
+  Int l = n * SrcCf::idx_ratio / 4;
   T* src0 = arg.src;
   T* src1 = arg.src + l;
   T* src2 = arg.src + 2 * l;
@@ -924,10 +924,10 @@ FORCEINLINE void first_three_passes_impl(
   typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
-  Int l = n / 8 * SrcCf::stride / V::vec_size;
+  Int l = n / 8 * SrcCf::idx_ratio;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
-  for(T* end = dst + n * VecCf::stride / V::vec_size; dst < end;)
+  for(T* end = dst + n * VecCf::idx_ratio; dst < end;)
   {
     C c0, c1, c2, c3;
     {
@@ -1075,18 +1075,18 @@ void two_passes(const Arg<typename V::T>& arg)
   Int n = arg.n;
   Int dft_size = arg.dft_size;
   auto src = arg.src;
-  auto tw = arg.twiddle + (VecCf::stride / V::vec_size) * (n - 4 * dft_size);
+  auto tw = arg.twiddle + (VecCf::idx_ratio) * (n - 4 * dft_size);
   auto dst = arg.dst;
 
-  Int l1 = n / 4 * VecCf::stride / V::vec_size;
+  Int l1 = n / 4 * VecCf::idx_ratio;
   Int l2 = 2 * l1;
   Int l3 = 3 * l1;
 
-  Int m1 = dft_size * DstCf::stride / V::vec_size;
+  Int m1 = dft_size * DstCf::idx_ratio;
   Int m2 = 2 * m1;
   Int m3 = 3 * m1;
 
-  for(T* end = src + dft_size * VecCf::stride / V::vec_size; src < end;)
+  for(T* end = src + dft_size * VecCf::idx_ratio; src < end;)
   {
     auto s = src;
     auto d = dst;
@@ -1105,7 +1105,7 @@ void two_passes(const Arg<typename V::T>& arg)
         VecCf::load(s + l2, 0), VecCf::load(s + l3, 0),
         d0, d1, d2, d3, tw0, tw1, tw2);
 
-      s += dft_size * VecCf::stride / V::vec_size;
+      s += dft_size * VecCf::idx_ratio;
 
       DstCf::store(d0, d, n);
       DstCf::store(d1, d + m1, n);
@@ -1611,7 +1611,7 @@ void real_last_pass(
   Int src_off = n / 2;
   Int dst_off = align_size<T>(n / 2 + 1);
 
-  const Int dst_ratio = DstCfT<V>::stride / V::vec_size;
+  const Int dst_ratio = DstCfT<V>::idx_ratio;
 
   Vec half = V::vec(0.5);
 
