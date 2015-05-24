@@ -42,8 +42,10 @@ T* alloc_complex_array(Int n)
   return (T*) valloc(2 * n * sizeof(T));
 }
 
+template<typename V, ComplexFormat cf, bool is_real> struct TestWrapper { };
+
 template<typename V, ComplexFormat cf>
-struct TestWrapper
+struct TestWrapper<V, cf, false>
 {
   enum { is_real = false };
   VEC_TYPEDEFS(V);
@@ -105,7 +107,7 @@ struct TestWrapper
 };
 
 template<typename V, ComplexFormat cf>
-struct RealTestWrapper
+struct TestWrapper<V, cf, true>
 {
   enum { is_real = true };
   VEC_TYPEDEFS(V);
@@ -115,7 +117,7 @@ struct RealTestWrapper
   Int im_offset;
   T* src;
   T* dst;
-  RealTestWrapper(Int n) :
+  TestWrapper(Int n) :
     state(rfft_state<V, cf>(n, valloc(rfft_state_memory_size<V>(n)))),
     n(n),
     im_offset(align_size<T>(n / 2 + 1))
@@ -124,7 +126,7 @@ struct RealTestWrapper
     dst = (T*) valloc(2 * im_offset * sizeof(T));
   }
 
-  ~RealTestWrapper()
+  ~TestWrapper()
   {
     free(rfft_state_memory_ptr(state));
     free(src);
@@ -198,22 +200,22 @@ struct InterleavedWrapperBase
   }
 };
 
-template<typename T> struct FftTestWrapper {};
+template<typename T> struct FftwTestWrapper {};
 
-template<> struct FftTestWrapper<float> : public InterleavedWrapperBase<float>
+template<> struct FftwTestWrapper<float> : public InterleavedWrapperBase<float>
 {
   enum { is_real = false };
   typedef float value_type;
   fftwf_plan plan;
 
-  FftTestWrapper(Int n) : InterleavedWrapperBase(n)
+  FftwTestWrapper(Int n) : InterleavedWrapperBase(n)
   {
     plan = fftwf_plan_dft_1d(
       n, (fftwf_complex*) src, (fftwf_complex*) dst,
       FFTW_FORWARD, FFTW_PATIENT);
   }
 
-  ~FftTestWrapper() { fftwf_destroy_plan(plan); }
+  ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
 
   void transform() { fftwf_execute(plan); }
 };
@@ -345,6 +347,19 @@ typename Fft0::value_type compare(Int n)
 
 extern "C" void* aligned_alloc(size_t, size_t);
 
+const auto cf = ComplexFormat::split;
+#if 0
+typedef Scalar<float> V;
+#elif defined __ARM_NEON__
+typedef Neon V;
+#elif defined __AVX__
+typedef AvxFloat V;
+#elif defined __SSE2__
+typedef SseFloat V;
+#else
+typedef Scalar<float> V;
+#endif
+
 template<typename Fft>
 void test(Int n)
 {
@@ -370,34 +385,51 @@ Options parse_options(int argc, char** argv)
   return r;
 }
 
-int main(int argc, char** argv)
+template<typename Fft>
+void test_or_bench3(const Options& opt)
 {
-  const auto cf = ComplexFormat::split;
-#if 0
-  typedef Scalar<float> V;
-#elif defined __ARM_NEON__
-  typedef Neon V;
-#elif defined __AVX__
-  typedef AvxFloat V;
-#elif defined __SSE2__
-  typedef SseFloat V;
-#else
-  typedef Scalar<float> V;
-#endif
-
-  VEC_TYPEDEFS(V);
-
-  Options opt = parse_options(argc, argv);
-  if(opt.positional.size() != 2) abort();
-
   Int log2n;
   std::stringstream(opt.positional[1]) >> log2n;
   Int n = 1 << log2n;
- 
-  if(opt.flags.count("-t"))
-    test<TestWrapper<V, cf>>(n);
-  else
-    bench<TestWrapper<V, cf>>(n, 1e11);
 
+  if(opt.flags.count("-b"))
+    bench<Fft>(n, 1e11);
+  else
+    test<Fft>(n);
+}
+
+template<bool is_real, bool is_inverse>
+void test_or_bench2(const Options& opt)
+{
+  if(opt.positional[0] == "fft")
+    test_or_bench3<TestWrapper<V, cf, is_real>>(opt);
+  else if(opt.positional[0] == "fftw")
+    test_or_bench3<FftwTestWrapper<float>>(opt);
+  else
+    abort();
+}
+
+template<bool is_real>
+void test_or_bench1(const Options& opt)
+{
+  if(opt.flags.count("-i"))
+    test_or_bench2<is_real, true>(opt);
+  else
+    test_or_bench2<is_real, false>(opt);
+}
+
+void test_or_bench0(const Options& opt)
+{
+  if(opt.flags.count("-r"))
+    test_or_bench1<true>(opt);
+  else
+    test_or_bench1<false>(opt);
+}
+
+int main(int argc, char** argv)
+{
+  Options opt = parse_options(argc, argv);
+  if(opt.positional.size() != 2) abort();
+  test_or_bench0(opt);
   return 0;
 }
