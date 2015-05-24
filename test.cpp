@@ -167,8 +167,11 @@ struct TestWrapper<V, cf, true>
   }
 };
 
+template<typename T, bool is_real>
+struct InterleavedWrapperBase { };
+
 template<typename T>
-struct InterleavedWrapperBase
+struct InterleavedWrapperBase<T, false>
 {
   Int n;
   T* src;
@@ -200,19 +203,67 @@ struct InterleavedWrapperBase
   }
 };
 
-template<typename T> struct FftwTestWrapper {};
-
-template<> struct FftwTestWrapper<float> : public InterleavedWrapperBase<float>
+template<typename T>
+struct InterleavedWrapperBase<T, true>
 {
-  enum { is_real = false };
+  Int n;
+  T* src;
+  T* dst;
+  
+  InterleavedWrapperBase(Int n) :
+    n(n),
+    src((T*) valloc(2 * sizeof(T) * (n / 2 + 1))),
+    dst((T*) valloc(2 * sizeof(T) * n)) { }
+
+  template<typename U>
+  void set_input(const U* re, const U* im)
+  {
+    std::copy_n(re, n, src);
+  }
+
+  template<typename U>
+  void get_output(U* re, U* im)
+  {
+    Int i = 0;
+    for(; i <= n / 2; i++)
+    {
+      re[i] = U(dst[2 * i]);
+      im[i] = U(dst[2 * i + 1]);
+    }
+    for(; i < n; i++)
+    {
+      Int j = n - i;
+      re[i] = U(dst[2 * j]);
+      im[i] = -U(dst[2 * j + 1]);
+    }
+  }
+};
+
+template<bool is_real, typename T> fftwf_plan make_plan(Int n, T* src, T* dst);
+
+const unsigned fftw_flags = FFTW_PATIENT;
+
+template<> fftwf_plan make_plan<false, float>(Int n, float* src, float* dst)
+{
+  return fftwf_plan_dft_1d(
+    n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_FORWARD, fftw_flags);
+}
+
+template<> fftwf_plan make_plan<true, float>(Int n, float* src, float* dst)
+{
+  return fftwf_plan_dft_r2c_1d(n, src, (fftwf_complex*) dst, fftw_flags);
+}
+
+template<typename T, bool is_real_>
+struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_>
+{
+  enum { is_real = is_real_ };
   typedef float value_type;
   fftwf_plan plan;
 
-  FftwTestWrapper(Int n) : InterleavedWrapperBase(n)
+  FftwTestWrapper(Int n) : InterleavedWrapperBase<T, is_real>(n)
   {
-    plan = fftwf_plan_dft_1d(
-      n, (fftwf_complex*) src, (fftwf_complex*) dst,
-      FFTW_FORWARD, FFTW_PATIENT);
+    plan = make_plan<is_real>(n, this->src, this->dst);
   }
 
   ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
@@ -221,7 +272,7 @@ template<> struct FftwTestWrapper<float> : public InterleavedWrapperBase<float>
 };
 
 template<typename T>
-struct ReferenceFft : public InterleavedWrapperBase<T>
+struct ReferenceFft : public InterleavedWrapperBase<T, false>
 {
   enum { is_real = false };
   typedef T value_type;
@@ -229,7 +280,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T>
   Complex<T>* twiddle;
   T* working;
 
-  ReferenceFft(Int n) : InterleavedWrapperBase<T>(n)
+  ReferenceFft(Int n) : InterleavedWrapperBase<T, false>(n)
   {
     working = new T[2 * n];
     twiddle = new Complex<T>[n / 2];
@@ -404,7 +455,7 @@ void test_or_bench2(const Options& opt)
   if(opt.positional[0] == "fft")
     test_or_bench3<TestWrapper<V, cf, is_real>>(opt);
   else if(opt.positional[0] == "fftw")
-    test_or_bench3<FftwTestWrapper<float>>(opt);
+    test_or_bench3<FftwTestWrapper<float, is_real>>(opt);
   else
     abort();
 }
