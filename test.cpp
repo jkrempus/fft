@@ -151,7 +151,7 @@ struct TestWrapper<V, CfT, true>
     {
       auto c = CfT<V>::load(dst + i * CfT<V>::elemsz, im_offset);
 
-      //TODO: get rid of this casts
+      //TODO: get rid of these casts
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
       for(Int j = 0; j < V::vec_size; j++)
@@ -416,7 +416,7 @@ typedef Scalar<float> V;
 #endif
 
 template<typename T>
-using CfT = complex_format::Vec<T>;
+using CfT = complex_format::Scal<T>;
 
 template<typename Fft>
 void test(Int n)

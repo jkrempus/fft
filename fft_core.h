@@ -1588,6 +1588,7 @@ template<typename V, template<typename> class DstCfT>
 void real_last_pass(
   Int n, typename V::T* src, typename V::T* twiddle, typename V::T* dst)
 {
+  static_assert(!SameType<DstCfT<V>, cf::Vec<V>>::value, "");
   VEC_TYPEDEFS(V);
   Int src_off = n / 2;
   Int dst_off = align_size<T>(n / 2 + 1);
@@ -1603,10 +1604,6 @@ void real_last_pass(
     i0 <= i1; 
     i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
   {
-    ASSERT(i0 >= 0 && i0 < n /2);
-    ASSERT(i1 >= 0 && i1 < n /2);
-    ASSERT(iw >= 0 && iw < n /2);
-
     C w = cf::Split<V>::load(twiddle + iw, src_off);
     C s0 = cf::Split<V>::unaligned_load(src + i0, src_off);
     C s1 = reverse_complex<V>(cf::Split<V>::load(src + i1, src_off));
@@ -1624,12 +1621,12 @@ void real_last_pass(
   }
 
   // fixes the aliasing bug
-  DstCfT<Scalar<T>>::store(middle.adj(), dst + n / 4, dst_off);
+  DstCfT<Scalar<T>>::store(middle.adj(), dst + n / 4 * dst_ratio, dst_off);
 
   {
     Complex<T> r0 = {src[0], src[src_off]};
     DstCfT<Scalar<T>>::store({r0.re + r0.im, 0}, dst, dst_off);
-    DstCfT<Scalar<T>>::store({r0.re - r0.im, 0}, dst + n / 2, dst_off);
+    DstCfT<Scalar<T>>::store({r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
   }
 }
 
