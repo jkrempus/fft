@@ -70,16 +70,6 @@ FORCEINLINE void copy(const T* src, Int n, T* dst)
 }
 
 template<typename T>
-void interleave(const T* src0, const T* src1, Int n, T* dst)
-{
-  for(Int i = 0; i < n; i++)
-  {
-    dst[2 * i] = src0[i];
-    dst[2 * i + 1] = src1[i];
-  }
-}
-
-template<typename T>
 struct Complex
 {
   T re;
@@ -456,6 +446,13 @@ struct Neon
   }
 
   static Vec FORCEINLINE vec(T a){ return vdupq_n_f32(a); }
+  
+  static Vec reverse(Vec v) { return v; } //TODO
+
+  static Vec load(T* p) { return vld1q_f32((float32_t*) p); }
+  static Vec unaligned_load(T* p) { return vld1q_f32((float32_t*) p); }
+  static void store(Vec val, T* p) { vst1q_f32((float32_t*) p, val); }
+  static void unaligned_store(Vec val, T* p) { vst1q_f32((float32_t*) p, val); }
 };
 #endif
 
@@ -655,16 +652,16 @@ Int twiddle_elements(Int npasses)
     npasses == 3 ? 5 : max_int;
 }
 
-template<typename T>
+template<typename V>
 void store_two_pass_twiddle(
-  Complex<T> first,
-  Complex<T>* dst)
+  Complex<typename V::Vec> first,
+  typename V::T* dst)
 {
-  dst[0] = first;
+  cf::Vec<V>::store(first, dst, 0);
   auto second = first * first;
   auto third = second * first;
-  dst[1] = second;
-  dst[2] = third;
+  cf::Vec<V>::store(second, dst + cf::Vec<V>::stride, 0);
+  cf::Vec<V>::store(third, dst + 2 * cf::Vec<V>::stride, 0);
 }
 
 template<typename T>
@@ -749,48 +746,58 @@ void init_twiddle(State<typename V::T>& state)
     }
   }
 
-  Int vn = n / V::vec_size;
-  interleave((Vec*) dst, (Vec*) dst + vn, vn, (Vec*) state.working);
-  copy((Vec*) state.working, vn, (Vec*) dst);
+  for(Int si = 0, di = 0; si < n;
+    si += cf::Split<V>::stride, di += cf::Vec<V>::stride)
+  {
+    cf::Vec<V>::store(cf::Split<V>::load(dst + si, n), state.working + di, 0);
+  }
 
-  int dft_size = 1;
+  copy(state.working, 2 * n, dst);
+
+  // It's all in Vec format after this point
+  typedef cf::Vec<V> CF;
+
+  Int dft_size = 1;
   for(Int s = 0; s < state.nsteps; s++)
   {
     auto step = state.steps[s];
     //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
 
-    Int vdft_size = dft_size / V::vec_size;
-
     if(step.npasses == 2 && dft_size >= V::vec_size)
     {
-      auto src_row0 = ((Complex<Vec>*) state.working) + vn - 4 * vdft_size;
-      auto dst_row0 = ((Complex<Vec>*) dst) + vn - 4 * vdft_size;
-      for(Int i = 0; i < vdft_size; i++)
-        store_two_pass_twiddle(src_row0[i], dst_row0 + 3 * i);
+      auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
+      auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
+      for(Int i = 0; i < dft_size * CF::idx_ratio; i += CF::stride)
+        store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
     }
     else if(step.npasses == 3 && dft_size >= V::vec_size)
     {
-      auto src_row0 = ((Complex<Vec>*) state.working) + vn - 4 * vdft_size;
-      auto src_row1 = ((Complex<Vec>*) state.working) + vn - 8 * vdft_size;
-      auto dst_row1 = ((Complex<Vec>*) dst) + vn - 8 * vdft_size;
-      for(Int i = 0; i < vdft_size; i++)
+      auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
+      auto src_row1 = state.working + (n - 8 * dft_size) * CF::idx_ratio;
+      auto dst_row1 = dst + (n - 8 * dft_size) * CF::idx_ratio;
+      for(Int i = 0; i < dft_size * CF::idx_ratio; i += CF::stride)
       {
-        store_two_pass_twiddle(src_row0[i], dst_row1 + 5 * i);
-        dst_row1[5 * i + 3] = src_row1[i];
-        dst_row1[5 * i + 4] = src_row1[i + vdft_size];
+        store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row1 + 5 * i);
+        CF::store(
+          CF::load(src_row1 + i, 0),
+          dst_row1 + 5 * i + 3 * CF::stride, 0);
+        
+        CF::store(
+          CF::load(src_row1 + i + dft_size * CF::idx_ratio, 0),
+          dst_row1 + 5 * i + 4 * CF::stride, 0);
       }
     } 
     else if(step.npasses == 4 && dft_size >= V::vec_size)
     {
-      auto src_row0 = ((Complex<Vec>*) state.working) + vn - 4 * vdft_size;
-      auto dst_row0 = ((Complex<Vec>*) dst) + vn - 4 * vdft_size;
-      for(Int i = 0; i < vdft_size; i++)
-        store_two_pass_twiddle(src_row0[i], dst_row0 + 3 * i);
+      auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
+      auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
+      for(Int i = 0; i < dft_size * CF::idx_ratio; i += CF::stride)
+        store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
       
-      auto src_row2 = ((Complex<Vec>*) state.working) + vn - 16 * vdft_size;
-      auto dst_row2 = ((Complex<Vec>*) dst) + vn - 16 * vdft_size;
-      for(Int i = 0; i < 4 * vdft_size; i++)
-        store_two_pass_twiddle(src_row2[i], dst_row2 + 3 * i);
+      auto src_row2 = state.working + (n - 16 * dft_size) * CF::idx_ratio;
+      auto dst_row2 = dst + (n - 16 * dft_size) * CF::idx_ratio;
+      for(Int i = 0; i < 4 * dft_size * CF::idx_ratio; i += CF::stride)
+        store_two_pass_twiddle<V>(CF::load(src_row2 + i, 0), dst_row2 + 3 * i);
     }
 
     dft_size <<= step.npasses;

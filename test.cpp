@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <sstream>
 
+//#define HAVE_FFTW
+
 extern "C" void* valloc(size_t);
 
 double get_time()
@@ -244,6 +246,7 @@ struct InterleavedWrapperBase<T, true>
   }
 };
 
+#ifdef HAVE_FFTW
 template<bool is_real, typename T> fftwf_plan make_plan(Int n, T* src, T* dst);
 
 const unsigned fftw_flags = FFTW_PATIENT;
@@ -275,13 +278,13 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_>
 
   void transform() { fftwf_execute(plan); }
 };
+#endif
 
 template<typename T>
 struct ReferenceFft : public InterleavedWrapperBase<T, false>
 {
   enum { is_real = false };
   typedef T value_type;
-  fftwf_plan plan;
   Complex<T>* twiddle;
   T* working;
 
@@ -461,8 +464,10 @@ void test_or_bench2(const Options& opt)
 {
   if(opt.positional[0] == "fft")
     test_or_bench3<TestWrapper<V, CfT, is_real>>(opt);
+#ifdef HAVE_FFTW
   else if(opt.positional[0] == "fftw")
     test_or_bench3<FftwTestWrapper<float, is_real>>(opt);
+#endif
   else
     abort();
 }
