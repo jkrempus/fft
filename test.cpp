@@ -42,10 +42,10 @@ T* alloc_complex_array(Int n)
   return (T*) valloc(2 * n * sizeof(T));
 }
 
-template<typename V, ComplexFormat cf, bool is_real> struct TestWrapper { };
+template<typename V, typename CF, bool is_real> struct TestWrapper { };
 
-template<typename V, ComplexFormat cf>
-struct TestWrapper<V, cf, false>
+template<typename V, typename CF>
+struct TestWrapper<V, CF, false>
 {
   enum { is_real = false };
   VEC_TYPEDEFS(V);
@@ -54,7 +54,7 @@ struct TestWrapper<V, cf, false>
   T* src;
   T* dst;
   TestWrapper(Int n) :
-    state(fft_state<V, cf, cf>(n, valloc(fft_state_memory_size<V>(n)))),
+    state(fft_state<V, CF, CF>(n, valloc(fft_state_memory_size<V>(n)))),
     src((T*) valloc(2 * sizeof(T) * n)),
     dst((T*) valloc(2 * sizeof(T) * n)) { }
 
@@ -81,7 +81,7 @@ struct TestWrapper<V, cf, false>
         pim[j] = T(im[V::vec_size * i + j]);
       }
 
-      store_complex<cf, V>(a, vsrc + i * complex_element_size<cf>(), vn);
+      CF::template store<V>(a, vsrc + i * CF::elemsz, vn);
     }
   }
  
@@ -94,7 +94,7 @@ struct TestWrapper<V, cf, false>
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
-      auto c = load_complex<cf, V>(vdst + i * complex_element_size<cf>(), vn);
+      auto c = CF::template load<V>(vdst + i * CF::elemsz, vn);
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
       for(Int j = 0; j < V::vec_size; j++)
@@ -106,8 +106,8 @@ struct TestWrapper<V, cf, false>
   }
 };
 
-template<typename V, ComplexFormat cf>
-struct TestWrapper<V, cf, true>
+template<typename V, typename CF>
+struct TestWrapper<V, CF, true>
 {
   enum { is_real = true };
   VEC_TYPEDEFS(V);
@@ -118,7 +118,7 @@ struct TestWrapper<V, cf, true>
   T* src;
   T* dst;
   TestWrapper(Int n) :
-    state(rfft_state<V, cf>(n, valloc(rfft_state_memory_size<V>(n)))),
+    state(rfft_state<V, CF>(n, valloc(rfft_state_memory_size<V>(n)))),
     n(n),
     im_offset(align_size<T>(n / 2 + 1))
   {
@@ -144,8 +144,8 @@ struct TestWrapper<V, cf, true>
     auto vdst = (Vec*) dst;
     for(Int i = 0; i < n / V::vec_size / 2 + 1; i++)
     {
-      auto c = load_complex<cf, V>(
-        vdst + i * complex_element_size<cf>(), im_offset / V::vec_size);
+      auto c = CF::template load<V>(
+        vdst + i * CF::elemsz, im_offset / V::vec_size);
 
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
@@ -398,7 +398,7 @@ typename Fft0::value_type compare(Int n)
 
 extern "C" void* aligned_alloc(size_t, size_t);
 
-const auto cf = ComplexFormat::split;
+typedef complex_format::Split CF;
 #if 0
 typedef Scalar<float> V;
 #elif defined __ARM_NEON__
@@ -453,7 +453,7 @@ template<bool is_real, bool is_inverse>
 void test_or_bench2(const Options& opt)
 {
   if(opt.positional[0] == "fft")
-    test_or_bench3<TestWrapper<V, cf, is_real>>(opt);
+    test_or_bench3<TestWrapper<V, CF, is_real>>(opt);
   else if(opt.positional[0] == "fftw")
     test_or_bench3<FftwTestWrapper<float, is_real>>(opt);
   else
