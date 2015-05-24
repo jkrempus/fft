@@ -1,3 +1,6 @@
+#include "fft_core.h"
+#include "fftw3.h"
+
 #include <string>
 #include <cstring>
 #include <algorithm>
@@ -8,9 +11,8 @@
 #include <unistd.h>
 #include <random>
 #include <cstdint>
-#include "fftw3.h"
-
-#include "fft_core.h"
+#include <unordered_set>
+#include <sstream>
 
 extern "C" void* valloc(size_t);
 
@@ -350,6 +352,24 @@ void test(Int n)
   printf("difference %e\n", compare<ReferenceFft<double>, Fft>(n));
 }
 
+struct Options
+{
+  std::unordered_set<std::string> flags;
+  std::vector<std::string> positional;
+};
+
+Options parse_options(int argc, char** argv)
+{
+  Options r;
+  for(Int i = 1; i < argc; i++)
+    if(argv[i][0] == '-')
+      r.flags.emplace(argv[i]);
+    else
+      r.positional.emplace_back(argv[i]);
+
+  return r;
+}
+
 int main(int argc, char** argv)
 {
   const auto cf = ComplexFormat::split;
@@ -367,14 +387,17 @@ int main(int argc, char** argv)
 
   VEC_TYPEDEFS(V);
 
-  Int log2n = atoi(argv[1]);
+  Options opt = parse_options(argc, argv);
+  if(opt.positional.size() != 2) abort();
+
+  Int log2n;
+  std::stringstream(opt.positional[1]) >> log2n;
   Int n = 1 << log2n;
-  bool is_test = argc == 3 && strcmp(argv[2], "t") == 0;
  
-  if(is_test) 
-    test<RealTestWrapper<V, cf>>(n);
+  if(opt.flags.count("-t"))
+    test<TestWrapper<V, cf>>(n);
   else
-    bench<RealTestWrapper<V, cf>>(n, 1e11);
-  
+    bench<TestWrapper<V, cf>>(n, 1e11);
+
   return 0;
 }
