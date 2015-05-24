@@ -378,7 +378,9 @@ struct Scalar
     return v;
   }
 
+  static Vec load(T* p) { return *p; }
   static Vec unaligned_load(T* p) { return *p; }
+  static void store(Vec val, T* p) { *p = val; }
   static void unaligned_store(Vec val, T* p) { *p = val; }
 };
 
@@ -529,6 +531,16 @@ struct SseFloat
   }
   
   static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
+  
+  static Vec reverse(Vec v)
+  {
+    return _mm_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
+  }
+
+  static Vec load(T* p) { return _mm_load_ps(p); }
+  static Vec unaligned_load(T* p) { return _mm_loadu_ps(p); }
+  static void store(Vec val, T* p) { _mm_store_ps(p, val); }
+  static void unaligned_store(Vec val, T* p) { _mm_storeu_ps(p, val); }
 };
 #endif
 
@@ -650,7 +662,9 @@ struct AvxFloat
     return _mm256_permute2f128_ps(v, v, _MM_SHUFFLE(0, 0, 0, 1));
   }
 
+  static Vec load(T* p) { return _mm256_load_ps(p); }
   static Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
+  static void store(Vec val, T* p) { _mm256_store_ps(p, val); }
   static void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
 };
 #endif
