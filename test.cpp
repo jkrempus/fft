@@ -81,7 +81,7 @@ struct TestWrapper<V, CF, false>
         pim[j] = T(im[V::vec_size * i + j]);
       }
 
-      CF::template store<V>(a, vsrc + i * CF::elemsz, vn);
+      CF::store(a, vsrc + i * CF::elemsz, vn);
     }
   }
  
@@ -94,7 +94,7 @@ struct TestWrapper<V, CF, false>
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
-      auto c = CF::template load<V>(vdst + i * CF::elemsz, vn);
+      auto c = CF::load(vdst + i * CF::elemsz, vn);
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
       for(Int j = 0; j < V::vec_size; j++)
@@ -144,8 +144,7 @@ struct TestWrapper<V, CF, true>
     auto vdst = (Vec*) dst;
     for(Int i = 0; i < n / V::vec_size / 2 + 1; i++)
     {
-      auto c = CF::template load<V>(
-        vdst + i * CF::elemsz, im_offset / V::vec_size);
+      auto c = CF::load(vdst + i * CF::elemsz, im_offset / V::vec_size);
 
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
@@ -398,7 +397,6 @@ typename Fft0::value_type compare(Int n)
 
 extern "C" void* aligned_alloc(size_t, size_t);
 
-typedef complex_format::Split CF;
 #if 0
 typedef Scalar<float> V;
 #elif defined __ARM_NEON__
@@ -410,6 +408,8 @@ typedef SseFloat V;
 #else
 typedef Scalar<float> V;
 #endif
+
+typedef complex_format::Split<V> CF;
 
 template<typename Fft>
 void test(Int n)
