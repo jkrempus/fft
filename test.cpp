@@ -85,7 +85,7 @@ struct TestWrapper<V, CfT, false>
         pim[j] = T(im[V::vec_size * i + j]);
       }
 
-      CfT<V>::store(a, src + i * CfT<V>::elemsz, state->n);
+      CfT<V>::store(a, src + i * CfT<V>::stride, state->n);
     }
   }
  
@@ -97,7 +97,7 @@ struct TestWrapper<V, CfT, false>
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
-      auto c = CfT<V>::load(dst + i * CfT<V>::elemsz, state->n);
+      auto c = CfT<V>::load(dst + i * CfT<V>::stride, state->n);
       //TODO: get rid of this casts
       T* pre = (T*) &c.re;
       T* pim = (T*) &c.im;
@@ -149,7 +149,7 @@ struct TestWrapper<V, CfT, true>
     Int vn = n / V::vec_size;
     for(Int i = 0; i < vn / 2 + 1; i++)
     {
-      auto c = CfT<V>::load(dst + i * CfT<V>::elemsz, im_offset);
+      auto c = CfT<V>::load(dst + i * CfT<V>::stride, im_offset);
 
       //TODO: get rid of these casts
       T* pre = (T*) &c.re;
@@ -416,7 +416,7 @@ typedef Scalar<float> V;
 #endif
 
 template<typename T>
-using CfT = complex_format::Scal<T>;
+using CfT = complex_format::Split<T>;
 
 template<typename Fft>
 void test(Int n)

@@ -117,7 +117,8 @@ namespace complex_format
     typedef typename V::T T;
     typedef typename V::Vec Vec;
     typedef Complex<typename V::Vec> C;
-    static const Int elemsz = V::vec_size;
+    static const Int stride = V::vec_size;
+    static const Int idx_ratio = 1;
 
     static FORCEINLINE C load(T* ptr, Int off)
     {
@@ -148,7 +149,8 @@ namespace complex_format
     typedef typename V::T T;
     typedef typename V::Vec Vec_;
     typedef Complex<typename V::Vec> C;
-    static const Int elemsz = 2 * V::vec_size;
+    static const Int stride = 2 * V::vec_size;
+    static const Int idx_ratio = 2;
 
     static FORCEINLINE C load(T* ptr, Int off)
     {
@@ -179,7 +181,8 @@ namespace complex_format
     typedef typename V::T T;
     typedef typename V::Vec Vec;
     typedef Complex<typename V::Vec> C;
-    static const Int elemsz = 2 * V::vec_size;
+    static const Int stride = 2 * V::vec_size;
+    static const Int idx_ratio = 2;
 
     static FORCEINLINE C load(T* ptr, Int off)
     {
@@ -824,15 +827,15 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   Int n = arg.n;
   auto src0 = arg.src;
-  auto src1 = arg.src + n * SrcCf::elemsz / V::vec_size / 2;
+  auto src1 = arg.src + n * SrcCf::stride / V::vec_size / 2;
   auto dst = arg.dst;
-  auto tw = VecCf::load(arg.tiny_twiddle + tiny_log2(dft_size) * VecCf::elemsz, 0);
+  auto tw = VecCf::load(arg.tiny_twiddle + tiny_log2(dft_size) * VecCf::stride, 0);
   for(auto end = src1; src0 < end;)
   {
     C a0 = SrcCf::load(src0, n);
     C a1 = SrcCf::load(src1, n);
-    src0 += SrcCf::elemsz;
-    src1 += SrcCf::elemsz;
+    src0 += SrcCf::stride;
+    src1 += SrcCf::stride;
 
     C b0, b1; 
     if(dft_size == 1)
@@ -852,9 +855,9 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
     V::template interleave_multi<nelem>(b0.re, b1.re, d0.re, d1.re);
     V::template interleave_multi<nelem>(b0.im, b1.im, d0.im, d1.im);
     VecCf::store(d0, dst, 0);
-    VecCf::store(d1, dst + VecCf::elemsz, 0);
+    VecCf::store(d1, dst + VecCf::stride, 0);
 
-    dst += 2 * VecCf::elemsz;
+    dst += 2 * VecCf::stride;
   }
 }
 
@@ -862,7 +865,7 @@ template<typename V, typename SrcCf>
 void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int l = n * SrcCf::elemsz / V::vec_size / 4;
+  Int l = n * SrcCf::stride / V::vec_size / 4;
   T* src0 = arg.src;
   T* src1 = arg.src + l;
   T* src2 = arg.src + 2 * l;
@@ -875,10 +878,10 @@ void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
     C a1 = SrcCf::load(src1, n);
     C a2 = SrcCf::load(src2, n);
     C a3 = SrcCf::load(src3, n);
-    src0 += SrcCf::elemsz;
-    src1 += SrcCf::elemsz;
-    src2 += SrcCf::elemsz;
-    src3 += SrcCf::elemsz;
+    src0 += SrcCf::stride;
+    src1 += SrcCf::stride;
+    src2 += SrcCf::stride;
+    src3 += SrcCf::stride;
 
     C b0 = a0 + a2;
     C b1 = a0 - a2;
@@ -895,10 +898,10 @@ void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
     V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
 
     VecCf::store(d0, dst, 0); 
-    VecCf::store(d1, dst + VecCf::elemsz, 0); 
-    VecCf::store(d2, dst + 2 * VecCf::elemsz, 0); 
-    VecCf::store(d3, dst + 3 * VecCf::elemsz, 0); 
-    dst += 4 * VecCf::elemsz;
+    VecCf::store(d1, dst + VecCf::stride, 0); 
+    VecCf::store(d2, dst + 2 * VecCf::stride, 0); 
+    VecCf::store(d3, dst + 3 * VecCf::stride, 0); 
+    dst += 4 * VecCf::stride;
   }
 }
 
@@ -921,10 +924,10 @@ FORCEINLINE void first_three_passes_impl(
   typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
-  Int l = n / 8 * SrcCf::elemsz / V::vec_size;
+  Int l = n / 8 * SrcCf::stride / V::vec_size;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
-  for(T* end = dst + n * VecCf::elemsz / V::vec_size; dst < end;)
+  for(T* end = dst + n * VecCf::stride / V::vec_size; dst < end;)
   {
     C c0, c1, c2, c3;
     {
@@ -963,7 +966,7 @@ FORCEINLINE void first_three_passes_impl(
       mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
     }
 
-    src += SrcCf::elemsz;
+    src += SrcCf::stride;
 
     C d[8];
     V::template transpose<SameType<SrcCf, cf::Scal<V>>::value>(
@@ -976,9 +979,9 @@ FORCEINLINE void first_three_passes_impl(
       c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
       d[0].im, d[1].im, d[2].im, d[3].im, d[4].im, d[5].im, d[6].im, d[7].im);
 
-    for(Int i = 0; i < 8; i++) VecCf::store(d[i], dst + i * VecCf::elemsz, 0);
+    for(Int i = 0; i < 8; i++) VecCf::store(d[i], dst + i * VecCf::stride, 0);
 
-    dst += 8 * VecCf::elemsz;
+    dst += 8 * VecCf::stride;
     if(src == end) break;
   }
 }
@@ -1006,11 +1009,11 @@ FORCEINLINE void last_pass_impl(
   Int vdft_size = n / 2 / V::vec_size;
   for(Int i0 = 0, i1 = vdft_size; i0 < vdft_size; i0++, i1++)
   {
-    auto a = VecCf::load(src + i0 * VecCf::elemsz, 0);
-    auto b = VecCf::load(src + i1 * VecCf::elemsz, 0);
-    auto mul = b * VecCf::load(twiddle + i0 * VecCf::elemsz, 0);
-    DstCf::store(a + mul, dst + i0 * DstCf::elemsz, n);
-    DstCf::store(a - mul, dst + i1 * DstCf::elemsz, n);
+    auto a = VecCf::load(src + i0 * VecCf::stride, 0);
+    auto b = VecCf::load(src + i1 * VecCf::stride, 0);
+    auto mul = b * VecCf::load(twiddle + i0 * VecCf::stride, 0);
+    DstCf::store(a + mul, dst + i0 * DstCf::stride, n);
+    DstCf::store(a - mul, dst + i1 * DstCf::stride, n);
   }
 }
 
@@ -1072,27 +1075,27 @@ void two_passes(const Arg<typename V::T>& arg)
   Int n = arg.n;
   Int dft_size = arg.dft_size;
   auto src = arg.src;
-  auto tw = arg.twiddle + (VecCf::elemsz / V::vec_size) * (n - 4 * dft_size);
+  auto tw = arg.twiddle + (VecCf::stride / V::vec_size) * (n - 4 * dft_size);
   auto dst = arg.dst;
 
-  Int l1 = n / 4 * VecCf::elemsz / V::vec_size;
+  Int l1 = n / 4 * VecCf::stride / V::vec_size;
   Int l2 = 2 * l1;
   Int l3 = 3 * l1;
 
-  Int m1 = dft_size * DstCf::elemsz / V::vec_size;
+  Int m1 = dft_size * DstCf::stride / V::vec_size;
   Int m2 = 2 * m1;
   Int m3 = 3 * m1;
 
-  for(T* end = src + dft_size * VecCf::elemsz / V::vec_size; src < end;)
+  for(T* end = src + dft_size * VecCf::stride / V::vec_size; src < end;)
   {
     auto s = src;
     auto d = dst;
     auto tw0 = VecCf::load(tw, 0);
-    auto tw1 = VecCf::load(tw + VecCf::elemsz, 0);
-    auto tw2 = VecCf::load(tw + 2 * VecCf::elemsz, 0);
-    src += VecCf::elemsz;
-    tw += 3 * VecCf::elemsz;
-    dst += DstCf::elemsz;
+    auto tw1 = VecCf::load(tw + VecCf::stride, 0);
+    auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
+    src += VecCf::stride;
+    tw += 3 * VecCf::stride;
+    dst += DstCf::stride;
 
     for(T* end1 = s + l1;;)
     {
@@ -1102,7 +1105,7 @@ void two_passes(const Arg<typename V::T>& arg)
         VecCf::load(s + l2, 0), VecCf::load(s + l3, 0),
         d0, d1, d2, d3, tw0, tw1, tw2);
 
-      s += dft_size * VecCf::elemsz / V::vec_size;
+      s += dft_size * VecCf::stride / V::vec_size;
 
       DstCf::store(d0, d, n);
       DstCf::store(d1, d + m1, n);
@@ -1149,7 +1152,7 @@ namespace index_mapping
   }
 }
 
-#if 0 //TODO
+#if 1 //TODO
 template<
   Int npasses,
   Int chunk_size,
@@ -1158,48 +1161,48 @@ template<
   typename DstCf,
   typename V>
 FORCEINLINE void two_passes_strided_impl(
-  Int n,
+  Int vn,
   Int nchunks,
   Int initial_dft_size,
   Int offset,
-  Complex<typename V::Vec>* src0,
-  Complex<typename V::Vec>* twiddle_start,
-  typename V::Vec* dst0)
+  typename V::T* src0,
+  typename V::T* twiddle_start,
+  typename V::T* dst0)
 {
   VEC_TYPEDEFS(V);
   namespace im = index_mapping;
 
+  Int n_ = vn * V::vec_size;
   //printf("npasses %d offset %d\n", npasses, offset);
-  typedef Complex<Vec> C;
  
   Int l = nchunks * chunk_size / 4;
   Int dft_size = initial_dft_size << npasses;
   Int m = min(initial_dft_size, chunk_size) << npasses;
 
-  C* twiddle = twiddle_start + n - 4 * dft_size;
+  T* twiddle = twiddle_start + (vn - 4 * dft_size) * VecCf::stride;
 
   bool is_large = initial_dft_size >= chunk_size;
   Int soffset = im::offset(offset, initial_dft_size, npasses, is_large);
   Int doffset = im::offset(offset, initial_dft_size, npasses + 2, is_large);
-  Int chunk_stride = n / nchunks;
+  Int chunk_stride = vn / nchunks;
 
   Int sstride = 
     src_is_strided ? im::to_strided_index(
-      l, n, chunk_stride, chunk_size, initial_dft_size, npasses, is_large)
+      l, vn, chunk_stride, chunk_size, initial_dft_size, npasses, is_large)
     : l;
 
   Int dstride = 
     dst_is_strided ? im::to_strided_index(
-      m, n, chunk_stride, chunk_size, initial_dft_size, npasses + 2, is_large)
+      m, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 2, is_large)
     : m;
 
-  C* src1 = src0 + sstride;
-  C* src2 = src1 + sstride;
-  C* src3 = src2 + sstride;
+  T* src1 = src0 + sstride * VecCf::stride;
+  T* src2 = src1 + sstride * VecCf::stride;
+  T* src3 = src2 + sstride * VecCf::stride;
   
-  Vec* dst1 = dst0 + dstride * DstCf::elemsz;
-  Vec* dst2 = dst1 + dstride * DstCf::elemsz;
-  Vec* dst3 = dst2 + dstride * DstCf::elemsz;
+  T* dst1 = dst0 + dstride * DstCf::stride;
+  T* dst2 = dst1 + dstride * DstCf::stride;
+  T* dst3 = dst2 + dstride * DstCf::stride;
 
   if(is_large)
     for(Int i = 0; i < l; i += m)
@@ -1210,27 +1213,34 @@ FORCEINLINE void two_passes_strided_impl(
         Int d = 4 * i + j;
 
         Int strided_s = soffset + im::to_strided_index(
-          s, n, chunk_stride, chunk_size, initial_dft_size, npasses, true);
+          s, vn, chunk_stride, chunk_size, initial_dft_size, npasses, true);
 
         Int strided_d = doffset + im::to_strided_index(
-          d, n, chunk_stride, chunk_size, initial_dft_size, npasses + 2, true);
+          d, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 2, true);
 
         if(src_is_strided) s = strided_s;
         if(dst_is_strided) d = strided_d; 
 
         for(Int k = 0; k < chunk_size; k++)
         {
-          auto tw = twiddle + 3 * (strided_s & (dft_size - 1));
-       
-          C d0, d1, d2, d3; 
-          two_passes_inner(
-            src0[s], src1[s], src2[s], src3[s], d0, d1, d2, d3,
-            tw[0], tw[1], tw[2]);
+          auto tw = twiddle + 3 * (strided_s & (dft_size - 1)) * VecCf::stride;
+          
+          C tw0 = VecCf::load(tw, 0);
+          C tw1 = VecCf::load(tw + VecCf::stride, 0);
+          C tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
 
-          DstCf::store(d0, dst0 + d * DstCf::elemsz, n);  
-          DstCf::store(d1, dst1 + d * DstCf::elemsz, n);  
-          DstCf::store(d2, dst2 + d * DstCf::elemsz, n);  
-          DstCf::store(d3, dst3 + d * DstCf::elemsz, n);  
+          C s0 = VecCf::load(src0 + s * VecCf::stride, 0);
+          C s1 = VecCf::load(src1 + s * VecCf::stride, 0);
+          C s2 = VecCf::load(src2 + s * VecCf::stride, 0);
+          C s3 = VecCf::load(src3 + s * VecCf::stride, 0);
+
+          C d0, d1, d2, d3; 
+          two_passes_inner(s0, s1, s2, s3, d0, d1, d2, d3, tw0, tw1, tw2);
+
+          DstCf::store(d0, dst0 + d * DstCf::stride, n_);  
+          DstCf::store(d1, dst1 + d * DstCf::stride, n_);  
+          DstCf::store(d2, dst2 + d * DstCf::stride, n_);  
+          DstCf::store(d3, dst3 + d * DstCf::stride, n_);  
 
           s++;
           d++;
@@ -1245,27 +1255,34 @@ FORCEINLINE void two_passes_strided_impl(
       Int d = 4 * i;
 
       Int strided_s = soffset + im::to_strided_index(
-        s, n, chunk_stride, chunk_size, initial_dft_size, npasses, false);
+        s, vn, chunk_stride, chunk_size, initial_dft_size, npasses, false);
 
       Int strided_d = doffset + im::to_strided_index(
-        d, n, chunk_stride, chunk_size, initial_dft_size, npasses + 2, false);
+        d, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 2, false);
 
       if(src_is_strided) s = strided_s;
       if(dst_is_strided) d = strided_d;
 
       for(Int j = 0; j < m; j++)
       {
-        auto tw = twiddle + 3 * (strided_s & (dft_size - 1));
+        auto tw = twiddle + 3 * (strided_s & (dft_size - 1)) * VecCf::stride;
+        
+        C tw0 = VecCf::load(tw, 0);
+        C tw1 = VecCf::load(tw + VecCf::stride, 0);
+        C tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
+
+        C s0 = VecCf::load(src0 + s * VecCf::stride, 0);
+        C s1 = VecCf::load(src1 + s * VecCf::stride, 0);
+        C s2 = VecCf::load(src2 + s * VecCf::stride, 0);
+        C s3 = VecCf::load(src3 + s * VecCf::stride, 0);
 
         C d0, d1, d2, d3; 
-        two_passes_inner(
-          src0[s], src1[s], src2[s], src3[s], d0, d1, d2, d3,
-          tw[0], tw[1], tw[2]);
+        two_passes_inner(s0, s1, s2, s3, d0, d1, d2, d3, tw0, tw1, tw2);
 
-        DstCf::store(d0, dst0 + d * DstCf::elemsz, n);  
-        DstCf::store(d1, dst1 + d * DstCf::elemsz, n);  
-        DstCf::store(d2, dst2 + d * DstCf::elemsz, n);  
-        DstCf::store(d3, dst3 + d * DstCf::elemsz, n);  
+        DstCf::store(d0, dst0 + d * DstCf::stride, n_);
+        DstCf::store(d1, dst1 + d * DstCf::stride, n_);
+        DstCf::store(d2, dst2 + d * DstCf::stride, n_);
+        DstCf::store(d3, dst3 + d * DstCf::stride, n_);
 
         s++;
         d++;
@@ -1281,9 +1298,9 @@ void four_passes(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   Int n = arg.n / V::vec_size;
   Int dft_size = arg.dft_size / V::vec_size;
-  auto src = (Complex<Vec>*) arg.src;
-  auto twiddle = (Complex<Vec>*) arg.twiddle;
-  auto dst = (Vec*) arg.dst;
+  auto src = arg.src;
+  auto twiddle = arg.twiddle;
+  auto dst = arg.dst;
   
   typedef Complex<Vec> C;
 
@@ -1294,11 +1311,12 @@ void four_passes(const Arg<typename V::T>& arg)
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-#if 0 //TODO
+#if 1 //TODO
+    // TODO: get rid of casts and align working manually
     two_passes_strided_impl<0, chunk_size, true, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, src, twiddle, working);
+      n, nchunks, dft_size, offset, src, twiddle, (T*) working);
     two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
-      n, nchunks, dft_size, offset, (C*) working, twiddle, dst);
+      n, nchunks, dft_size, offset, (T*) working, twiddle, dst);
 #endif
   }
 }
@@ -1319,20 +1337,20 @@ FORCEINLINE void last_three_passes_impl(
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
 
-  for(auto end = src + l1 * VecCf::elemsz;;)
+  for(auto end = src + l1 * VecCf::stride;;)
   {
     C a[8];
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
       C tw0 = VecCf::load(twiddle, 0);
-      C tw1 = VecCf::load(twiddle + VecCf::elemsz, 0);
-      C tw2 = VecCf::load(twiddle + 2 * VecCf::elemsz, 0);
+      C tw1 = VecCf::load(twiddle + VecCf::stride, 0);
+      C tw2 = VecCf::load(twiddle + 2 * VecCf::stride, 0);
 
       {
         C mul0 =       VecCf::load(src, 0);
-        C mul1 = tw0 * VecCf::load(src + l2 * VecCf::elemsz, 0);
-        C mul2 = tw1 * VecCf::load(src + l4 * VecCf::elemsz, 0);
-        C mul3 = tw2 * VecCf::load(src + l6 * VecCf::elemsz, 0);
+        C mul1 = tw0 * VecCf::load(src + l2 * VecCf::stride, 0);
+        C mul2 = tw1 * VecCf::load(src + l4 * VecCf::stride, 0);
+        C mul3 = tw2 * VecCf::load(src + l6 * VecCf::stride, 0);
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -1346,10 +1364,10 @@ FORCEINLINE void last_three_passes_impl(
       }
 
       {
-        C mul0 =       VecCf::load(src + l1 * VecCf::elemsz, 0);
-        C mul1 = tw0 * VecCf::load(src + l3 * VecCf::elemsz, 0);
-        C mul2 = tw1 * VecCf::load(src + l5 * VecCf::elemsz, 0);
-        C mul3 = tw2 * VecCf::load(src + l7 * VecCf::elemsz, 0);
+        C mul0 =       VecCf::load(src + l1 * VecCf::stride, 0);
+        C mul1 = tw0 * VecCf::load(src + l3 * VecCf::stride, 0);
+        C mul2 = tw1 * VecCf::load(src + l5 * VecCf::stride, 0);
+        C mul3 = tw2 * VecCf::load(src + l7 * VecCf::stride, 0);
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -1364,38 +1382,38 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw3 = VecCf::load(twiddle + 3 * VecCf::elemsz, 0);
+      C tw3 = VecCf::load(twiddle + 3 * VecCf::stride, 0);
       {
         auto mul = tw3 * a4;
         DstCf::store(a0 + mul, dst + 0, n);
-        DstCf::store(a0 - mul, dst + l4 * DstCf::elemsz, n);
+        DstCf::store(a0 - mul, dst + l4 * DstCf::stride, n);
       }
 
       {
         auto mul = tw3.mul_neg_i() * a6;
-        DstCf::store(a2 + mul, dst + l2 * DstCf::elemsz, n);
-        DstCf::store(a2 - mul, dst + l6 * DstCf::elemsz, n);
+        DstCf::store(a2 + mul, dst + l2 * DstCf::stride, n);
+        DstCf::store(a2 - mul, dst + l6 * DstCf::stride, n);
       }
     }
 
     {
-      C tw4 = VecCf::load(twiddle + 4 * VecCf::elemsz, 0);
+      C tw4 = VecCf::load(twiddle + 4 * VecCf::stride, 0);
       {
         auto mul = tw4 * a5;
-        DstCf::store(a1 + mul, dst + l1 * DstCf::elemsz, n);
-        DstCf::store(a1 - mul, dst + l5 * DstCf::elemsz, n);
+        DstCf::store(a1 + mul, dst + l1 * DstCf::stride, n);
+        DstCf::store(a1 - mul, dst + l5 * DstCf::stride, n);
       }
 
       {
         auto mul = tw4.mul_neg_i() * a7;
-        DstCf::store(a3 + mul, dst + l3 * DstCf::elemsz, n);
-        DstCf::store(a3 - mul, dst + l7 * DstCf::elemsz, n);
+        DstCf::store(a3 + mul, dst + l3 * DstCf::stride, n);
+        DstCf::store(a3 - mul, dst + l7 * DstCf::stride, n);
       }
     }
 
-    src += VecCf::elemsz;
-    dst += DstCf::elemsz;
-    twiddle += 5 * VecCf::elemsz;
+    src += VecCf::stride;
+    dst += DstCf::stride;
+    twiddle += 5 * VecCf::stride;
     if(src == end) break;
   }
 }
@@ -1593,7 +1611,7 @@ void real_last_pass(
   Int src_off = n / 2;
   Int dst_off = align_size<T>(n / 2 + 1);
 
-  const Int dst_ratio = DstCfT<V>::elemsz / V::vec_size;
+  const Int dst_ratio = DstCfT<V>::stride / V::vec_size;
 
   Vec half = V::vec(0.5);
 
