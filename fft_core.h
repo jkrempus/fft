@@ -3,7 +3,8 @@ typedef unsigned long Uint;
 
 const Int max_int = Int(Uint(-1) >> 1);
 
-#define FORCEINLINE __attribute__((always_inline)) inline
+//#define FORCEINLINE __attribute__((always_inline)) inline
+#define FORCEINLINE
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
 
@@ -79,16 +80,6 @@ void interleave(const T* src0, const T* src1, Int n, T* dst)
 }
 
 template<typename T>
-void deinterleave(const T* src, Int n, T* dst0, T* dst1)
-{
-  for(Int i = 0; i < n; i++)
-  {
-    dst0[i] = src[2 * i];
-    dst1[i] = src[2 * i + 1];
-  }
-}
-
-template<typename T>
 struct Complex
 {
   T re;
@@ -118,30 +109,30 @@ struct Complex
   }
 };
 
-#define VEC_TYPEDEFS(V) \
-  typedef typename V::T T; \
-  typedef typename V::Vec Vec; \
-  typedef Complex<typename V::Vec> C;
-
 namespace complex_format
 {
   template<typename V>
   struct Split
   {
-    VEC_TYPEDEFS(V);
-    static const Int elemsz = 1;
+    typedef typename V::T T;
+    typedef typename V::Vec Vec;
+    typedef Complex<typename V::Vec> C;
+    static const Int elemsz = V::vec_size;
 
-    static FORCEINLINE C load(Vec* ptr, Int off) { return {ptr[0], ptr[off]}; }
+    static FORCEINLINE C load(T* ptr, Int off)
+    {
+      return { V::load(ptr), V::load(ptr + off)};
+    }
     
     static FORCEINLINE C unaligned_load(T* ptr, Int off)
     {
       return {V::unaligned_load(ptr), V::unaligned_load(ptr + off)};
     }
 
-    static FORCEINLINE void store(C a, Vec* ptr, Int off)
+    static FORCEINLINE void store(C a, T* ptr, Int off)
     {
-      ptr[0] = a.re;
-      ptr[off] = a.im;
+      V::store(a.re, ptr);
+      V::store(a.im, ptr + off);
     }
 
     static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
@@ -157,19 +148,22 @@ namespace complex_format
     typedef typename V::T T;
     typedef typename V::Vec Vec_;
     typedef Complex<typename V::Vec> C;
-    static const Int elemsz = 2;
+    static const Int elemsz = 2 * V::vec_size;
 
-    static FORCEINLINE C load(Vec_* ptr, Int off) { return {ptr[0], ptr[1]}; }
+    static FORCEINLINE C load(T* ptr, Int off)
+    {
+      return {V::load(ptr), V::load(ptr + V::vec_size)};
+    }
 
     static FORCEINLINE C unaligned_load(T* ptr, Int off)
     {
       return {V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
     }
 
-    static FORCEINLINE void store(C a, Vec_* ptr, Int off)
+    static FORCEINLINE void store(C a, T* ptr, Int off)
     {
-      ptr[0] = a.re;
-      ptr[1] = a.im;
+      V::store(a.re, ptr);
+      V::store(a.im, ptr + V::vec_size);
     }
 
     static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
@@ -182,13 +176,18 @@ namespace complex_format
   template<typename V>
   struct Scal
   {
-    VEC_TYPEDEFS(V)
-    static const Int elemsz = 2;
+    typedef typename V::T T;
+    typedef typename V::Vec Vec;
+    typedef Complex<typename V::Vec> C;
+    static const Int elemsz = 2 * V::vec_size;
 
-    static FORCEINLINE C load(Vec* ptr, Int off)
+    static FORCEINLINE C load(T* ptr, Int off)
     {
       C r;
-      V::deinterleave(ptr[0], ptr[1], r.re, r.im);
+      V::deinterleave(
+        V::load(ptr), V::load(ptr + V::vec_size),
+        r.re, r.im);
+
       return r;
     }
 
@@ -202,9 +201,11 @@ namespace complex_format
       return r;
     }
 
-    static FORCEINLINE void store(C a, Vec* ptr, Int off)
+    static FORCEINLINE void store(C a, T* ptr, Int off)
     {
-      V::interleave(a.re, a.im, ptr[0], ptr[1]);
+      V::interleave(a.re, a.im, a.re, a.im);
+      V::store(a.re, ptr);
+      V::store(a.im, ptr + V::vec_size);
     }
 
     static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
@@ -217,6 +218,12 @@ namespace complex_format
 }
 
 namespace cf = complex_format;
+
+#define VEC_TYPEDEFS(V) \
+  typedef typename V::T T; \
+  typedef typename V::Vec Vec; \
+  typedef Complex<typename V::Vec> C; \
+  typedef cf::Vec<V> VecCf;
 
 template<typename V>
 Complex<typename V::Vec> reverse_complex(Complex<typename V::Vec> a)
@@ -681,40 +688,6 @@ void swap(T& a, T& b)
   b = tmpa;
 }
 
-template<typename V, typename SrcCf>
-void rearrange_vector_elements_like_load(typename V::Vec* p, Int len)
-{
-  VEC_TYPEDEFS(V);
-  Vec a[2];
-  
-  for(auto end = p + len; p < end; p += 2)
-  {
-    T* src = (T*) p;
-    T* dst = (T*) a;
-
-    //Get it into the source format
-    for(Int i = 0; i < V::vec_size; i++)
-    {
-      if(SameType<SrcCf, cf::Scal<V>>::value)
-      {
-        dst[2 * i] = src[i];
-        dst[2 * i + 1] = src[i + V::vec_size];
-      }
-      else
-      {
-        dst[2 * i] = src[2 * i];
-        dst[2 * i + 1] = src[2 * i + 1];
-      }
-    }
-
-    //load it like we would during fft computation
-    Complex<Vec> c = SrcCf::load(a, 1);
-    //store it as cf::Vec
-    p[0] = c.re;
-    p[1] = c.im; 
-  }
-}
-
 template<typename T>
 void compute_twiddle_step(
   T* src_re, T* src_im,
@@ -835,9 +808,9 @@ void init_twiddle(State<typename V::T>& state)
     dft_size <<= step.npasses;
   }
 
-  rearrange_vector_elements_like_load<V, SrcCf>((Vec*) dst, 2 * n / V::vec_size);
-  rearrange_vector_elements_like_load<V, SrcCf>(
-    (Vec*) state.tiny_twiddle, 2 * tiny_log2(V::vec_size));
+  //rearrange_vector_elements_like_load<V, SrcCf>((Vec*) dst, 2 * n / V::vec_size);
+  //rearrange_vector_elements_like_load<V, SrcCf>(
+  //  (Vec*) state.tiny_twiddle, 2 * tiny_log2(V::vec_size));
 }
 
 template<typename T> T min(T a, T b){ return a < b ? a : b; }
@@ -849,16 +822,17 @@ template<typename V, Int dft_size, typename SrcCf>
 void ct_dft_size_pass(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  typedef Complex<Vec> C;
-  Int vn = arg.n / V::vec_size;
-  auto vsrc0 = (Vec*) arg.src;
-  auto vsrc1 = (Vec*) arg.src + SrcCf::elemsz * vn / 2;
-  auto vdst = (Complex<Vec>*) arg.dst;
-  C tw = ((C*) arg.tiny_twiddle)[tiny_log2(dft_size)];
-  for(auto end = vdst + vn; vdst < end;)
+  Int n = arg.n;
+  auto src0 = arg.src;
+  auto src1 = arg.src + n * SrcCf::elemsz / V::vec_size / 2;
+  auto dst = arg.dst;
+  auto tw = VecCf::load(arg.tiny_twiddle + tiny_log2(dft_size) * VecCf::elemsz, 0);
+  for(auto end = src1; src0 < end;)
   {
-    C a0 = SrcCf::load(vsrc0, vn);
-    C a1 = SrcCf::load(vsrc1, vn);
+    C a0 = SrcCf::load(src0, n);
+    C a1 = SrcCf::load(src1, n);
+    src0 += SrcCf::elemsz;
+    src1 += SrcCf::elemsz;
 
     C b0, b1; 
     if(dft_size == 1)
@@ -874,12 +848,13 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
     }
 
     const Int nelem = V::vec_size / dft_size;
-    V::template interleave_multi<nelem>(b0.re, b1.re, vdst[0].re, vdst[1].re);
-    V::template interleave_multi<nelem>(b0.im, b1.im, vdst[0].im, vdst[1].im);
+    C d0, d1;
+    V::template interleave_multi<nelem>(b0.re, b1.re, d0.re, d1.re);
+    V::template interleave_multi<nelem>(b0.im, b1.im, d0.im, d1.im);
+    VecCf::store(d0, dst, 0);
+    VecCf::store(d1, dst + VecCf::elemsz, 0);
 
-    vsrc0 += SrcCf::elemsz;
-    vsrc1 += SrcCf::elemsz;
-    vdst += 2;
+    dst += 2 * VecCf::elemsz;
   }
 }
 
@@ -887,21 +862,23 @@ template<typename V, typename SrcCf>
 void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  typedef Complex<Vec> C;
+  Int l = n * SrcCf::elemsz / V::vec_size / 4;
+  T* src0 = arg.src;
+  T* src1 = arg.src + l;
+  T* src2 = arg.src + 2 * l;
+  T* src3 = arg.src + 3 * l;
+  T* dst = arg.dst;
 
-  Int vn = n / V::vec_size;
-  Vec* vsrc0 = (Vec*) arg.src;
-  Vec* vsrc1 = (Vec*) arg.src + SrcCf::elemsz * vn / 4;
-  Vec* vsrc2 = (Vec*) arg.src + SrcCf::elemsz * 2 * vn / 4;
-  Vec* vsrc3 = (Vec*) arg.src + SrcCf::elemsz * 3 * vn / 4;
-  auto vdst = (C*) arg.dst;
-
-  for(Int i = 0; i < vn / 4; i++)
+  for(T* end = src1; src0 < end;)
   {
-    C a0 = SrcCf::load(vsrc0 + SrcCf::elemsz * i, vn);
-    C a1 = SrcCf::load(vsrc1 + SrcCf::elemsz * i, vn);
-    C a2 = SrcCf::load(vsrc2 + SrcCf::elemsz * i, vn);
-    C a3 = SrcCf::load(vsrc3 + SrcCf::elemsz * i, vn);
+    C a0 = SrcCf::load(src0, n);
+    C a1 = SrcCf::load(src1, n);
+    C a2 = SrcCf::load(src2, n);
+    C a3 = SrcCf::load(src3, n);
+    src0 += SrcCf::elemsz;
+    src1 += SrcCf::elemsz;
+    src2 += SrcCf::elemsz;
+    src3 += SrcCf::elemsz;
 
     C b0 = a0 + a2;
     C b1 = a0 - a2;
@@ -913,14 +890,15 @@ void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
     C c1 = b1 + b3.mul_neg_i();
     C c3 = b1 - b3.mul_neg_i();
 
-    Int j = 4 * i;
-    V::transpose(
-      c0.re, c1.re, c2.re, c3.re,
-      vdst[j].re, vdst[j + 1].re, vdst[j + 2].re, vdst[j + 3].re);
-    
-    V::transpose(
-      c0.im, c1.im, c2.im, c3.im,
-      vdst[j].im, vdst[j + 1].im, vdst[j + 2].im, vdst[j + 3].im);
+    C d0, d1, d2, d3;
+    V::transpose(c0.re, c1.re, c2.re, c3.re, d0.re, d1.re, d2.re, d3.re);
+    V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
+
+    VecCf::store(d0, dst, 0); 
+    VecCf::store(d1, dst + VecCf::elemsz, 0); 
+    VecCf::store(d2, dst + 2 * VecCf::elemsz, 0); 
+    VecCf::store(d3, dst + 3 * VecCf::elemsz, 0); 
+    dst += 4 * VecCf::elemsz;
   }
 }
 
@@ -939,21 +917,21 @@ void first_two_passes_ct_size(const Arg<typename V::T>& arg)
 template<typename V, typename SrcCf>
 FORCEINLINE void first_three_passes_impl(
   Int n,
-  typename V::Vec* src,
-  Complex<typename V::Vec>* dst)
+  typename V::T* src,
+  typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
-  Int l = n / 8;
+  Int l = n / 8 * SrcCf::elemsz / V::vec_size;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
-  for(auto end = src + l * SrcCf::elemsz;;)
+  for(T* end = dst + n * VecCf::elemsz / V::vec_size; dst < end;)
   {
     C c0, c1, c2, c3;
     {
-      C a0 = SrcCf::load(src + 0 * l * SrcCf::elemsz, n);
-      C a1 = SrcCf::load(src + 2 * l * SrcCf::elemsz, n);
-      C a2 = SrcCf::load(src + 4 * l * SrcCf::elemsz, n);
-      C a3 = SrcCf::load(src + 6 * l * SrcCf::elemsz, n);
+      C a0 = SrcCf::load(src + 0 * l, n);
+      C a1 = SrcCf::load(src + 2 * l, n);
+      C a2 = SrcCf::load(src + 4 * l, n);
+      C a3 = SrcCf::load(src + 6 * l, n);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -966,10 +944,10 @@ FORCEINLINE void first_three_passes_impl(
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = SrcCf::load(src + 1 * l * SrcCf::elemsz, n);
-      C a1 = SrcCf::load(src + 3 * l * SrcCf::elemsz, n);
-      C a2 = SrcCf::load(src + 5 * l * SrcCf::elemsz, n);
-      C a3 = SrcCf::load(src + 7 * l * SrcCf::elemsz, n);
+      C a0 = SrcCf::load(src + 1 * l, n);
+      C a1 = SrcCf::load(src + 3 * l, n);
+      C a2 = SrcCf::load(src + 5 * l, n);
+      C a3 = SrcCf::load(src + 7 * l, n);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -987,19 +965,20 @@ FORCEINLINE void first_three_passes_impl(
 
     src += SrcCf::elemsz;
 
+    C d[8];
     V::template transpose<SameType<SrcCf, cf::Scal<V>>::value>(
       c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
       c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
-      dst[0].re, dst[1].re, dst[2].re, dst[3].re,
-      dst[4].re, dst[5].re, dst[6].re, dst[7].re);
+      d[0].re, d[1].re, d[2].re, d[3].re, d[4].re, d[5].re, d[6].re, d[7].re);
 
     V::template transpose<SameType<SrcCf, cf::Scal<V>>::value>(
       c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
       c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
-      dst[0].im, dst[1].im, dst[2].im, dst[3].im,
-      dst[4].im, dst[5].im, dst[6].im, dst[7].im);
+      d[0].im, d[1].im, d[2].im, d[3].im, d[4].im, d[5].im, d[6].im, d[7].im);
 
-    dst += 8;
+    for(Int i = 0; i < 8; i++) VecCf::store(d[i], dst + i * VecCf::elemsz, 0);
+
+    dst += 8 * VecCf::elemsz;
     if(src == end) break;
   }
 }
@@ -1007,59 +986,44 @@ FORCEINLINE void first_three_passes_impl(
 template<typename V, typename SrcCf>
 void first_three_passes(const Arg<typename V::T>& arg)
 {
-  VEC_TYPEDEFS(V);
-  first_three_passes_impl<V, SrcCf>(
-    arg.n / V::vec_size,
-    (Vec*) arg.src,
-    (Complex<Vec>*) arg.dst);
+  first_three_passes_impl<V, SrcCf>(arg.n, arg.src, arg.dst);
 }
 
 template<typename V, typename SrcCf, Int n>
 void first_three_passes_ct_size(const Arg<typename V::T>& arg)
 {
-  VEC_TYPEDEFS(V);
-  first_three_passes_impl<V, SrcCf>(
-    n / V::vec_size,
-    (Vec*) arg.src,
-    (Complex<Vec>*) arg.dst);
+  first_three_passes_impl<V, SrcCf>(n, arg.src, arg.dst);
 }
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_pass_impl(
-  Int dft_size,
-  Complex<typename V::Vec>* src,
-  Complex<typename V::Vec>* twiddle,
-  typename V::Vec* dst)
+  Int n,
+  typename V::T* src,
+  typename V::T* twiddle,
+  typename V::T* dst)
 {
-  for(Int i0 = 0, i1 = dft_size; i0 < dft_size; i0++, i1++)
+  VEC_TYPEDEFS(V);
+  Int vdft_size = n / 2 / V::vec_size;
+  for(Int i0 = 0, i1 = vdft_size; i0 < vdft_size; i0++, i1++)
   {
-    auto a = src[i0];
-    auto mul = src[i1] * twiddle[i0];
-    DstCf::store(a + mul, dst + i0 * DstCf::elemsz, 2 * dft_size);
-    DstCf::store(a - mul, dst + i1 * DstCf::elemsz, 2 * dft_size);
+    auto a = VecCf::load(src + i0 * VecCf::elemsz, 0);
+    auto b = VecCf::load(src + i1 * VecCf::elemsz, 0);
+    auto mul = b * VecCf::load(twiddle + i0 * VecCf::elemsz, 0);
+    DstCf::store(a + mul, dst + i0 * DstCf::elemsz, n);
+    DstCf::store(a - mul, dst + i1 * DstCf::elemsz, n);
   }
 }
 
 template<typename V, typename DstCf>
 void last_pass_vec(const Arg<typename V::T>& arg)
 {
-  VEC_TYPEDEFS(V);
-  last_pass_impl<V, DstCf>(
-    arg.n / V::vec_size / 2,
-    (Complex<Vec>*) arg.src,
-    (Complex<Vec>*) arg.twiddle,
-    (Vec*) arg.dst);
+  last_pass_impl<V, DstCf>(arg.n, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
 {
-  VEC_TYPEDEFS(V);
-  last_pass_impl<V, DstCf>(
-    n / V::vec_size / 2,
-    (Complex<Vec>*) arg.src,
-    (Complex<Vec>*) arg.twiddle,
-    (Vec*) arg.dst);
+  last_pass_impl<V, DstCf>(n, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename T>
@@ -1085,6 +1049,7 @@ FORCEINLINE void two_passes_inner(
   dst3 = dif02 - dif13.mul_neg_i();
 }
 
+#if 0 //TODO
 template<
   typename T,
   void (*fun0)(const Arg<T>& a),
@@ -1096,6 +1061,7 @@ void two_steps(const Arg<T>& arg_in)
   swap(arg.src, arg.dst);
   fun1(arg); 
 }
+#endif
 
 template<typename V, typename DstCf>
 void two_passes(const Arg<typename V::T>& arg)
@@ -1103,36 +1069,40 @@ void two_passes(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   typedef Complex<Vec> C;
 
-  Int n = arg.n / V::vec_size;
-  Int dft_size = arg.dft_size / V::vec_size;
-  auto src = (Complex<Vec>*) arg.src;
-  auto tw = (Complex<Vec>*) arg.twiddle + n - 4 * dft_size;
-  auto dst = (Vec*) arg.dst;
+  Int n = arg.n;
+  Int dft_size = arg.dft_size;
+  auto src = arg.src;
+  auto tw = arg.twiddle + (VecCf::elemsz / V::vec_size) * (n - 4 * dft_size);
+  auto dst = arg.dst;
 
-  Int l1 = n / 4;
+  Int l1 = n / 4 * VecCf::elemsz / V::vec_size;
   Int l2 = 2 * l1;
   Int l3 = 3 * l1;
 
-  Int m1 = dft_size * DstCf::elemsz;
+  Int m1 = dft_size * DstCf::elemsz / V::vec_size;
   Int m2 = 2 * m1;
   Int m3 = 3 * m1;
 
-  for(C* end = src + dft_size; src < end;)
+  for(T* end = src + dft_size * VecCf::elemsz / V::vec_size; src < end;)
   {
     auto s = src;
     auto d = dst;
-    auto tw0 = tw[0];
-    auto tw1 = tw[1];
-    auto tw2 = tw[2]; 
-    src += 1;
-    tw += 3;
+    auto tw0 = VecCf::load(tw, 0);
+    auto tw1 = VecCf::load(tw + VecCf::elemsz, 0);
+    auto tw2 = VecCf::load(tw + 2 * VecCf::elemsz, 0);
+    src += VecCf::elemsz;
+    tw += 3 * VecCf::elemsz;
     dst += DstCf::elemsz;
 
-    for(C* end1 = s + l1;;)
+    for(T* end1 = s + l1;;)
     {
       C d0, d1, d2, d3;
-      two_passes_inner(s[0], s[l1], s[l2], s[l3], d0, d1, d2, d3, tw0, tw1, tw2);
-      s += dft_size;
+      two_passes_inner(
+        VecCf::load(s, 0), VecCf::load(s + l1, 0),
+        VecCf::load(s + l2, 0), VecCf::load(s + l3, 0),
+        d0, d1, d2, d3, tw0, tw1, tw2);
+
+      s += dft_size * VecCf::elemsz / V::vec_size;
 
       DstCf::store(d0, d, n);
       DstCf::store(d1, d + m1, n);
@@ -1179,6 +1149,7 @@ namespace index_mapping
   }
 }
 
+#if 0 //TODO
 template<
   Int npasses,
   Int chunk_size,
@@ -1302,6 +1273,7 @@ FORCEINLINE void two_passes_strided_impl(
       }
     }
 }
+#endif
 
 template<typename V, typename DstCf>
 void four_passes(const Arg<typename V::T>& arg)
@@ -1322,22 +1294,24 @@ void four_passes(const Arg<typename V::T>& arg)
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
+#if 0 //TODO
     two_passes_strided_impl<0, chunk_size, true, false, cf::Vec<V>, V>(
       n, nchunks, dft_size, offset, src, twiddle, working);
     two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
       n, nchunks, dft_size, offset, (C*) working, twiddle, dst);
+#endif
   }
 }
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_three_passes_impl(
   Int n,
-  Complex<typename V::Vec>* src,
-  Complex<typename V::Vec>* twiddle,
-  typename V::Vec* dst)
+  typename V::T* src,
+  typename V::T* twiddle,
+  typename V::T* dst)
 {
-  typedef Complex<typename V::Vec> C;
-  Int l1 = n / 8;
+  VEC_TYPEDEFS(V);
+  Int l1 = n / 8 / V::vec_size;
   Int l2 = 2 * l1;
   Int l3 = 3 * l1;
   Int l4 = 4 * l1;
@@ -1345,20 +1319,20 @@ FORCEINLINE void last_three_passes_impl(
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
 
-  for(auto end = src + l1;;)
+  for(auto end = src + l1 * VecCf::elemsz;;)
   {
     C a[8];
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
-      C tw0 = twiddle[0];
-      C tw1 = twiddle[1];
-      C tw2 = twiddle[2];
+      C tw0 = VecCf::load(twiddle, 0);
+      C tw1 = VecCf::load(twiddle + VecCf::elemsz, 0);
+      C tw2 = VecCf::load(twiddle + 2 * VecCf::elemsz, 0);
 
       {
-        C mul0 =       src[0];
-        C mul1 = tw0 * src[l2];
-        C mul2 = tw1 * src[l4];
-        C mul3 = tw2 * src[l6];
+        C mul0 =       VecCf::load(src, 0);
+        C mul1 = tw0 * VecCf::load(src + l2 * VecCf::elemsz, 0);
+        C mul2 = tw1 * VecCf::load(src + l4 * VecCf::elemsz, 0);
+        C mul3 = tw2 * VecCf::load(src + l6 * VecCf::elemsz, 0);
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -1372,10 +1346,10 @@ FORCEINLINE void last_three_passes_impl(
       }
 
       {
-        C mul0 =       src[l1];
-        C mul1 = tw0 * src[l3];
-        C mul2 = tw1 * src[l5];
-        C mul3 = tw2 * src[l7];
+        C mul0 =       VecCf::load(src + l1 * VecCf::elemsz, 0);
+        C mul1 = tw0 * VecCf::load(src + l3 * VecCf::elemsz, 0);
+        C mul2 = tw1 * VecCf::load(src + l5 * VecCf::elemsz, 0);
+        C mul3 = tw2 * VecCf::load(src + l7 * VecCf::elemsz, 0);
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -1390,7 +1364,7 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw3 = twiddle[3];
+      C tw3 = VecCf::load(twiddle + 3 * VecCf::elemsz, 0);
       {
         auto mul = tw3 * a4;
         DstCf::store(a0 + mul, dst + 0, n);
@@ -1405,7 +1379,7 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw4 = twiddle[4];
+      C tw4 = VecCf::load(twiddle + 4 * VecCf::elemsz, 0);
       {
         auto mul = tw4 * a5;
         DstCf::store(a1 + mul, dst + l1 * DstCf::elemsz, n);
@@ -1419,9 +1393,9 @@ FORCEINLINE void last_three_passes_impl(
       }
     }
 
-    src += 1;
+    src += VecCf::elemsz;
     dst += DstCf::elemsz;
-    twiddle += 5;
+    twiddle += 5 * VecCf::elemsz;
     if(src == end) break;
   }
 }
@@ -1429,23 +1403,13 @@ FORCEINLINE void last_three_passes_impl(
 template<typename V, typename DstCf>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
-  VEC_TYPEDEFS(V);
-  last_three_passes_impl<V, DstCf>(
-    arg.n / V::vec_size,
-    (Complex<Vec>*) arg.src,
-    (Complex<Vec>*) arg.twiddle,
-    (Vec*) arg.dst);
+  last_three_passes_impl<V, DstCf>(arg.n, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
 {
-  VEC_TYPEDEFS(V);
-  last_three_passes_impl<V, DstCf>(
-    n / V::vec_size,
-    (Complex<Vec>*) arg.src,
-    (Complex<Vec>*) arg.twiddle,
-    (Vec*) arg.dst);
+  last_three_passes_impl<V, DstCf>(n, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -1626,11 +1590,9 @@ void real_last_pass(
 {
   VEC_TYPEDEFS(V);
   Int src_off = n / 2;
-  Int vsrc_off = src_off / V::vec_size;
   Int dst_off = align_size<T>(n / 2 + 1);
-  Int vdst_off = dst_off / V::vec_size;
 
-  const Int dst_es = DstCfT<V>::elemsz;
+  const Int dst_ratio = DstCfT<V>::elemsz / V::vec_size;
 
   Vec half = V::vec(0.5);
 
@@ -1641,10 +1603,13 @@ void real_last_pass(
     i0 <= i1; 
     i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
   {
-    C w = cf::Split<V>::load((Vec*)(twiddle + iw), vsrc_off);
-    C s0 = cf::Split<V>::unaligned_load(src +  i0, src_off);
-    C s1 = reverse_complex<V>(
-        cf::Split<V>::load((Vec*)(src + i1), vsrc_off));
+    ASSERT(i0 >= 0 && i0 < n /2);
+    ASSERT(i1 >= 0 && i1 < n /2);
+    ASSERT(iw >= 0 && iw < n /2);
+
+    C w = cf::Split<V>::load(twiddle + iw, src_off);
+    C s0 = cf::Split<V>::unaligned_load(src + i0, src_off);
+    C s1 = reverse_complex<V>(cf::Split<V>::load(src + i1, src_off));
 
     //printf("%f %f %f %f %f %f\n", w.re, w.im, s0.re, s0.im, s1.re, s1.im);
 
@@ -1654,9 +1619,8 @@ void real_last_pass(
     C d0 = a + b.mul_neg_i();
     C d1 = a.adj() + b.adj().mul_neg_i();
 
-    DstCfT<V>::unaligned_store(d0, dst + i0 * dst_es, dst_off);
-    DstCfT<V>::store(
-      reverse_complex<V>(d1), (Vec*)(dst + i1 * dst_es), vdst_off);
+    DstCfT<V>::unaligned_store(d0, dst + i0 * dst_ratio, dst_off);
+    DstCfT<V>::store(reverse_complex<V>(d1), dst + i1 * dst_ratio, dst_off);
   }
 
   // fixes the aliasing bug
@@ -1727,9 +1691,5 @@ void rfft(const RealState<T>* state, T* src, T* dst)
 {
   fft(state->state, src, dst); // the intermediate result is now in state->working
   state->last_pass(
-    state->state->n * 2,
-    state->state->working,
-    state->twiddle,
-    dst);
+    state->state->n * 2, state->state->working, state->twiddle, dst);
 }
-
