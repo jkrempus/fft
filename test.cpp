@@ -74,20 +74,19 @@ struct TestWrapper<V, CfT, false>
   template<typename U>
   void set_input(const U* re, const U* im)
   {
-    auto vsrc = (Vec*) src;
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
-      Complex<Vec> a;
-      T* pre = (T*) &a.re;
-      T* pim = (T*) &a.im;
+      T p[2 * V::vec_size];
       for(Int j = 0; j < V::vec_size; j++)
       {
-        pre[j] = T(re[V::vec_size * i + j]);
-        pim[j] = T(im[V::vec_size * i + j]);
+        p[j] = T(re[V::vec_size * i + j]);
+        p[j + V::vec_size] = T(im[V::vec_size * i + j]);
       }
 
-      CfT<V>::store(a, src + i * CfT<V>::stride, state->n);
+      CfT<V>::store(
+        complex_format::Vec<V>::unaligned_load(p, 0),
+        src + i * CfT<V>::stride, state->n);
     }
   }
  
@@ -99,14 +98,13 @@ struct TestWrapper<V, CfT, false>
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
+      T p[2 * V::vec_size];
       auto c = CfT<V>::load(dst + i * CfT<V>::stride, state->n);
-      //TODO: get rid of this casts
-      T* pre = (T*) &c.re;
-      T* pim = (T*) &c.im;
+      cf::Vec<V>::unaligned_store(c, p, 0);
       for(Int j = 0; j < V::vec_size; j++)
       {
-        re[V::vec_size * i + j] = U(pre[j]);
-        im[V::vec_size * i + j] = U(pim[j]);
+        re[V::vec_size * i + j] = U(p[j]);
+        im[V::vec_size * i + j] = U(p[j + V::vec_size]);
       }
     }
   }
@@ -147,26 +145,24 @@ struct TestWrapper<V, CfT, true>
   template<typename U>
   void get_output(U* re, U* im)
   {
-    auto vdst = (Vec*) dst;
     Int vn = n / V::vec_size;
     for(Int i = 0; i < vn / 2 + 1; i++)
     {
+      T p[2 * V::vec_size];
       auto c = CfT<V>::load(dst + i * CfT<V>::stride, im_offset);
+      cf::Vec<V>::unaligned_store(c, p, 0);
 
-      //TODO: get rid of these casts
-      T* pre = (T*) &c.re;
-      T* pim = (T*) &c.im;
       for(Int j = 0; j < V::vec_size; j++)
       {
         Int k = V::vec_size * i + j;
         if(k <= n / 2)
         {
-          re[k] = U(pre[j]);
-          im[k] = U(pim[j]);
+          re[k] = U(p[j]);
+          im[k] = U(p[j + V::vec_size]);
           if(k > 0)
           {
-            re[n - k] = U(pre[j]);
-            im[n - k] = -U(pim[j]);
+            re[n - k] = U(p[j]);
+            im[n - k] = -U(p[j + V::vec_size]);
           }
         }
       }
@@ -314,10 +310,9 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false>
     {
       swap(this->dst, working);
 
+      typedef complex_format::Scal<Scalar<T>> CF;
       Int twiddle_stride = this->n / 2 / dft_size;
-      auto cdst = (Complex<T>*) this->dst;
-      auto cworking = (Complex<T>*) working;
-      auto ctw = (Complex<T>*) twiddle;
+
       for(Int i = 0; i < this->n / 2; i += dft_size)
       {
         Int src_i = i;
@@ -325,13 +320,14 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false>
         Int twiddle_i = 0;
         for(; src_i < i + dft_size;)
         {
-          auto a = cworking[src_i];
-          auto mul = ctw[twiddle_i] * cworking[src_i + this->n / 2];
-          cdst[dst_i] = a + mul;
-          cdst[dst_i + dft_size] = a - mul;
+          auto a = CF::load(working + src_i * CF::stride, 0);
+          auto b = CF::load(working + (src_i + this->n / 2) * CF::stride, 0);
+          auto mul = twiddle[twiddle_i] * b;
+          CF::store(a + mul, this->dst + dst_i * CF::stride, 0);
+          CF::store(a - mul, this->dst + (dst_i + dft_size) * CF::stride, 0);
           src_i++;
           dst_i++;
-          twiddle_i+= twiddle_stride;
+          twiddle_i += twiddle_stride;
         }  
       }
     }

@@ -449,10 +449,10 @@ struct Neon
   
   static Vec reverse(Vec v) { return v; } //TODO
 
-  static Vec load(T* p) { return vld1q_f32((float32_t*) p); }
-  static Vec unaligned_load(T* p) { return vld1q_f32((float32_t*) p); }
-  static void store(Vec val, T* p) { vst1q_f32((float32_t*) p, val); }
-  static void unaligned_store(Vec val, T* p) { vst1q_f32((float32_t*) p, val); }
+  static Vec load(T* p) { return vld1q_f32(p); }
+  static Vec unaligned_load(T* p) { return vld1q_f32(p); }
+  static void store(Vec val, T* p) { vst1q_f32(p, val); }
+  static void unaligned_store(Vec val, T* p) { vst1q_f32(p, val); }
 };
 #endif
 
@@ -714,7 +714,7 @@ void compute_twiddle(
       end_re - size, end_im - size);
 }
 
-template<typename V, typename SrcCf, typename DstCf>
+template<typename V>
 void init_twiddle(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
@@ -1295,17 +1295,17 @@ void four_passes(const Arg<typename V::T>& arg)
   const Int chunk_size = 16;
   const Int nchunks = 16;
   Int stride = n / nchunks;
-  Vec working[2 * chunk_size * nchunks];
+  
+  Uint bitmask = align_bytes - 1;
+  char mem[2 * chunk_size * nchunks * sizeof(Vec) + bitmask];
+  T* working = (T*)((Uint(mem) + bitmask) & ~bitmask);
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-#if 1 //TODO
-    // TODO: get rid of casts and align working manually
     two_passes_strided_impl<0, chunk_size, true, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, src, twiddle, (T*) working);
+      n, nchunks, dft_size, offset, src, twiddle, working);
     two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
-      n, nchunks, dft_size, offset, (T*) working, twiddle, dst);
-#endif
+      n, nchunks, dft_size, offset, working, twiddle, dst);
   }
 }
 
@@ -1557,7 +1557,7 @@ State<typename V::T>* fft_state(Int n, void* ptr)
   state->twiddle = state->working + 2 * n;
   state->tiny_twiddle = state->twiddle + 2 * n;
   init_steps<V, SrcCfT<V>, DstCfT<V>>(*state);
-  init_twiddle<V, SrcCfT<V>, DstCfT<V>>(*state);
+  init_twiddle<V>(*state);
   return state;
 }
 
