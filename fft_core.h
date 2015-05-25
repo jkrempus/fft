@@ -537,7 +537,7 @@ struct SseFloat
 struct AvxFloat
 {
   typedef float T;
-  typedef __m256 Vec;
+  typedef __v8sf Vec;
   const static Int vec_size = 8;
 
   template<Int elements_per_vec>
@@ -956,18 +956,26 @@ FORCEINLINE void first_three_passes_impl(
 
     src += SrcCf::stride;
 
-    C d[8];
-    V::transpose(
-      c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
-      c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
-      d[0].re, d[1].re, d[2].re, d[3].re, d[4].re, d[5].re, d[6].re, d[7].re);
+    {
+      Vec d[8];
+      V::transpose(
+        c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
+        c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
+        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
 
-    V::transpose(
-      c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
-      c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
-      d[0].im, d[1].im, d[2].im, d[3].im, d[4].im, d[5].im, d[6].im, d[7].im);
+      for(Int i = 0; i < 8; i++) V::store(d[i], dst + i * VecCf::stride);
+    }
 
-    for(Int i = 0; i < 8; i++) VecCf::store(d[i], dst + i * VecCf::stride, 0);
+    {
+      Vec d[8];
+      V::transpose(
+        c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
+        c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
+        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+
+      for(Int i = 0; i < 8; i++)
+        V::store(d[i], dst + i * VecCf::stride + V::vec_size);
+    }
 
     dst += 8 * VecCf::stride;
     if(src == end) break;
@@ -1292,7 +1300,7 @@ void four_passes(const Arg<typename V::T>& arg)
   
   typedef Complex<Vec> C;
 
-  const Int chunk_size = 16;
+  const Int chunk_size = 32;
   const Int nchunks = 16;
   Int stride = n / nchunks;
   

@@ -14,7 +14,7 @@
 #include <unordered_set>
 #include <sstream>
 
-//#define HAVE_FFTW
+#define HAVE_FFTW
 
 extern "C" void* valloc(size_t);
 
