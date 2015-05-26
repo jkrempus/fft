@@ -62,11 +62,23 @@ Int log2(Int a)
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
 {
-#if defined __GNUC__ || defined __clang__
+#if 0 && defined __GNUC__ || defined __clang__
   __builtin_memmove(dst, src, n * sizeof(T));
 #else
   for(Int i = 0; i < n; i++) dst[i] = src[i];
 #endif
+}
+
+template<typename V, typename SrcCf, typename DstCf>
+FORCEINLINE void complex_copy(
+  typename V::T* src, Int src_off, Int n,
+  typename V::T* dst, Int dst_off)
+{
+  for(Int i = 0; i < n; i++)
+  {
+    auto c = SrcCf::load(src + i * SrcCf::stride, src_off);
+    DstCf::store(c, dst + i * DstCf::stride, dst_off);
+  }
 }
 
 template<typename T>
@@ -763,12 +775,16 @@ void init_twiddle(State<typename V::T>& state)
     auto step = state.steps[s];
     //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
 
-    if(step.npasses == 2 && dft_size >= V::vec_size)
+    if((step.npasses % 2) == 0 && dft_size >= V::vec_size)
     {
-      auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
-      auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
-      for(Int i = 0; i < dft_size * CF::idx_ratio; i += CF::stride)
-        store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
+      for(Int i = 0; i < step.npasses; i += 2)
+      {
+        Int ds = dft_size << i;
+        auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
+        auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
+        for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
+          store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
+      }
     }
     else if(step.npasses == 3 && dft_size >= V::vec_size)
     {
@@ -787,18 +803,6 @@ void init_twiddle(State<typename V::T>& state)
           dst_row1 + 5 * i + 4 * CF::stride, 0);
       }
     } 
-    else if(step.npasses == 4 && dft_size >= V::vec_size)
-    {
-      auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
-      auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
-      for(Int i = 0; i < dft_size * CF::idx_ratio; i += CF::stride)
-        store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
-      
-      auto src_row2 = state.working + (n - 16 * dft_size) * CF::idx_ratio;
-      auto dst_row2 = dst + (n - 16 * dft_size) * CF::idx_ratio;
-      for(Int i = 0; i < 4 * dft_size * CF::idx_ratio; i += CF::stride)
-        store_two_pass_twiddle<V>(CF::load(src_row2 + i, 0), dst_row2 + 3 * i);
-    }
 
     dft_size <<= step.npasses;
   }
@@ -1288,6 +1292,7 @@ FORCEINLINE void two_passes_strided_impl(
 }
 #endif
 
+#if 1
 template<typename V, typename DstCf>
 void four_passes(const Arg<typename V::T>& arg)
 {
@@ -1314,6 +1319,84 @@ void four_passes(const Arg<typename V::T>& arg)
       n, nchunks, dft_size, offset, src, twiddle, working);
     two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
       n, nchunks, dft_size, offset, working, twiddle, dst);
+  }
+}
+#else
+template<typename V, typename DstCf>
+void four_passes(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  Int n = arg.n / V::vec_size;
+  Int dft_size = arg.dft_size / V::vec_size;
+  auto src = arg.src;
+  auto twiddle = arg.twiddle;
+  auto dst = arg.dst;
+  
+  const Int chunk_size = 16;
+  const Int nchunks = 16;
+  Int stride = n / nchunks;
+  
+  Uint bitmask = align_bytes - 1;
+  char mem0[4 * chunk_size * nchunks * sizeof(Vec) + bitmask];
+  T* working0 = (T*)((Uint(mem0) + bitmask) & ~bitmask);
+  T* working1 = working0 + 2 * chunk_size * nchunks * V::vec_size;
+
+  typedef cf::Vec<V> VecCf;
+
+  for(Int offset = 0; offset < stride; offset += chunk_size)
+  {
+    for(Int i = 0; i < nchunks; i++)
+      complex_copy<V, VecCf, VecCf>(
+        src + (offset + i * stride) * VecCf::stride, 0, chunk_size,
+        working0 + i * chunk_size * VecCf::stride, 0);
+
+    two_passes_strided_impl<0, chunk_size, false, false, VecCf, V>(
+      n, nchunks, dft_size, offset, working0, twiddle, working1);
+#if 0
+    two_passes_strided_impl<2, chunk_size, false, false, VecCf, V>(
+      n, nchunks, dft_size, offset, working1, twiddle, working0);
+
+    auto off = index_mapping::offset(offset, dft_size, 4, dft_size > chunk_size);
+    complex_copy<V, VecCf, DstCf>(
+      working0, 0, nchunks * chunk_size,
+      dst + off * DstCf::stride, arg.n);
+#else
+    two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
+      n, nchunks, dft_size, offset, working1, twiddle, dst);
+#endif
+  }
+}
+#endif
+
+template<typename V, typename DstCf>
+void six_passes(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  Int n = arg.n / V::vec_size;
+  Int dft_size = arg.dft_size / V::vec_size;
+  auto src = arg.src;
+  auto twiddle = arg.twiddle;
+  auto dst = arg.dst;
+  
+  typedef Complex<Vec> C;
+
+  const Int chunk_size = 16;
+  const Int nchunks = 64;
+  Int stride = n / nchunks;
+  
+  Uint bitmask = align_bytes - 1;
+  char mem[4 * chunk_size * nchunks * sizeof(Vec) + bitmask];
+  T* working0 = (T*)((Uint(mem) + bitmask) & ~bitmask);
+  T* working1 = working0 + 2 * chunk_size * nchunks * V::vec_size;
+
+  for(Int offset = 0; offset < stride; offset += chunk_size)
+  {
+    two_passes_strided_impl<0, chunk_size, true, false, cf::Vec<V>, V>(
+      n, nchunks, dft_size, offset, src, twiddle, working0);
+    two_passes_strided_impl<2, chunk_size, false, false, cf::Vec<V>, V>(
+      n, nchunks, dft_size, offset, working0, twiddle, working1);
+    two_passes_strided_impl<4, chunk_size, false, true, DstCf, V>(
+      n, nchunks, dft_size, offset, working1, twiddle, dst);
   }
 }
 
@@ -1467,6 +1550,18 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 3;
       }
+#if 0
+      else if(state.n >= large_fft_size && dft_size * 64 == state.n)
+      {
+        step.fun_ptr = &six_passes<V, DstCf>;
+        step.npasses = 6;
+      }
+      else if(state.n >= large_fft_size && dft_size * 64 < state.n)
+      {
+        step.fun_ptr = &six_passes<V, cf::Vec<V>>;
+        step.npasses = 6;
+      }
+#endif
       else if(state.n >= large_fft_size && dft_size * 16 == state.n)
       {
         step.fun_ptr = &four_passes<V, DstCf>;
@@ -1602,7 +1697,7 @@ template<typename V, template<typename> class DstCfT>
 void real_last_pass(
   Int n, typename V::T* src, typename V::T* twiddle, typename V::T* dst)
 {
-  static_assert(!SameType<DstCfT<V>, cf::Vec<V>>::value, "");
+  if(SameType<DstCfT<V>, cf::Vec<V>>::value) ASSERT(0);
   VEC_TYPEDEFS(V);
   Int src_off = n / 2;
   Int dst_off = align_size<T>(n / 2 + 1);
