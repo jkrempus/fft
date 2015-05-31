@@ -1,5 +1,4 @@
 #include "fft_core.h"
-#include "fftw3.h"
 
 #include <string>
 #include <cstring>
@@ -14,7 +13,9 @@
 #include <unordered_set>
 #include <sstream>
 
-#define HAVE_FFTW
+#ifdef HAVE_FFTW
+#include "fftw3.h"
+#endif
 
 extern "C" void* valloc(size_t);
 
@@ -402,7 +403,7 @@ typename Fft0::value_type compare(Int n)
 
 extern "C" void* aligned_alloc(size_t, size_t);
 
-#if 0
+#ifdef NO_SIMD
 typedef Scalar<float> V;
 #elif defined __ARM_NEON__
 typedef Neon V;
