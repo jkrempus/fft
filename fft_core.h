@@ -775,20 +775,14 @@ void init_twiddle(State<typename V::T>& state)
     auto step = state.steps[s];
     //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
 
-		if(step.npasses == 4 && dft_size == 1)
+		if(step.npasses == 5 && dft_size == 1)
 		{
+			Int ds = dft_size << 3;
+			auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
+			auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
+			for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
+				store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
 		}
-    else if((step.npasses % 2) == 0 && dft_size >= V::vec_size)
-    {
-      for(Int i = 0; i < step.npasses; i += 2)
-      {
-        Int ds = dft_size << i;
-        auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
-        auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
-        for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
-          store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
-      }
-    }
     else if(step.npasses == 3 && dft_size >= V::vec_size)
     {
       auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
@@ -806,14 +800,17 @@ void init_twiddle(State<typename V::T>& state)
           dst_row1 + 5 * i + 4 * CF::stride, 0);
       }
     }
-		else if(step.npasses == 5 && dft_size == 1)
-		{
-			Int ds = dft_size << 3;
-			auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
-			auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
-			for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
-				store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
-		}
+    else if(dft_size >= V::vec_size)
+    {
+      for(Int i = 0; i + 1 < step.npasses; i += 2)
+      {
+        Int ds = dft_size << i;
+        auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
+        auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
+        for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
+          store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
+      }
+    }
 
     dft_size <<= step.npasses;
   }
@@ -1470,36 +1467,35 @@ void first_five_passes(const Arg<typename V::T>& arg)
   }
 }
 
-template<typename V, typename SrcCf>
-void first_four_passes(const Arg<typename V::T>& arg)
+template<typename V, typename DstCf>
+void five_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int vn = arg.n / V::vec_size;
+  Int n = arg.n / V::vec_size;
+  Int dft_size = arg.dft_size / V::vec_size;
   auto src = arg.src;
   auto twiddle = arg.twiddle;
   auto dst = arg.dst;
-
+  
   typedef Complex<Vec> C;
 
-  const Int chunk_size = 32;
-  const Int nchunks = 16;
-  Int stride = vn / nchunks;
-
+  const Int chunk_size = 16;
+  const Int nchunks = 32;
+  Int stride = n / nchunks;
+  
   Uint bitmask = align_bytes - 1;
-  char mem[2 * chunk_size * nchunks * sizeof(Vec) + bitmask];
-  T* working = (T*)((Uint(mem) + bitmask) & ~bitmask);
+  char mem[4 * chunk_size * nchunks * sizeof(Vec) + bitmask];
+  T* working0 = (T*)((Uint(mem) + bitmask) & ~bitmask);
+  T* working1 = working0 + 2 * chunk_size * nchunks * V::vec_size;
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-		for(Int i = 0; i < nchunks / 8; i++)
-			first_three_passes_impl<V, SrcCf>(
-				vn * V::vec_size,
-			 	chunk_size * V::vec_size * 8,
-				src + (offset + i * stride) * SrcCf::stride,
-				working + i * chunk_size * 8 * VecCf::stride);
-
-    one_pass_strided<0, chunk_size * 8, false, true, VecCf, V>(
-      vn, nchunks / 8, 8 / V::vec_size, 8 * offset, working, twiddle, dst);
+    two_passes_strided<0, chunk_size, true, false, cf::Vec<V>, V>(
+      n, nchunks, dft_size, offset, src, twiddle, working0);
+    two_passes_strided<2, chunk_size, false, false, cf::Vec<V>, V>(
+      n, nchunks, dft_size, offset, working0, twiddle, working1);
+    one_pass_strided<4, chunk_size, false, true, DstCf, V>(
+      n, nchunks, dft_size, offset, working1, twiddle, dst);
   }
 }
 
@@ -1692,6 +1688,11 @@ void init_steps(State<typename V::T>& state)
           step.fun_ptr = &last_three_passes_vec<V, DstCf>;
 
         step.npasses = 3;
+      }
+      else if(state.n >= large_fft_size && dft_size * 32 == state.n)
+      {
+        step.fun_ptr = &five_passes<V, DstCf>;
+        step.npasses = 5;
       }
       else if(state.n >= large_fft_size && dft_size * 64 == state.n)
       {
