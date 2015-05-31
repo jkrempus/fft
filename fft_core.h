@@ -802,7 +802,15 @@ void init_twiddle(State<typename V::T>& state)
           CF::load(src_row1 + i + dft_size * CF::idx_ratio, 0),
           dst_row1 + 5 * i + 4 * CF::stride, 0);
       }
-    } 
+    }
+		else if(step.npasses == 5 && dft_size == 1)
+		{
+			Int ds = dft_size << 3;
+			auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
+			auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
+			for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
+				store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
+		}
 
     dft_size <<= step.npasses;
   }
@@ -912,6 +920,7 @@ void first_two_passes_ct_size(const Arg<typename V::T>& arg)
 template<typename V, typename SrcCf>
 FORCEINLINE void first_three_passes_impl(
   Int n,
+	Int dst_chunk_size,
   typename V::T* src,
   typename V::T* dst)
 {
@@ -919,7 +928,7 @@ FORCEINLINE void first_three_passes_impl(
   Int l = n / 8 * SrcCf::idx_ratio;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
-  for(T* end = dst + n * VecCf::idx_ratio; dst < end;)
+  for(T* end = dst + dst_chunk_size * VecCf::idx_ratio; dst < end;)
   {
     C c0, c1, c2, c3;
     {
@@ -989,13 +998,13 @@ FORCEINLINE void first_three_passes_impl(
 template<typename V, typename SrcCf>
 void first_three_passes(const Arg<typename V::T>& arg)
 {
-  first_three_passes_impl<V, SrcCf>(arg.n, arg.src, arg.dst);
+  first_three_passes_impl<V, SrcCf>(arg.n, arg.n, arg.src, arg.dst);
 }
 
 template<typename V, typename SrcCf, Int n>
 void first_three_passes_ct_size(const Arg<typename V::T>& arg)
 {
-  first_three_passes_impl<V, SrcCf>(n, arg.src, arg.dst);
+  first_three_passes_impl<V, SrcCf>(n, n, arg.src, arg.dst);
 }
 
 template<typename V, typename DstCf>
@@ -1066,7 +1075,7 @@ void two_steps(const Arg<T>& arg_in)
 }
 #endif
 
-template<typename V, typename DstCf>
+template<typename V, typename DstCf, bool is_last>
 void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
@@ -1113,7 +1122,7 @@ void two_passes(const Arg<typename V::T>& arg)
       DstCf::store(d3, d + m3, n);
 
       d += m1 + m3;
-      if(!(s < end1)) break;
+      if(is_last || !(s < end1)) break;
     }
   }
 }
@@ -1292,7 +1301,6 @@ FORCEINLINE void two_passes_strided_impl(
 }
 #endif
 
-#if 1
 template<typename V, typename DstCf>
 void four_passes(const Arg<typename V::T>& arg)
 {
@@ -1321,49 +1329,38 @@ void four_passes(const Arg<typename V::T>& arg)
       n, nchunks, dft_size, offset, working, twiddle, dst);
   }
 }
-#else
-template<typename V, typename DstCf>
-void four_passes(const Arg<typename V::T>& arg)
+
+#if 1
+template<typename V, typename SrcCf>
+void first_five_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int n = arg.n / V::vec_size;
-  Int dft_size = arg.dft_size / V::vec_size;
+  Int vn = arg.n / V::vec_size;
   auto src = arg.src;
   auto twiddle = arg.twiddle;
   auto dst = arg.dst;
-  
-  const Int chunk_size = 16;
-  const Int nchunks = 16;
-  Int stride = n / nchunks;
-  
-  Uint bitmask = align_bytes - 1;
-  char mem0[4 * chunk_size * nchunks * sizeof(Vec) + bitmask];
-  T* working0 = (T*)((Uint(mem0) + bitmask) & ~bitmask);
-  T* working1 = working0 + 2 * chunk_size * nchunks * V::vec_size;
 
-  typedef cf::Vec<V> VecCf;
+  typedef Complex<Vec> C;
+
+  const Int chunk_size = 16;
+  const Int nchunks = 32;
+  Int stride = vn / nchunks;
+
+  Uint bitmask = align_bytes - 1;
+  char mem[2 * chunk_size * nchunks * sizeof(Vec) + bitmask];
+  T* working = (T*)((Uint(mem) + bitmask) & ~bitmask);
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-    for(Int i = 0; i < nchunks; i++)
-      complex_copy<V, VecCf, VecCf>(
-        src + (offset + i * stride) * VecCf::stride, 0, chunk_size,
-        working0 + i * chunk_size * VecCf::stride, 0);
+		for(Int i = 0; i < nchunks / 8; i++)
+			first_three_passes_impl<V, SrcCf>(
+				vn * V::vec_size,
+			 	chunk_size * V::vec_size * 8,
+				src + (offset + i * stride) * SrcCf::stride,
+				working + i * chunk_size * 8 * VecCf::stride);
 
-    two_passes_strided_impl<0, chunk_size, false, false, VecCf, V>(
-      n, nchunks, dft_size, offset, working0, twiddle, working1);
-#if 0
-    two_passes_strided_impl<2, chunk_size, false, false, VecCf, V>(
-      n, nchunks, dft_size, offset, working1, twiddle, working0);
-
-    auto off = index_mapping::offset(offset, dft_size, 4, dft_size > chunk_size);
-    complex_copy<V, VecCf, DstCf>(
-      working0, 0, nchunks * chunk_size,
-      dst + off * DstCf::stride, arg.n);
-#else
-    two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
-      n, nchunks, dft_size, offset, working1, twiddle, dst);
-#endif
+    two_passes_strided_impl<0, chunk_size * 8, false, true, VecCf, V>(
+      vn, nchunks / 8, 8 / V::vec_size, 8 * offset, working, twiddle, dst);
   }
 }
 #endif
@@ -1509,6 +1506,8 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
   last_three_passes_impl<V, DstCf>(n, arg.src, arg.twiddle, arg.dst);
 }
 
+template<typename V> void null_pass(const Arg<typename V::T>& arg) { }
+
 template<typename V, typename SrcCf, typename DstCf>
 void init_steps(State<typename V::T>& state)
 {
@@ -1519,7 +1518,13 @@ void init_steps(State<typename V::T>& state)
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
-    if(dft_size == 1 && state.n >= 8 * V::vec_size)
+		if(state.n >= large_fft_size && dft_size == 1)
+		{
+			step.fun_ptr = &first_five_passes<V, SrcCf>;
+			//step.fun_ptr = &null_pass<V>;
+      step.npasses = 5;
+		}
+		else if(dft_size == 1 && state.n >= 8 * V::vec_size)
     {
       if(state.n == 8 * V::vec_size)
         step.fun_ptr = &first_three_passes_ct_size<V, SrcCf, 8 * V::vec_size>;
@@ -1574,12 +1579,12 @@ void init_steps(State<typename V::T>& state)
       }
       else if(dft_size * 4 == state.n)
       {
-        step.fun_ptr = &two_passes<V, DstCf>;
+        step.fun_ptr = &two_passes<V, DstCf, true>;
         step.npasses = 2;
       }
       else if(dft_size * 4 < state.n)
       {
-        step.fun_ptr = &two_passes<V, cf::Vec<V>>;
+        step.fun_ptr = &two_passes<V, cf::Vec<V>, false>;
         step.npasses = 2;
       }
       else
