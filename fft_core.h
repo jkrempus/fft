@@ -775,7 +775,10 @@ void init_twiddle(State<typename V::T>& state)
     auto step = state.steps[s];
     //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
 
-    if((step.npasses % 2) == 0 && dft_size >= V::vec_size)
+		if(step.npasses == 4 && dft_size == 1)
+		{
+		}
+    else if((step.npasses % 2) == 0 && dft_size >= V::vec_size)
     {
       for(Int i = 0; i < step.npasses; i += 2)
       {
@@ -1161,7 +1164,6 @@ namespace index_mapping
   }
 }
 
-#if 1 //TODO
 template<
   Int npasses,
   Int chunk_size,
@@ -1169,7 +1171,7 @@ template<
   bool dst_is_strided,
   typename DstCf,
   typename V>
-FORCEINLINE void two_passes_strided_impl(
+FORCEINLINE void two_passes_strided(
   Int vn,
   Int nchunks,
   Int initial_dft_size,
@@ -1299,7 +1301,112 @@ FORCEINLINE void two_passes_strided_impl(
       }
     }
 }
-#endif
+
+template<
+  Int npasses,
+  Int chunk_size,
+  bool src_is_strided,
+  bool dst_is_strided,
+  typename DstCf,
+  typename V>
+FORCEINLINE void one_pass_strided(
+  Int vn,
+  Int nchunks,
+  Int initial_dft_size,
+  Int offset,
+  typename V::T* src0,
+  typename V::T* twiddle_start,
+  typename V::T* dst0)
+{
+  VEC_TYPEDEFS(V);
+  namespace im = index_mapping;
+
+  Int n = vn * V::vec_size;
+ 
+  Int l = nchunks * chunk_size / 2;
+  Int dft_size = initial_dft_size << npasses;
+  Int m = min(initial_dft_size, chunk_size) << npasses;
+
+  T* twiddle = twiddle_start + (vn - 2 * dft_size) * VecCf::stride;
+
+  bool is_large = initial_dft_size >= chunk_size;
+  Int soffset = im::offset(offset, initial_dft_size, npasses, is_large);
+  Int doffset = im::offset(offset, initial_dft_size, npasses + 1, is_large);
+  Int chunk_stride = vn / nchunks;
+
+  Int sstride = 
+    src_is_strided ? im::to_strided_index(
+      l, vn, chunk_stride, chunk_size, initial_dft_size, npasses, is_large)
+    : l;
+
+  Int dstride = 
+    dst_is_strided ? im::to_strided_index(
+      m, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 1, is_large)
+    : m;
+
+  T* src1 = src0 + sstride * VecCf::stride;
+  T* dst1 = dst0 + dstride * DstCf::stride;
+
+  if(is_large)
+    for(Int i = 0; i < l; i += m)
+    {
+      for(Int j = 0; j < m; j += chunk_size)
+      {
+        Int s = i + j;
+        Int d = 2 * i + j;
+
+        Int strided_s = soffset + im::to_strided_index(
+          s, vn, chunk_stride, chunk_size, initial_dft_size, npasses, true);
+
+        Int strided_d = doffset + im::to_strided_index(
+          d, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 1, true);
+
+        if(src_is_strided) s = strided_s;
+        if(dst_is_strided) d = strided_d; 
+
+        for(Int k = 0; k < chunk_size; k++)
+        {
+          auto tw = twiddle + (strided_s & (dft_size - 1)) * VecCf::stride;
+				C tw0 = VecCf::load(tw, 0);
+				C s0 = VecCf::load(src0 + s * VecCf::stride, 0);
+				C mul = VecCf::load(src1 + s * VecCf::stride, 0) * tw0;
+				DstCf::store(s0 + mul, dst0 + d * DstCf::stride, n);  
+				DstCf::store(s0 - mul, dst1 + d * DstCf::stride, n);  
+        s++;
+        d++;
+        strided_s++;
+        }
+      }
+    }
+  else
+    for(Int i = 0; i < l; i += m)
+    {
+      Int s = i;
+      Int d = 2 * i;
+
+      Int strided_s = soffset + im::to_strided_index(
+        s, vn, chunk_stride, chunk_size, initial_dft_size, npasses, false);
+
+      Int strided_d = doffset + im::to_strided_index(
+        d, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 1, false);
+
+      if(src_is_strided) s = strided_s;
+      if(dst_is_strided) d = strided_d;
+
+      for(Int j = 0; j < m; j++)
+      {
+        auto tw = twiddle + (strided_s & (dft_size - 1)) * VecCf::stride;
+				C tw0 = VecCf::load(tw, 0);
+				C s0 = VecCf::load(src0 + s * VecCf::stride, 0);
+				C mul = VecCf::load(src1 + s * VecCf::stride, 0) * tw0;
+				DstCf::store(s0 + mul, dst0 + d * DstCf::stride, n);  
+				DstCf::store(s0 - mul, dst1 + d * DstCf::stride, n);  
+        s++;
+        d++;
+        strided_s++;
+      }
+    }
+}
 
 template<typename V, typename DstCf>
 void four_passes(const Arg<typename V::T>& arg)
@@ -1323,14 +1430,13 @@ void four_passes(const Arg<typename V::T>& arg)
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-    two_passes_strided_impl<0, chunk_size, true, false, cf::Vec<V>, V>(
+    two_passes_strided<0, chunk_size, true, false, cf::Vec<V>, V>(
       n, nchunks, dft_size, offset, src, twiddle, working);
-    two_passes_strided_impl<2, chunk_size, false, true, DstCf, V>(
+    two_passes_strided<2, chunk_size, false, true, DstCf, V>(
       n, nchunks, dft_size, offset, working, twiddle, dst);
   }
 }
 
-#if 1
 template<typename V, typename SrcCf>
 void first_five_passes(const Arg<typename V::T>& arg)
 {
@@ -1359,11 +1465,43 @@ void first_five_passes(const Arg<typename V::T>& arg)
 				src + (offset + i * stride) * SrcCf::stride,
 				working + i * chunk_size * 8 * VecCf::stride);
 
-    two_passes_strided_impl<0, chunk_size * 8, false, true, VecCf, V>(
+    two_passes_strided<0, chunk_size * 8, false, true, VecCf, V>(
       vn, nchunks / 8, 8 / V::vec_size, 8 * offset, working, twiddle, dst);
   }
 }
-#endif
+
+template<typename V, typename SrcCf>
+void first_four_passes(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  Int vn = arg.n / V::vec_size;
+  auto src = arg.src;
+  auto twiddle = arg.twiddle;
+  auto dst = arg.dst;
+
+  typedef Complex<Vec> C;
+
+  const Int chunk_size = 32;
+  const Int nchunks = 16;
+  Int stride = vn / nchunks;
+
+  Uint bitmask = align_bytes - 1;
+  char mem[2 * chunk_size * nchunks * sizeof(Vec) + bitmask];
+  T* working = (T*)((Uint(mem) + bitmask) & ~bitmask);
+
+  for(Int offset = 0; offset < stride; offset += chunk_size)
+  {
+		for(Int i = 0; i < nchunks / 8; i++)
+			first_three_passes_impl<V, SrcCf>(
+				vn * V::vec_size,
+			 	chunk_size * V::vec_size * 8,
+				src + (offset + i * stride) * SrcCf::stride,
+				working + i * chunk_size * 8 * VecCf::stride);
+
+    one_pass_strided<0, chunk_size * 8, false, true, VecCf, V>(
+      vn, nchunks / 8, 8 / V::vec_size, 8 * offset, working, twiddle, dst);
+  }
+}
 
 template<typename V, typename DstCf>
 void six_passes(const Arg<typename V::T>& arg)
@@ -1388,11 +1526,11 @@ void six_passes(const Arg<typename V::T>& arg)
 
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
-    two_passes_strided_impl<0, chunk_size, true, false, cf::Vec<V>, V>(
+    two_passes_strided<0, chunk_size, true, false, cf::Vec<V>, V>(
       n, nchunks, dft_size, offset, src, twiddle, working0);
-    two_passes_strided_impl<2, chunk_size, false, false, cf::Vec<V>, V>(
+    two_passes_strided<2, chunk_size, false, false, cf::Vec<V>, V>(
       n, nchunks, dft_size, offset, working0, twiddle, working1);
-    two_passes_strided_impl<4, chunk_size, false, true, DstCf, V>(
+    two_passes_strided<4, chunk_size, false, true, DstCf, V>(
       n, nchunks, dft_size, offset, working1, twiddle, dst);
   }
 }
@@ -1555,18 +1693,11 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 3;
       }
-#if 0
       else if(state.n >= large_fft_size && dft_size * 64 == state.n)
       {
         step.fun_ptr = &six_passes<V, DstCf>;
         step.npasses = 6;
       }
-      else if(state.n >= large_fft_size && dft_size * 64 < state.n)
-      {
-        step.fun_ptr = &six_passes<V, cf::Vec<V>>;
-        step.npasses = 6;
-      }
-#endif
       else if(state.n >= large_fft_size && dft_size * 16 == state.n)
       {
         step.fun_ptr = &four_passes<V, DstCf>;
