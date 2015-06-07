@@ -6,6 +6,11 @@ else
 	CXXFLAGS += -std=c++11 -Ofast
 endif
 
+ifdef USE_FFTW
+	CXXFLAGS += -DHAVE_FFTW
+	LDFLAGS += libfftw3f.a
+endif
+
 .PHONY: all
 all: avx2
 
@@ -13,7 +18,7 @@ all: avx2
 	$(CXX) -c -o $@ $< $(CXXFLAGS)
 
 test: test.o
-	$(CXX) -o $@ $^ $(CFLAGS)
+	$(CXX) -o $@ $^ $(LDFLAGS)
 
 .PHONY: sse
 sse: CXXFLAGS += -msse2

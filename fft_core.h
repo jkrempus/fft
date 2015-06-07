@@ -62,7 +62,7 @@ Int log2(Int a)
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
 {
-#if 0 && defined __GNUC__ || defined __clang__
+#if 1 && defined __GNUC__ || defined __clang__
   __builtin_memmove(dst, src, n * sizeof(T));
 #else
   for(Int i = 0; i < n; i++) dst[i] = src[i];
@@ -240,6 +240,7 @@ template<typename T>
 struct Arg
 {
   Int n;
+  Int im_off;
   Int dft_size;
   T* src;
   T* twiddle;
@@ -259,12 +260,13 @@ template<typename T>
 struct State
 {
   Int n;
-  T* working;
+  Int im_off;
+  T* working0;
+  T* working1;
   T* twiddle;
   T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
-  Int num_copies;
 };
 
 template<typename T>
@@ -733,6 +735,7 @@ void init_twiddle(State<typename V::T>& state)
 
   auto dst = state.twiddle;
   auto n = state.n;
+  auto im_off = state.im_off;
   auto end_re = dst + n;
   auto end_im = dst + 2 * n;
   end_re[-1] = T(0);
@@ -761,10 +764,10 @@ void init_twiddle(State<typename V::T>& state)
   for(Int si = 0, di = 0; si < n;
     si += cf::Split<V>::stride, di += cf::Vec<V>::stride)
   {
-    cf::Vec<V>::store(cf::Split<V>::load(dst + si, n), state.working + di, 0);
+    cf::Vec<V>::store(cf::Split<V>::load(dst + si, n), state.working0 + di, 0);
   }
 
-  copy(state.working, 2 * n, dst);
+  copy(state.working0, 2 * n, dst);
 
   // It's all in Vec format after this point
   typedef cf::Vec<V> CF;
@@ -778,15 +781,15 @@ void init_twiddle(State<typename V::T>& state)
 		if(step.npasses == 5 && dft_size == 1)
 		{
 			Int ds = dft_size << 3;
-			auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
+			auto src_row0 = state.working0 + (n - 4 * ds) * CF::idx_ratio;
 			auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
 			for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
 				store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
 		}
     else if(step.npasses == 3 && dft_size >= V::vec_size)
     {
-      auto src_row0 = state.working + (n - 4 * dft_size) * CF::idx_ratio;
-      auto src_row1 = state.working + (n - 8 * dft_size) * CF::idx_ratio;
+      auto src_row0 = state.working0 + (n - 4 * dft_size) * CF::idx_ratio;
+      auto src_row1 = state.working0 + (n - 8 * dft_size) * CF::idx_ratio;
       auto dst_row1 = dst + (n - 8 * dft_size) * CF::idx_ratio;
       for(Int i = 0; i < dft_size * CF::idx_ratio; i += CF::stride)
       {
@@ -805,7 +808,7 @@ void init_twiddle(State<typename V::T>& state)
       for(Int i = 0; i + 1 < step.npasses; i += 2)
       {
         Int ds = dft_size << i;
-        auto src_row0 = state.working + (n - 4 * ds) * CF::idx_ratio;
+        auto src_row0 = state.working0 + (n - 4 * ds) * CF::idx_ratio;
         auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
         for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
           store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
@@ -832,8 +835,8 @@ void ct_dft_size_pass(const Arg<typename V::T>& arg)
   auto tw = VecCf::load(arg.tiny_twiddle + tiny_log2(dft_size) * VecCf::stride, 0);
   for(auto end = src1; src0 < end;)
   {
-    C a0 = SrcCf::load(src0, n);
-    C a1 = SrcCf::load(src1, n);
+    C a0 = SrcCf::load(src0, arg.im_off);
+    C a1 = SrcCf::load(src1, arg.im_off);
     src0 += SrcCf::stride;
     src1 += SrcCf::stride;
 
@@ -874,10 +877,10 @@ void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 
   for(T* end = src1; src0 < end;)
   {
-    C a0 = SrcCf::load(src0, n);
-    C a1 = SrcCf::load(src1, n);
-    C a2 = SrcCf::load(src2, n);
-    C a3 = SrcCf::load(src3, n);
+    C a0 = SrcCf::load(src0, arg.im_off);
+    C a1 = SrcCf::load(src1, arg.im_off);
+    C a2 = SrcCf::load(src2, arg.im_off);
+    C a3 = SrcCf::load(src3, arg.im_off);
     src0 += SrcCf::stride;
     src1 += SrcCf::stride;
     src2 += SrcCf::stride;
@@ -921,6 +924,7 @@ template<typename V, typename SrcCf>
 FORCEINLINE void first_three_passes_impl(
   Int n,
 	Int dst_chunk_size,
+  Int im_off,
   typename V::T* src,
   typename V::T* dst)
 {
@@ -932,10 +936,10 @@ FORCEINLINE void first_three_passes_impl(
   {
     C c0, c1, c2, c3;
     {
-      C a0 = SrcCf::load(src + 0 * l, n);
-      C a1 = SrcCf::load(src + 2 * l, n);
-      C a2 = SrcCf::load(src + 4 * l, n);
-      C a3 = SrcCf::load(src + 6 * l, n);
+      C a0 = SrcCf::load(src + 0 * l, im_off);
+      C a1 = SrcCf::load(src + 2 * l, im_off);
+      C a2 = SrcCf::load(src + 4 * l, im_off);
+      C a3 = SrcCf::load(src + 6 * l, im_off);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -948,10 +952,10 @@ FORCEINLINE void first_three_passes_impl(
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = SrcCf::load(src + 1 * l, n);
-      C a1 = SrcCf::load(src + 3 * l, n);
-      C a2 = SrcCf::load(src + 5 * l, n);
-      C a3 = SrcCf::load(src + 7 * l, n);
+      C a0 = SrcCf::load(src + 1 * l, im_off);
+      C a1 = SrcCf::load(src + 3 * l, im_off);
+      C a2 = SrcCf::load(src + 5 * l, im_off);
+      C a3 = SrcCf::load(src + 7 * l, im_off);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3; 
@@ -998,18 +1002,19 @@ FORCEINLINE void first_three_passes_impl(
 template<typename V, typename SrcCf>
 void first_three_passes(const Arg<typename V::T>& arg)
 {
-  first_three_passes_impl<V, SrcCf>(arg.n, arg.n, arg.src, arg.dst);
+  first_three_passes_impl<V, SrcCf>(arg.n, arg.n, arg.im_off, arg.src, arg.dst);
 }
 
 template<typename V, typename SrcCf, Int n>
 void first_three_passes_ct_size(const Arg<typename V::T>& arg)
 {
-  first_three_passes_impl<V, SrcCf>(n, n, arg.src, arg.dst);
+  first_three_passes_impl<V, SrcCf>(n, n, arg.im_off, arg.src, arg.dst);
 }
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_pass_impl(
   Int n,
+  Int im_off,
   typename V::T* src,
   typename V::T* twiddle,
   typename V::T* dst)
@@ -1021,21 +1026,21 @@ FORCEINLINE void last_pass_impl(
     auto a = VecCf::load(src + i0 * VecCf::stride, 0);
     auto b = VecCf::load(src + i1 * VecCf::stride, 0);
     auto mul = b * VecCf::load(twiddle + i0 * VecCf::stride, 0);
-    DstCf::store(a + mul, dst + i0 * DstCf::stride, n);
-    DstCf::store(a - mul, dst + i1 * DstCf::stride, n);
+    DstCf::store(a + mul, dst + i0 * DstCf::stride, im_off);
+    DstCf::store(a - mul, dst + i1 * DstCf::stride, im_off);
   }
 }
 
 template<typename V, typename DstCf>
 void last_pass_vec(const Arg<typename V::T>& arg)
 {
-  last_pass_impl<V, DstCf>(arg.n, arg.src, arg.twiddle, arg.dst);
+  last_pass_impl<V, DstCf>(arg.n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
 {
-  last_pass_impl<V, DstCf>(n, arg.src, arg.twiddle, arg.dst);
+  last_pass_impl<V, DstCf>(n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename T>
@@ -1116,10 +1121,10 @@ void two_passes(const Arg<typename V::T>& arg)
 
       s += dft_size * VecCf::idx_ratio;
 
-      DstCf::store(d0, d, n);
-      DstCf::store(d1, d + m1, n);
-      DstCf::store(d2, d + m2, n);
-      DstCf::store(d3, d + m3, n);
+      DstCf::store(d0, d, arg.im_off);
+      DstCf::store(d1, d + m1, arg.im_off);
+      DstCf::store(d2, d + m2, arg.im_off);
+      DstCf::store(d3, d + m3, arg.im_off);
 
       d += m1 + m3;
       if(is_last || !(s < end1)) break;
@@ -1170,6 +1175,7 @@ template<
   typename V>
 FORCEINLINE void two_passes_strided(
   Int vn,
+  Int im_off,
   Int nchunks,
   Int initial_dft_size,
   Int offset,
@@ -1180,7 +1186,6 @@ FORCEINLINE void two_passes_strided(
   VEC_TYPEDEFS(V);
   namespace im = index_mapping;
 
-  Int n_ = vn * V::vec_size;
   //printf("npasses %d offset %d\n", npasses, offset);
  
   Int l = nchunks * chunk_size / 4;
@@ -1245,10 +1250,10 @@ FORCEINLINE void two_passes_strided(
           C d0, d1, d2, d3; 
           two_passes_inner(s0, s1, s2, s3, d0, d1, d2, d3, tw0, tw1, tw2);
 
-          DstCf::store(d0, dst0 + d * DstCf::stride, n_);  
-          DstCf::store(d1, dst1 + d * DstCf::stride, n_);  
-          DstCf::store(d2, dst2 + d * DstCf::stride, n_);  
-          DstCf::store(d3, dst3 + d * DstCf::stride, n_);  
+          DstCf::store(d0, dst0 + d * DstCf::stride, im_off);  
+          DstCf::store(d1, dst1 + d * DstCf::stride, im_off);  
+          DstCf::store(d2, dst2 + d * DstCf::stride, im_off);  
+          DstCf::store(d3, dst3 + d * DstCf::stride, im_off);  
 
           s++;
           d++;
@@ -1289,10 +1294,10 @@ FORCEINLINE void two_passes_strided(
         C d0, d1, d2, d3; 
         two_passes_inner(s0, s1, s2, s3, d0, d1, d2, d3, tw0, tw1, tw2);
 
-        DstCf::store(d0, dst0 + d * DstCf::stride, n_);
-        DstCf::store(d1, dst1 + d * DstCf::stride, n_);
-        DstCf::store(d2, dst2 + d * DstCf::stride, n_);
-        DstCf::store(d3, dst3 + d * DstCf::stride, n_);
+        DstCf::store(d0, dst0 + d * DstCf::stride, im_off);
+        DstCf::store(d1, dst1 + d * DstCf::stride, im_off);
+        DstCf::store(d2, dst2 + d * DstCf::stride, im_off);
+        DstCf::store(d3, dst3 + d * DstCf::stride, im_off);
 
         s++;
         d++;
@@ -1310,6 +1315,7 @@ template<
   typename V>
 FORCEINLINE void one_pass_strided(
   Int vn,
+  Int im_off,
   Int nchunks,
   Int initial_dft_size,
   Int offset,
@@ -1369,8 +1375,8 @@ FORCEINLINE void one_pass_strided(
 				C tw0 = VecCf::load(tw, 0);
 				C s0 = VecCf::load(src0 + s * VecCf::stride, 0);
 				C mul = VecCf::load(src1 + s * VecCf::stride, 0) * tw0;
-				DstCf::store(s0 + mul, dst0 + d * DstCf::stride, n);  
-				DstCf::store(s0 - mul, dst1 + d * DstCf::stride, n);  
+				DstCf::store(s0 + mul, dst0 + d * DstCf::stride, im_off);  
+				DstCf::store(s0 - mul, dst1 + d * DstCf::stride, im_off);  
         s++;
         d++;
         strided_s++;
@@ -1398,8 +1404,8 @@ FORCEINLINE void one_pass_strided(
 				C tw0 = VecCf::load(tw, 0);
 				C s0 = VecCf::load(src0 + s * VecCf::stride, 0);
 				C mul = VecCf::load(src1 + s * VecCf::stride, 0) * tw0;
-				DstCf::store(s0 + mul, dst0 + d * DstCf::stride, n);  
-				DstCf::store(s0 - mul, dst1 + d * DstCf::stride, n);  
+				DstCf::store(s0 + mul, dst0 + d * DstCf::stride, im_off);  
+				DstCf::store(s0 - mul, dst1 + d * DstCf::stride, im_off);  
         s++;
         d++;
         strided_s++;
@@ -1430,9 +1436,9 @@ void four_passes(const Arg<typename V::T>& arg)
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
     two_passes_strided<0, chunk_size, true, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, src, twiddle, working);
+      n, arg.im_off, nchunks, dft_size, offset, src, twiddle, working);
     two_passes_strided<2, chunk_size, false, true, DstCf, V>(
-      n, nchunks, dft_size, offset, working, twiddle, dst);
+      n, arg.im_off, nchunks, dft_size, offset, working, twiddle, dst);
   }
 }
 
@@ -1461,11 +1467,13 @@ void first_five_passes(const Arg<typename V::T>& arg)
 			first_three_passes_impl<V, SrcCf>(
 				vn * V::vec_size,
 			 	chunk_size * V::vec_size * 8,
+        arg.im_off,
 				src + (offset + i * stride) * SrcCf::stride,
 				working + i * chunk_size * 8 * VecCf::stride);
 
     two_passes_strided<0, chunk_size * 8, false, true, VecCf, V>(
-      vn, nchunks / 8, 8 / V::vec_size, 8 * offset, working, twiddle, dst);
+      vn, arg.im_off, nchunks / 8, 8 / V::vec_size, 8 * offset,
+      working, twiddle, dst);
   }
 }
 
@@ -1493,11 +1501,11 @@ void five_passes(const Arg<typename V::T>& arg)
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
     two_passes_strided<0, chunk_size, true, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, src, twiddle, working0);
+      n, arg.im_off, nchunks, dft_size, offset, src, twiddle, working0);
     two_passes_strided<2, chunk_size, false, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, working0, twiddle, working1);
+      n, arg.im_off, nchunks, dft_size, offset, working0, twiddle, working1);
     one_pass_strided<4, chunk_size, false, true, DstCf, V>(
-      n, nchunks, dft_size, offset, working1, twiddle, dst);
+      n, arg.im_off, nchunks, dft_size, offset, working1, twiddle, dst);
   }
 }
 
@@ -1525,17 +1533,18 @@ void six_passes(const Arg<typename V::T>& arg)
   for(Int offset = 0; offset < stride; offset += chunk_size)
   {
     two_passes_strided<0, chunk_size, true, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, src, twiddle, working0);
+      n, arg.im_off, nchunks, dft_size, offset, src, twiddle, working0);
     two_passes_strided<2, chunk_size, false, false, cf::Vec<V>, V>(
-      n, nchunks, dft_size, offset, working0, twiddle, working1);
+      n, arg.im_off, nchunks, dft_size, offset, working0, twiddle, working1);
     two_passes_strided<4, chunk_size, false, true, DstCf, V>(
-      n, nchunks, dft_size, offset, working1, twiddle, dst);
+      n, arg.im_off, nchunks, dft_size, offset, working1, twiddle, dst);
   }
 }
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_three_passes_impl(
   Int n,
+  Int im_off,
   typename V::T* src,
   typename V::T* twiddle,
   typename V::T* dst)
@@ -1597,14 +1606,14 @@ FORCEINLINE void last_three_passes_impl(
       C tw3 = VecCf::load(twiddle + 3 * VecCf::stride, 0);
       {
         auto mul = tw3 * a4;
-        DstCf::store(a0 + mul, dst + 0, n);
-        DstCf::store(a0 - mul, dst + l4 * DstCf::stride, n);
+        DstCf::store(a0 + mul, dst + 0, im_off);
+        DstCf::store(a0 - mul, dst + l4 * DstCf::stride, im_off);
       }
 
       {
         auto mul = tw3.mul_neg_i() * a6;
-        DstCf::store(a2 + mul, dst + l2 * DstCf::stride, n);
-        DstCf::store(a2 - mul, dst + l6 * DstCf::stride, n);
+        DstCf::store(a2 + mul, dst + l2 * DstCf::stride, im_off);
+        DstCf::store(a2 - mul, dst + l6 * DstCf::stride, im_off);
       }
     }
 
@@ -1612,14 +1621,14 @@ FORCEINLINE void last_three_passes_impl(
       C tw4 = VecCf::load(twiddle + 4 * VecCf::stride, 0);
       {
         auto mul = tw4 * a5;
-        DstCf::store(a1 + mul, dst + l1 * DstCf::stride, n);
-        DstCf::store(a1 - mul, dst + l5 * DstCf::stride, n);
+        DstCf::store(a1 + mul, dst + l1 * DstCf::stride, im_off);
+        DstCf::store(a1 - mul, dst + l5 * DstCf::stride, im_off);
       }
 
       {
         auto mul = tw4.mul_neg_i() * a7;
-        DstCf::store(a3 + mul, dst + l3 * DstCf::stride, n);
-        DstCf::store(a3 - mul, dst + l7 * DstCf::stride, n);
+        DstCf::store(a3 + mul, dst + l3 * DstCf::stride, im_off);
+        DstCf::store(a3 - mul, dst + l7 * DstCf::stride, im_off);
       }
     }
 
@@ -1633,13 +1642,15 @@ FORCEINLINE void last_three_passes_impl(
 template<typename V, typename DstCf>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
-  last_three_passes_impl<V, DstCf>(arg.n, arg.src, arg.twiddle, arg.dst);
+  last_three_passes_impl<V, DstCf>(
+    arg.n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
 {
-  last_three_passes_impl<V, DstCf>(n, arg.src, arg.twiddle, arg.dst);
+  last_three_passes_impl<V, DstCf>(
+    n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V> void null_pass(const Arg<typename V::T>& arg) { }
@@ -1649,7 +1660,6 @@ void init_steps(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
   Int step_index = 0;
-  state.num_copies = 0;
 
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
@@ -1751,7 +1761,6 @@ void init_steps(State<typename V::T>& state)
 
     state.steps[step_index] = step;
     dft_size <<= step.npasses;
-    state.num_copies++;
   }
 
   state.nsteps = step_index;
@@ -1774,7 +1783,8 @@ Int state_struct_offset(Int n)
 {
   VEC_TYPEDEFS(V);
   return align_size(
-    sizeof(T) * 2 * n +                                     //working
+    sizeof(T) * 2 * n +                                     //working0
+    sizeof(T) * 2 * n +                                     //working1
     sizeof(T) * 2 * n +                                     //twiddle
     sizeof(Vec) * 2 * tiny_log2(V::vec_size));              //tiny_twiddle
 }
@@ -1795,8 +1805,10 @@ State<typename V::T>* fft_state(Int n, void* ptr)
   VEC_TYPEDEFS(V);
   auto state = (State<T>*)(Uint(ptr) + Uint(state_struct_offset<V>(n)));
   state->n = n;
-  state->working = (T*) ptr;
-  state->twiddle = state->working + 2 * n;
+  state->im_off = n;
+  state->working0 = (T*) ptr;
+  state->working1 = state->working0 + 2 * n;
+  state->twiddle = state->working1 + 2 * n;
   state->tiny_twiddle = state->twiddle + 2 * n;
   init_steps<V, SrcCfT<V>, DstCfT<V>>(*state);
   init_twiddle<V>(*state);
@@ -1804,32 +1816,54 @@ State<typename V::T>* fft_state(Int n, void* ptr)
 }
 
 template<typename T>
-void* fft_state_memory_ptr(State<T>* state) { return state->working; }
+void* fft_state_memory_ptr(State<T>* state) { return state->working0; }
 
 template<typename T>
-void fft(const State<T>* state, T* src, T* dst)
+FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 {
   Arg<T> arg;
   arg.n = state->n;
+  arg.im_off = im_off;
   arg.dft_size = 1;
   arg.src = src;
   arg.twiddle = state->twiddle;
   arg.tiny_twiddle = state->tiny_twiddle;
-  
-  auto is_odd = bool(state->num_copies & 1);
-  arg.dst = is_odd ? dst : state->working;
-  auto next_dst = is_odd ? state->working : dst;
 
-  for(Int step = 0; step < state->nsteps; step++)
+  auto w0 = state->working0;
+  auto w1 =
+    im_off == arg.n ? dst :
+    im_off == -arg.n ? dst + im_off : state->working1;
+ 
+  if((state->nsteps & 1)) swap(w0, w1);
+
+  arg.src = src;
+  arg.dst = w0;
+  state->steps[0].fun_ptr(arg);
+  arg.dft_size <<= state->steps[0].npasses;
+
+  arg.src = w0;
+  arg.dst = w1;
+  for(Int step = 1; step < state->nsteps - 1; step++)
   {
-    auto next_dft_size = arg.dft_size << state->steps[step].npasses;
-    if(!state->steps[step].fun_ptr) break;
     state->steps[step].fun_ptr(arg);
-    arg.dft_size = next_dft_size;
-
-    swap(next_dst, arg.dst);
-    arg.src = next_dst;
+    arg.dft_size <<= state->steps[step].npasses;
+    swap(arg.src, arg.dst);
   }
+
+  arg.dst = dst;  
+  state->steps[state->nsteps - 1].fun_ptr(arg);
+}
+
+template<typename T>
+void fft(const State<T>* state, T* src, T* dst)
+{
+  fft_impl(state, state->n, src, dst);
+}
+
+template<typename T>
+void inverse_fft(const State<T>* state, T* src, T* dst)
+{
+  fft_impl(state, -state->n, src + state->n, dst + state->n);
 }
 
 template<typename V, template<typename> class DstCfT>
@@ -1914,7 +1948,6 @@ RealState<typename V::T>* rfft_state(Int n, void* ptr)
   RealState<T>* r = (RealState<T>*)(Uint(ptr) + real_state_struct_offset<V>(n));
   r->state = fft_state<V, cf::Scal, cf::Split>(n / 2, ptr);
 
-  r->state->num_copies++; // causes fft() to put the result in state->working
   r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
   r->last_pass = &real_last_pass<V, DstCfT>;
   
@@ -1934,7 +1967,7 @@ void* rfft_state_memory_ptr(RealState<T>* state)
 template<typename T>
 void rfft(const RealState<T>* state, T* src, T* dst)
 {
-  fft(state->state, src, dst); // the intermediate result is now in state->working
+  fft(state->state, src, state->state->working1);
   state->last_pass(
-    state->state->n * 2, state->state->working, state->twiddle, dst);
+    state->state->n * 2, state->state->working1, state->twiddle, dst);
 }

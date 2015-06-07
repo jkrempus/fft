@@ -55,8 +55,8 @@ struct TestWrapper { };
 template<typename V, template<typename> class CfT, bool is_inverse_>
 struct TestWrapper<V, CfT, false, is_inverse_>
 {
-  enum { is_real = false };
-  enum { is_inverse = is_inverse_ };
+  static const bool is_real = false;
+  static const bool is_inverse = is_inverse_;
   VEC_TYPEDEFS(V);
   typedef T value_type;
   State<T>* state;
@@ -95,8 +95,7 @@ struct TestWrapper<V, CfT, false, is_inverse_>
  
   void transform()
  	{
-		//TODO: inverse
-	 	fft(state, src, dst);
+	 	(is_inverse ? inverse_fft<T> : fft<T>)(state, src, dst);
  	}
 
   template<typename U>
@@ -120,8 +119,8 @@ struct TestWrapper<V, CfT, false, is_inverse_>
 template<typename V, template<typename> class CfT>
 struct TestWrapper<V, CfT, true, false>
 {
-  enum { is_real = true };
-  enum { is_inverse = false };
+  static const bool is_real = true;
+  static const bool is_inverse = false;
   VEC_TYPEDEFS(V);
   typedef T value_type;
   RealState<T>* state;
@@ -181,8 +180,8 @@ struct TestWrapper<V, CfT, true, false>
 template<typename V, template<typename> class CfT>
 struct TestWrapper<V, CfT, true, true>
 {
-  enum { is_real = true };
-  enum { is_inverse = true };
+  static const bool is_real = true;
+  static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
   typedef T value_type;
   RealState<T>* state;
@@ -271,8 +270,8 @@ struct InterleavedWrapperBase<T, true, false>
   
   InterleavedWrapperBase(Int n) :
     n(n),
-    src((T*) valloc(2 * sizeof(T) * (n / 2 + 1))),
-    dst((T*) valloc(2 * sizeof(T) * n)) { }
+    src((T*) valloc(sizeof(T) * n)),
+    dst((T*) valloc(2 * sizeof(T) * (n / 2 + 1))) { }
 
   template<typename U>
   void set_input(const U* re, const U* im)
@@ -308,33 +307,31 @@ struct InterleavedWrapperBase<T, true, true>
   InterleavedWrapperBase(Int n) :
     n(n),
     src((T*) valloc(2 * sizeof(T) * (n / 2 + 1))),
-    dst((T*) valloc(2 * sizeof(T) * n)) { }
+    dst((T*) valloc(sizeof(T) * n)) { }
 
   template<typename U>
   void set_input(const U* re, const U* im)
   {
 		//TODO
-    //std::copy_n(re, n, src);
+    Int i = 0;
+    for(; i <= n / 2; i++)
+    {
+      src[2 * i] = T(re[i]);
+      src[2 * i + 1] = T(im[i]);
+    }
+    for(; i < n; i++)
+    {
+      Int j = n - i;
+      src[2 * i] = T(re[j]);
+      src[2 * i + 1] = T(-im[j]);
+    }
   }
 
   template<typename U>
   void get_output(U* re, U* im)
   {
-		//TODO
-#if 0
-    Int i = 0;
-    for(; i <= n / 2; i++)
-    {
-      re[i] = U(dst[2 * i]);
-      im[i] = U(dst[2 * i + 1]);
-    }
-    for(; i < n; i++)
-    {
-      Int j = n - i;
-      re[i] = U(dst[2 * j]);
-      im[i] = -U(dst[2 * j + 1]);
-    }
-#endif
+    std::copy_n(dst, n, re);
+		std::fill_n(im, n, U(0));
   }
 };
 
@@ -353,7 +350,7 @@ template<> fftwf_plan make_plan<false, false, float>(Int n, float* src, float* d
 template<> fftwf_plan make_plan<false, true, float>(Int n, float* src, float* dst)
 {
   return fftwf_plan_dft_1d(
-    n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_REVERSE, fftw_flags);
+    n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_BACKWARD, fftw_flags);
 }
 
 template<> fftwf_plan make_plan<true, false, float>(Int n, float* src, float* dst)
@@ -369,14 +366,14 @@ template<> fftwf_plan make_plan<true, true, float>(Int n, float* src, float* dst
 template<typename T, bool is_real_, bool is_inverse_>
 struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
 {
-  enum { is_real = is_real_ };
-  enum { is_inverse = is_inverse_ };
+  static const bool is_real = is_real_;
+  static const bool is_inverse = is_inverse_;
   typedef float value_type;
   fftwf_plan plan;
 
-  FftwTestWrapper(Int n) : InterleavedWrapperBase<T, is_real>(n)
+  FftwTestWrapper(Int n) : InterleavedWrapperBase<T, is_real, is_inverse_>(n)
   {
-    plan = make_plan<is_real>(n, this->src, this->dst);
+    plan = make_plan<is_real, is_inverse_>(n, this->src, this->dst);
   }
 
   ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
@@ -385,16 +382,16 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
 };
 #endif
 
-template<typename T>
-struct ReferenceFft : public InterleavedWrapperBase<T, false, false>
+template<typename T, bool is_inverse_>
+struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 {
-  enum { is_real = false };
-  enum { is_inverse = false };
+  static const bool is_real = false;
+  static const bool is_inverse = is_inverse_;
   typedef T value_type;
   Complex<T>* twiddle;
   T* working;
 
-  ReferenceFft(Int n) : InterleavedWrapperBase<T, false, false>(n)
+  ReferenceFft(Int n) : InterleavedWrapperBase<T, false, is_inverse_>(n)
   {
     working = new T[2 * n];
     twiddle = new Complex<T>[n / 2];
@@ -415,6 +412,9 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, false>
   void transform()
   {
     copy(this->src, 2 * this->n, this->dst);
+		if(is_inverse)
+			for(Int i = 0; i < 2 * this->n; i += 2)
+				std::swap(this->dst[i], this->dst[i + 1]);
 
     for(Int dft_size = 1; dft_size < this->n; dft_size *= 2)
     {
@@ -441,6 +441,10 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, false>
         }  
       }
     }
+
+		if(is_inverse)
+			for(Int i = 0; i < 2 * this->n; i += 2)
+				std::swap(this->dst[i], this->dst[i + 1]);
   }
 };
 
@@ -468,6 +472,7 @@ void bench(Int n, double requested_operations)
 template<typename Fft0, typename Fft1>
 typename Fft0::value_type compare(Int n)
 {
+  static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
   Fft0 fft0(n);
   Fft1 fft1(n);
@@ -481,7 +486,22 @@ typename Fft0::value_type compare(Int n)
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
 	//TODO: handle is_inverse
   if(Fft0::is_real || Fft1::is_real)
-    for(Int i = n; i < n * 2; i++) src[i] = T(0);
+  {
+    if(Fft0::is_inverse)
+    {
+      for(Int i = 0; i < n / 2; i++)
+      {
+        Int j = n - i;
+        src[j] = src[i];
+        src[j + n] = -src[i + n];
+      }
+
+      src[n] = T(0);
+      src[n / 2 + n] = T(0);
+    }
+    else
+      for(Int i = n; i < n * 2; i++) src[i] = T(0);
+  }
 
   fft0.set_input(src, src + n);
   fft1.set_input(src, src + n);
@@ -492,9 +512,14 @@ typename Fft0::value_type compare(Int n)
   fft0.get_output(dst0, dst0 + n);
   fft1.get_output(dst1, dst1 + n);
 
-#if 0
-  dump(fft1.state->twiddle, n, "t.float32");
-  dump(fft1.state->state->working, n, "i.float32");
+#if 1
+  //dump(fft1.state->twiddle, n, "t.float32");
+  //dump(fft1.state->state->working, n, "i.float32");
+
+  dump(fft1.src, n + 2, "src.float32");  
+  dump(fft1.dst, n, "dst.float32");  
+
+  dump(src, 2 * n, "aa.float64");
   dump(dst0, 2 * n, "a.float64");
   dump(dst1, 2 * n, "b.float64");
 #endif
@@ -532,7 +557,8 @@ template<typename Fft>
 void test(Int n)
 {
   //TODO: Use long double for ReferenceFft
-  printf("difference %e\n", compare<ReferenceFft<double>, Fft>(n));
+  printf("difference %e\n",
+		 compare<ReferenceFft<double, Fft::is_inverse>, Fft>(n));
 }
 
 struct Options
