@@ -1265,6 +1265,7 @@ FORCEINLINE void two_passes_strided(
       Int strided_s = soffset + im::to_strided_index(
         s, vn, chunk_stride, chunk_size, initial_dft_size, npasses, false);
 
+			// is actually 4 * strided_s
       Int strided_d = doffset + im::to_strided_index(
         d, vn, chunk_stride, chunk_size, initial_dft_size, npasses + 2, false);
 
@@ -1273,7 +1274,8 @@ FORCEINLINE void two_passes_strided(
 
       for(Int j = 0; j < m; j++)
       {
-        auto tw = twiddle + 3 * (strided_s & (dft_size - 1)) * VecCf::stride;
+        //auto tw = twiddle + 3 * (strided_s & (dft_size - 1)) * VecCf::stride;
+        auto tw = twiddle + 3 * j * VecCf::stride;
         
         C tw0 = VecCf::load(tw, 0);
         C tw1 = VecCf::load(tw + VecCf::stride, 0);
@@ -1479,7 +1481,7 @@ void five_passes(const Arg<typename V::T>& arg)
   
   typedef Complex<Vec> C;
 
-  const Int chunk_size = 16;
+  const Int chunk_size = 32;
   const Int nchunks = 32;
   Int stride = n / nchunks;
   
