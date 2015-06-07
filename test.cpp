@@ -48,13 +48,15 @@ T* alloc_complex_array(Int n)
 template<
   typename V,
   template<typename> class CfT,
-  bool is_real>
+  bool is_real,
+	bool is_inverse>
 struct TestWrapper { };
 
-template<typename V, template<typename> class CfT>
-struct TestWrapper<V, CfT, false>
+template<typename V, template<typename> class CfT, bool is_inverse_>
+struct TestWrapper<V, CfT, false, is_inverse_>
 {
   enum { is_real = false };
+  enum { is_inverse = is_inverse_ };
   VEC_TYPEDEFS(V);
   typedef T value_type;
   State<T>* state;
@@ -91,7 +93,11 @@ struct TestWrapper<V, CfT, false>
     }
   }
  
-  void transform() { fft(state, src, dst); }
+  void transform()
+ 	{
+		//TODO: inverse
+	 	fft(state, src, dst);
+ 	}
 
   template<typename U>
   void get_output(U* re, U* im)
@@ -112,9 +118,10 @@ struct TestWrapper<V, CfT, false>
 };
 
 template<typename V, template<typename> class CfT>
-struct TestWrapper<V, CfT, true>
+struct TestWrapper<V, CfT, true, false>
 {
   enum { is_real = true };
+  enum { is_inverse = false };
   VEC_TYPEDEFS(V);
   typedef T value_type;
   RealState<T>* state;
@@ -171,11 +178,59 @@ struct TestWrapper<V, CfT, true>
   }
 };
 
-template<typename T, bool is_real>
+template<typename V, template<typename> class CfT>
+struct TestWrapper<V, CfT, true, true>
+{
+  enum { is_real = true };
+  enum { is_inverse = true };
+  VEC_TYPEDEFS(V);
+  typedef T value_type;
+  RealState<T>* state;
+  Int n;
+  Int im_offset;
+  T* src;
+  T* dst;
+  TestWrapper(Int n) :
+    state(rfft_state<V, CfT>(n, valloc(rfft_state_memory_size<V>(n)))),
+    n(n),
+    im_offset(align_size<T>(n / 2 + 1))
+  {
+    src = (T*) valloc(n * sizeof(T));
+    dst = (T*) valloc(2 * im_offset * sizeof(T));
+  }
+
+  ~TestWrapper()
+  {
+    free(rfft_state_memory_ptr(state));
+    free(src);
+    free(dst);
+  }
+
+  template<typename U>
+  void set_input(const U* re, const U* im)
+ 	{
+		//TODO
+	 	// std::copy_n(re, n, src);
+ 	}
+ 
+  void transform()
+ 	{
+		//TODO
+	 	// rfft(state, src, dst);
+ 	}
+
+  template<typename U>
+  void get_output(U* re, U* im)
+  {
+		//TODO
+  }
+};
+
+template<typename T, bool is_real, bool is_inverse>
 struct InterleavedWrapperBase { };
 
-template<typename T>
-struct InterleavedWrapperBase<T, false>
+template<typename T, bool is_inverse_>
+struct InterleavedWrapperBase<T, false, is_inverse_>
 {
   Int n;
   T* src;
@@ -208,7 +263,7 @@ struct InterleavedWrapperBase<T, false>
 };
 
 template<typename T>
-struct InterleavedWrapperBase<T, true>
+struct InterleavedWrapperBase<T, true, false>
 {
   Int n;
   T* src;
@@ -243,26 +298,79 @@ struct InterleavedWrapperBase<T, true>
   }
 };
 
+template<typename T>
+struct InterleavedWrapperBase<T, true, true>
+{
+  Int n;
+  T* src;
+  T* dst;
+  
+  InterleavedWrapperBase(Int n) :
+    n(n),
+    src((T*) valloc(2 * sizeof(T) * (n / 2 + 1))),
+    dst((T*) valloc(2 * sizeof(T) * n)) { }
+
+  template<typename U>
+  void set_input(const U* re, const U* im)
+  {
+		//TODO
+    //std::copy_n(re, n, src);
+  }
+
+  template<typename U>
+  void get_output(U* re, U* im)
+  {
+		//TODO
+#if 0
+    Int i = 0;
+    for(; i <= n / 2; i++)
+    {
+      re[i] = U(dst[2 * i]);
+      im[i] = U(dst[2 * i + 1]);
+    }
+    for(; i < n; i++)
+    {
+      Int j = n - i;
+      re[i] = U(dst[2 * j]);
+      im[i] = -U(dst[2 * j + 1]);
+    }
+#endif
+  }
+};
+
 #ifdef HAVE_FFTW
-template<bool is_real, typename T> fftwf_plan make_plan(Int n, T* src, T* dst);
+template<bool is_real, bool is_inverse, typename T>
+fftwf_plan make_plan(Int n, T* src, T* dst);
 
 const unsigned fftw_flags = FFTW_PATIENT;
 
-template<> fftwf_plan make_plan<false, float>(Int n, float* src, float* dst)
+template<> fftwf_plan make_plan<false, false, float>(Int n, float* src, float* dst)
 {
   return fftwf_plan_dft_1d(
     n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_FORWARD, fftw_flags);
 }
 
-template<> fftwf_plan make_plan<true, float>(Int n, float* src, float* dst)
+template<> fftwf_plan make_plan<false, true, float>(Int n, float* src, float* dst)
+{
+  return fftwf_plan_dft_1d(
+    n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_REVERSE, fftw_flags);
+}
+
+template<> fftwf_plan make_plan<true, false, float>(Int n, float* src, float* dst)
 {
   return fftwf_plan_dft_r2c_1d(n, src, (fftwf_complex*) dst, fftw_flags);
 }
 
-template<typename T, bool is_real_>
-struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_>
+template<> fftwf_plan make_plan<true, true, float>(Int n, float* src, float* dst)
+{
+  return fftwf_plan_dft_c2r_1d(n, (fftwf_complex*) src, dst, fftw_flags);
+}
+
+template<typename T, bool is_real_, bool is_inverse_>
+struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
 {
   enum { is_real = is_real_ };
+  enum { is_inverse = is_inverse_ };
   typedef float value_type;
   fftwf_plan plan;
 
@@ -278,14 +386,15 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_>
 #endif
 
 template<typename T>
-struct ReferenceFft : public InterleavedWrapperBase<T, false>
+struct ReferenceFft : public InterleavedWrapperBase<T, false, false>
 {
   enum { is_real = false };
+  enum { is_inverse = false };
   typedef T value_type;
   Complex<T>* twiddle;
   T* working;
 
-  ReferenceFft(Int n) : InterleavedWrapperBase<T, false>(n)
+  ReferenceFft(Int n) : InterleavedWrapperBase<T, false, false>(n)
   {
     working = new T[2 * n];
     twiddle = new Complex<T>[n / 2];
@@ -370,6 +479,7 @@ typename Fft0::value_type compare(Int n)
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+	//TODO: handle is_inverse
   if(Fft0::is_real || Fft1::is_real)
     for(Int i = n; i < n * 2; i++) src[i] = T(0);
 
@@ -460,10 +570,10 @@ template<bool is_real, bool is_inverse>
 void test_or_bench2(const Options& opt)
 {
   if(opt.positional[0] == "fft")
-    test_or_bench3<TestWrapper<V, CfT, is_real>>(opt);
+    test_or_bench3<TestWrapper<V, CfT, is_real, is_inverse>>(opt);
 #ifdef HAVE_FFTW
   else if(opt.positional[0] == "fftw")
-    test_or_bench3<FftwTestWrapper<float, is_real>>(opt);
+    test_or_bench3<FftwTestWrapper<float, is_real, is_inverse>>(opt);
 #endif
   else
     abort();
