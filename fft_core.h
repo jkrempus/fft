@@ -294,6 +294,7 @@ struct Step
 {
   typedef void (*pass_fun_t)(const Arg<T>&);
   short npasses;
+  bool is_out_of_place;
   pass_fun_t fun_ptr;
 };
 
@@ -308,6 +309,7 @@ struct State
   T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
+  Int ncopies;
 };
 
 template<typename T>
@@ -1701,10 +1703,12 @@ void init_steps(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
   Int step_index = 0;
+  state.ncopies = 0;
 
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
+    step.is_out_of_place = true;
 		if(state.n >= large_fft_size && dft_size == 1)
 		{
 			step.fun_ptr = &first_five_passes<V, SrcCf>;
@@ -1801,6 +1805,7 @@ void init_steps(State<typename V::T>& state)
     }
 
     state.steps[step_index] = step;
+    if(step.is_out_of_place) state.ncopies++;
     dft_size <<= step.npasses;
   }
 
@@ -1888,7 +1893,7 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
   {
     state->steps[step].fun_ptr(arg);
     arg.dft_size <<= state->steps[step].npasses;
-    swap(arg.src, arg.dst);
+    if(state->steps[step].is_out_of_place) swap(arg.src, arg.dst);
   }
 
   arg.dst = dst;  
