@@ -53,7 +53,7 @@ struct BitReversed
   Uint br;
   Uint mask;
   static const Uint table_size_nbits = 3;
-  static const Uint table_size = Uint(1) << table_size_nbits;
+  static const Uint table_size = (Uint(1) << table_size_nbits) - 1;
   Uint bit_flip_table[table_size];
 
   BitReversed(int nbits) :
@@ -72,9 +72,9 @@ struct BitReversed
 
   void advance()
   {
-    Uint low_bits = i & (table_size - 1);
+    Uint low_bits = i & table_size;
     Uint br_mask;
-    if(low_bits != (table_size - 1))
+    if(low_bits != table_size)
       br_mask = bit_flip_table[low_bits];
     else
     {
