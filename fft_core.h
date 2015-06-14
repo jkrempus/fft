@@ -1234,37 +1234,35 @@ template<typename V>
 void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  typedef Complex<Vec> C;
-
   Int vn = arg.n / V::vec_size;
   Int vdft_size = arg.dft_size / V::vec_size;
   auto tw = arg.twiddle + (VecCf::stride) * (vn - 4 * vdft_size);
 
-  for(Int i = 0; i < vdft_size; i++)
+  Int vm = vn / vdft_size / 4;
+  auto p0 = arg.src; 
+  auto p1 = p0 + vm * VecCf::stride; 
+  auto p2 = p1 + vm * VecCf::stride; 
+  auto p3 = p2 + vm * VecCf::stride; 
+
+  for(Int i = 0; i < vn * VecCf::stride; i += 4 * vm * VecCf::stride)
   {
     auto tw0 = VecCf::load(tw, 0);
     auto tw1 = VecCf::load(tw + VecCf::stride, 0);
     auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
     tw += 3 * VecCf::stride;
 
-    Int vm = vn / vdft_size / 4;
-    for(Int j = 0; j < vm; j++)
+    for(Int j = i; j < i + vm * VecCf::stride; j += VecCf::stride)
     {
-      auto p0 = arg.src + (4 * vm * i + j + 0 * vm) * VecCf::stride; 
-      auto p1 = arg.src + (4 * vm * i + j + 1 * vm) * VecCf::stride; 
-      auto p2 = arg.src + (4 * vm * i + j + 2 * vm) * VecCf::stride; 
-      auto p3 = arg.src + (4 * vm * i + j + 3 * vm) * VecCf::stride; 
-
       C d0, d1, d2, d3;
       two_passes_inner(
-        VecCf::load(p0, 0), VecCf::load(p1, 0),
-        VecCf::load(p2, 0), VecCf::load(p3, 0),
+        VecCf::load(p0 + j, 0), VecCf::load(p1 + j, 0),
+        VecCf::load(p2 + j, 0), VecCf::load(p3 + j, 0),
         d0, d1, d2, d3, tw0, tw1, tw2);
 
-      VecCf::store(d0, p0, arg.im_off);
-      VecCf::store(d2, p1, arg.im_off);
-      VecCf::store(d1, p2, arg.im_off);
-      VecCf::store(d3, p3, arg.im_off);
+      VecCf::store(d0, p0 + j, 0);
+      VecCf::store(d2, p1 + j, 0);
+      VecCf::store(d1, p2 + j, 0);
+      VecCf::store(d3, p3 + j, 0);
     }
   }
 }
