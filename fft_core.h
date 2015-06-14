@@ -877,8 +877,8 @@ void init_twiddle(State<typename V::T>& state)
 template<typename V>
 void init_br_table(State<typename V::T>& state)
 {
-  auto vn = state.n / V::vec_size;
-  for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
+  auto len = (state.n / V::vec_size) >> state.steps[state.nsteps - 1].npasses;
+  for(BitReversed br(len); br.i < len; br.advance())
     state.br_table[br.i] = br.br;
 }
 
@@ -1295,29 +1295,28 @@ void last_two_passes(const Arg<typename V::T>& arg)
   Int vn = arg.n / V::vec_size;
   auto tw = arg.twiddle;
 
-  auto src0 = arg.src; 
-  auto src1 = src0 + VecCf::stride; 
-  auto src2 = src1 + VecCf::stride; 
-  auto src3 = src2 + VecCf::stride; 
+  auto src = arg.src;
+  const auto off1 = VecCf::stride;
+  const auto off2 = off1 + VecCf::stride;
+  const auto off3 = off2 + VecCf::stride;
   
   auto dst0 = arg.dst; 
   auto dst1 = dst0 + vn / 4 * DstCf::stride; 
   auto dst2 = dst1 + vn / 4 * DstCf::stride; 
   auto dst3 = dst2 + vn / 4 * DstCf::stride; 
 
-  //for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
   auto br = arg.br_table;
-  for(Int s = 0; s < vn * VecCf::stride; s += 4 * VecCf::stride)
+  for(auto end = src + vn * VecCf::stride; src < end; src += 4 * VecCf::stride)
   {
     auto tw0 = VecCf::load(tw, 0);
-    auto tw1 = VecCf::load(tw + VecCf::stride, 0);
-    auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
-    tw += 3 * VecCf::stride;
+    auto tw1 = VecCf::load(tw + off1, 0);
+    auto tw2 = VecCf::load(tw + off2, 0);
+    tw += off3;
 
     C d0, d1, d2, d3;
     two_passes_inner(
-      VecCf::load(src0 + s, 0), VecCf::load(src1 + s, 0),
-      VecCf::load(src2 + s, 0), VecCf::load(src3 + s, 0),
+      VecCf::load(src, 0), VecCf::load(src + off1, 0),
+      VecCf::load(src + off2, 0), VecCf::load(src + off3, 0),
       d0, d1, d2, d3, tw0, tw1, tw2);
 
     Int d = br[0] * DstCf::stride;
@@ -2019,7 +2018,7 @@ Int state_struct_offset(Int n)
     sizeof(T) * 2 * n +                            //working1
     sizeof(T) * 2 * n +                            //twiddle
     tiny_twiddle_bytes<V>() +                      //tiny_twiddle
-    sizeof(Int) * n / V::vec_size / 4);            //br table
+    sizeof(Int) * n / V::vec_size / 2);            //br table
 }
 
 template<typename V>
