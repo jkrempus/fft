@@ -1268,6 +1268,45 @@ void two_passes(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename DstCf>
+void last_two_passes(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  Int vn = arg.n / V::vec_size;
+  auto tw = arg.twiddle;
+
+  auto src0 = arg.src; 
+  auto src1 = src0 + VecCf::stride; 
+  auto src2 = src1 + VecCf::stride; 
+  auto src3 = src2 + VecCf::stride; 
+  
+  auto dst0 = arg.dst; 
+  auto dst1 = dst0 + vn / 4 * DstCf::stride; 
+  auto dst2 = dst1 + vn / 4 * DstCf::stride; 
+  auto dst3 = dst2 + vn / 4 * DstCf::stride; 
+
+  for(BitReversed br(log2(vn / 4)); br.i < vn / 4; br.advance())
+  {
+    auto tw0 = VecCf::load(tw, 0);
+    auto tw1 = VecCf::load(tw + VecCf::stride, 0);
+    auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
+    tw += 3 * VecCf::stride;
+
+    C d0, d1, d2, d3;
+    Int i = 4 * VecCf::stride * br.i;
+    two_passes_inner(
+      VecCf::load(src0 + i, 0), VecCf::load(src1 + i, 0),
+      VecCf::load(src2 + i, 0), VecCf::load(src3 + i, 0),
+      d0, d1, d2, d3, tw0, tw1, tw2);
+
+    Int j = br.br * DstCf::stride;
+    DstCf::store(d0, dst0 + j, arg.im_off);
+    DstCf::store(d1, dst1 + j, arg.im_off);
+    DstCf::store(d2, dst2 + j, arg.im_off);
+    DstCf::store(d3, dst3 + j, arg.im_off);
+  }
+}
+
+template<typename V, typename DstCf>
 void bit_reverse_pass(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
@@ -1873,9 +1912,8 @@ void init_steps(State<typename V::T>& state)
       }
       else if(dft_size * 4 == state.n)
       {
-        step.fun_ptr = &two_passes<V>;
+        step.fun_ptr = &last_two_passes<V, DstCf>;
         step.npasses = 2;
-        step.is_out_of_place = false;
       }
       else if(dft_size * 4 < state.n)
       {
@@ -1916,6 +1954,7 @@ void init_steps(State<typename V::T>& state)
     dft_size <<= step.npasses;
   }
 
+#if 0
   {
     Step<T> step;
     step.npasses = 0;
@@ -1925,6 +1964,7 @@ void init_steps(State<typename V::T>& state)
     state.ncopies++;
     step_index++;
   }
+#endif
 
   state.nsteps = step_index;
 
