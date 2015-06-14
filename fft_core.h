@@ -48,6 +48,25 @@ Int tiny_log2(Int a)
     a == 16 ? 4 : -1;
 }
 
+FORCEINLINE Int power2_div(Int a, Int b)
+{
+  Int r = 1;
+  for(; b < a; b += b) r += r;
+  return r;
+}
+
+Int log2(Int a)
+{
+  Int r = 0;
+  while(a > 1)
+  {
+    r++;
+    a >>= 1; 
+  }
+
+  return r;
+}
+
 struct BitReversed
 {
   Uint i;
@@ -88,18 +107,6 @@ struct BitReversed
     i++;
   }
 };
-
-Int log2(Int a)
-{
-  Int r = 0;
-  while(a > 1)
-  {
-    r++;
-    a >>= 1; 
-  }
-
-  return r;
-}
 
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
@@ -1235,36 +1242,39 @@ template<typename V>
 void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int vn = arg.n / V::vec_size;
-  Int vdft_size = arg.dft_size / V::vec_size;
-  auto tw = arg.twiddle + (VecCf::stride) * (vn - 4 * vdft_size);
+  Int n = arg.n;
+  Int dft_size = arg.dft_size;
+  auto tw = arg.twiddle + VecCf::idx_ratio * (n - 4 * dft_size);
 
-  Int vm = vn / vdft_size / 4;
-  auto p0 = arg.src; 
-  auto p1 = p0 + vm * VecCf::stride; 
-  auto p2 = p1 + vm * VecCf::stride; 
-  auto p3 = p2 + vm * VecCf::stride; 
+  auto off1 = power2_div(n, dft_size) / 4 * VecCf::stride;
+  auto off2 = off1 + off1;
+  auto off3 = off2 + off1;
 
-  for(Int i = 0; i < vn * VecCf::stride; i += 4 * vm * VecCf::stride)
+  for(auto p = arg.src, end0 = p + n * VecCf::idx_ratio; p < end0;)
   {
     auto tw0 = VecCf::load(tw, 0);
     auto tw1 = VecCf::load(tw + VecCf::stride, 0);
     auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
     tw += 3 * VecCf::stride;
 
-    for(Int j = i; j < i + vm * VecCf::stride; j += VecCf::stride)
+    for(auto end1 = p + off1;;)
     {
       C d0, d1, d2, d3;
       two_passes_inner(
-        VecCf::load(p0 + j, 0), VecCf::load(p1 + j, 0),
-        VecCf::load(p2 + j, 0), VecCf::load(p3 + j, 0),
+        VecCf::load(p, 0), VecCf::load(p + off1, 0),
+        VecCf::load(p + off2, 0), VecCf::load(p + off3, 0),
         d0, d1, d2, d3, tw0, tw1, tw2);
 
-      VecCf::store(d0, p0 + j, 0);
-      VecCf::store(d2, p1 + j, 0);
-      VecCf::store(d1, p2 + j, 0);
-      VecCf::store(d3, p3 + j, 0);
+      VecCf::store(d0, p, 0);
+      VecCf::store(d2, p + off1, 0);
+      VecCf::store(d1, p + off2, 0);
+      VecCf::store(d3, p + off3, 0);
+
+      p += VecCf::stride;
+      if(!(p < end1)) break;
     }
+
+    p += off3;
   }
 }
 
@@ -1990,6 +2000,7 @@ Int state_struct_offset(Int n)
     sizeof(T) * 2 * n +                                     //working0
     sizeof(T) * 2 * n +                                     //working1
     sizeof(T) * 2 * n +                                     //twiddle
+    //sizeof(Int) * n / V::vec_size / 4 +                     //br table
     sizeof(Vec) * 2 * tiny_log2(V::vec_size));              //tiny_twiddle
 }
 
