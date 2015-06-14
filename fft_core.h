@@ -47,6 +47,42 @@ Int tiny_log2(Int a)
     a == 16 ? 4 : -1;
 }
 
+struct BitReversed
+{
+  Uint i;
+  Uint br;
+  Uint mask;
+  Uint high_bit;
+  Uint two_high_bits;
+
+  BitReversed(int nbits) :
+    i(0),
+    br(0),
+    mask(Uint(Int(-1)) >> (8 * sizeof(Uint) - nbits))
+  {
+    high_bit = mask ^ (mask >> 1);
+    two_high_bits = mask ^ (mask >> 2);
+  }
+
+  void advance()
+  {
+    Uint br_mask;
+    if((i & 1) == 0)
+      br_mask = high_bit;
+    else if((i & 2) == 0)
+      br_mask = two_high_bits;
+    else
+    {
+      br_mask = mask >> 2;
+      for(Uint j = i >> 2; j & 1; j >>= 1) br_mask >>= 1;
+      br_mask ^= mask;
+    }
+
+    br ^= br_mask;
+    i++;
+  }
+};
+
 Int log2(Int a)
 {
   Int r = 0;
