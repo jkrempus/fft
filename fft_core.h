@@ -52,29 +52,34 @@ struct BitReversed
   Uint i;
   Uint br;
   Uint mask;
-  Uint high_bit;
-  Uint two_high_bits;
+  static const Uint table_size_nbits = 3;
+  static const Uint table_size = Uint(1) << table_size_nbits;
+  Uint bit_flip_table[table_size];
 
   BitReversed(int nbits) :
     i(0),
     br(0),
     mask(Uint(Int(-1)) >> (8 * sizeof(Uint) - nbits))
   {
-    high_bit = mask ^ (mask >> 1);
-    two_high_bits = mask ^ (mask >> 2);
+    for(Uint i = 0; i < table_size; i++)
+    {
+      Uint br_mask = mask >> 1;
+      for(Uint j = i; j & 1; j >>= 1) br_mask >>= 1;
+      br_mask ^= mask;
+      bit_flip_table[i] = br_mask;
+    }
   }
 
   void advance()
   {
+    Uint low_bits = i & (table_size - 1);
     Uint br_mask;
-    if((i & 1) == 0)
-      br_mask = high_bit;
-    else if((i & 2) == 0)
-      br_mask = two_high_bits;
+    if(low_bits != (table_size - 1))
+      br_mask = bit_flip_table[low_bits];
     else
     {
-      br_mask = mask >> 2;
-      for(Uint j = i >> 2; j & 1; j >>= 1) br_mask >>= 1;
+      br_mask = mask >> (table_size_nbits + 1);
+      for(Uint j = i >> table_size_nbits; j & 1; j >>= 1) br_mask >>= 1;
       br_mask ^= mask;
     }
 
