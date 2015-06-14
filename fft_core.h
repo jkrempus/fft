@@ -295,6 +295,7 @@ struct Arg
   T* twiddle;
   T* tiny_twiddle;
   T* dst;
+  Int* br_table;
 };
 
 template<typename T>
@@ -314,6 +315,7 @@ struct State
   T* working0;
   T* working1;
   T* twiddle;
+  Int* br_table;
   T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
@@ -872,6 +874,14 @@ void init_twiddle(State<typename V::T>& state)
   }
 }
 
+template<typename V>
+void init_br_table(State<typename V::T>& state)
+{
+  auto vn = state.n / V::vec_size;
+  for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
+    state.br_table[br.i] = br.br;
+}
+
 template<typename T> T min(T a, T b){ return a < b ? a : b; }
 template<typename T> T max(T a, T b){ return a > b ? a : b; }
 
@@ -1295,7 +1305,9 @@ void last_two_passes(const Arg<typename V::T>& arg)
   auto dst2 = dst1 + vn / 4 * DstCf::stride; 
   auto dst3 = dst2 + vn / 4 * DstCf::stride; 
 
-  for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
+  //for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
+  auto br = arg.br_table;
+  for(Int s = 0; s < vn * VecCf::stride; s += 4 * VecCf::stride)
   {
     auto tw0 = VecCf::load(tw, 0);
     auto tw1 = VecCf::load(tw + VecCf::stride, 0);
@@ -1303,17 +1315,17 @@ void last_two_passes(const Arg<typename V::T>& arg)
     tw += 3 * VecCf::stride;
 
     C d0, d1, d2, d3;
-    Int i = 4 * VecCf::stride * br.i;
     two_passes_inner(
-      VecCf::load(src0 + i, 0), VecCf::load(src1 + i, 0),
-      VecCf::load(src2 + i, 0), VecCf::load(src3 + i, 0),
+      VecCf::load(src0 + s, 0), VecCf::load(src1 + s, 0),
+      VecCf::load(src2 + s, 0), VecCf::load(src3 + s, 0),
       d0, d1, d2, d3, tw0, tw1, tw2);
 
-    Int j = br.br * DstCf::stride;
-    DstCf::store(d0, dst0 + j, arg.im_off);
-    DstCf::store(d1, dst1 + j, arg.im_off);
-    DstCf::store(d2, dst2 + j, arg.im_off);
-    DstCf::store(d3, dst3 + j, arg.im_off);
+    Int d = br[0] * DstCf::stride;
+    br++;
+    DstCf::store(d0, dst0 + d, arg.im_off);
+    DstCf::store(d1, dst1 + d, arg.im_off);
+    DstCf::store(d2, dst2 + d, arg.im_off);
+    DstCf::store(d3, dst3 + d, arg.im_off);
   }
 }
 
@@ -1993,15 +2005,21 @@ Int align_size(Int size)
 };
 
 template<typename V>
+Int tiny_twiddle_bytes()
+{
+  return sizeof(typename V::Vec) * 2 * tiny_log2(V::vec_size);
+}
+
+template<typename V>
 Int state_struct_offset(Int n)
 {
   VEC_TYPEDEFS(V);
   return align_size(
-    sizeof(T) * 2 * n +                                     //working0
-    sizeof(T) * 2 * n +                                     //working1
-    sizeof(T) * 2 * n +                                     //twiddle
-    //sizeof(Int) * n / V::vec_size / 4 +                     //br table
-    sizeof(Vec) * 2 * tiny_log2(V::vec_size));              //tiny_twiddle
+    sizeof(T) * 2 * n +                            //working0
+    sizeof(T) * 2 * n +                            //working1
+    sizeof(T) * 2 * n +                            //twiddle
+    tiny_twiddle_bytes<V>() +                      //tiny_twiddle
+    sizeof(Int) * n / V::vec_size / 4);            //br table
 }
 
 template<typename V>
@@ -2025,8 +2043,10 @@ State<typename V::T>* fft_state(Int n, void* ptr)
   state->working1 = state->working0 + 2 * n;
   state->twiddle = state->working1 + 2 * n;
   state->tiny_twiddle = state->twiddle + 2 * n;
+  state->br_table = (Int*)(Uint(state->tiny_twiddle) + tiny_twiddle_bytes<V>());
   init_steps<V, SrcCfT<V>, DstCfT<V>>(*state);
   init_twiddle<V>(*state);
+  init_br_table<V>(*state);
   return state;
 }
 
@@ -2042,6 +2062,7 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
   arg.dft_size = 1;
   arg.src = src;
   arg.twiddle = state->twiddle;
+  arg.br_table = state->br_table;
   arg.tiny_twiddle = state->tiny_twiddle;
 
   auto w0 = state->working0;
