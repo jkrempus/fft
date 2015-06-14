@@ -27,7 +27,8 @@ void print_vec(T a)
 }
 #endif
 
-Int large_fft_size = 1 << 14;
+//Int large_fft_size = 1 << 14;
+Int large_fft_size = 1 << 24;
 Int max_vec_size = 8;
 const Int align_bytes = 64;
 
@@ -52,14 +53,14 @@ struct BitReversed
   Uint i;
   Uint br;
   Uint mask;
-  static const Uint table_size_nbits = 3;
+  static const Uint table_size_nbits = 1;
   static const Uint table_size = (Uint(1) << table_size_nbits) - 1;
   Uint bit_flip_table[table_size];
 
-  BitReversed(int nbits) :
+  BitReversed(Uint limit) :
     i(0),
     br(0),
-    mask(nbits == 0 ? 0 : Uint(Int(-1)) >> (8 * sizeof(Uint) - nbits))
+    mask(limit - 1)
   {
     for(Uint i = 0; i < table_size; i++)
     {
@@ -851,7 +852,7 @@ void init_twiddle(State<typename V::T>& state)
       auto src_row0 = state.working0 + (n - 4 * dft_size) * CF::idx_ratio;
       auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
-      BitReversed br(log2(vdft_size));
+      BitReversed br(vdft_size);
       for(; br.i < vdft_size; br.advance())
       {
         store_two_pass_twiddle<V>(
@@ -1284,7 +1285,7 @@ void last_two_passes(const Arg<typename V::T>& arg)
   auto dst2 = dst1 + vn / 4 * DstCf::stride; 
   auto dst3 = dst2 + vn / 4 * DstCf::stride; 
 
-  for(BitReversed br(log2(vn / 4)); br.i < vn / 4; br.advance())
+  for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
   {
     auto tw0 = VecCf::load(tw, 0);
     auto tw1 = VecCf::load(tw + VecCf::stride, 0);
@@ -1312,7 +1313,7 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
 
   Int vn = arg.n / V::vec_size;
-  for(BitReversed br(log2(vn)); br.i < vn; br.advance())
+  for(BitReversed br(vn); br.i < vn; br.advance())
     DstCf::store(
       VecCf::load(arg.src + br.i * VecCf::stride, 0),
       arg.dst + br.br * DstCf::stride,
