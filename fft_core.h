@@ -291,6 +291,7 @@ struct Arg
   Int n;
   Int im_off;
   Int dft_size;
+  Int offset;
   T* src;
   T* twiddle;
   T* tiny_twiddle;
@@ -1161,122 +1162,19 @@ void two_steps(const Arg<T>& arg_in)
 }
 #endif
 
-template<typename V, typename DstCf, bool is_last>
-void two_passes_(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  typedef Complex<Vec> C;
-
-  Int n = arg.n;
-  Int dft_size = arg.dft_size;
-  auto src = arg.src;
-  auto tw = arg.twiddle + (VecCf::idx_ratio) * (n - 4 * dft_size);
-  auto dst = arg.dst;
-
-  Int l1 = n / 4 * VecCf::idx_ratio;
-  Int l2 = 2 * l1;
-  Int l3 = 3 * l1;
-
-  Int m1 = dft_size * DstCf::idx_ratio;
-  Int m2 = 2 * m1;
-  Int m3 = 3 * m1;
-
-  for(T* end = src + dft_size * VecCf::idx_ratio; src < end;)
-  {
-    auto s = src;
-    auto d = dst;
-    auto tw0 = VecCf::load(tw, 0);
-    auto tw1 = VecCf::load(tw + VecCf::stride, 0);
-    auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
-    src += VecCf::stride;
-    tw += 3 * VecCf::stride;
-    dst += DstCf::stride;
-
-    for(T* end1 = s + l1;;)
-    {
-      C d0, d1, d2, d3;
-      two_passes_inner(
-        VecCf::load(s, 0), VecCf::load(s + l1, 0),
-        VecCf::load(s + l2, 0), VecCf::load(s + l3, 0),
-        d0, d1, d2, d3, tw0, tw1, tw2);
-
-      s += dft_size * VecCf::idx_ratio;
-
-      DstCf::store(d0, d, arg.im_off);
-      DstCf::store(d1, d + m1, arg.im_off);
-      DstCf::store(d2, d + m2, arg.im_off);
-      DstCf::store(d3, d + m3, arg.im_off);
-
-      d += m1 + m3;
-      if(is_last || !(s < end1)) break;
-    }
-  }
-}
-
-template<typename V, typename DstCf, bool is_last>
-void two_passes__(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  typedef Complex<Vec> C;
-
-  Int n = arg.n;
-  Int dft_size = arg.dft_size;
-  auto src = arg.src;
-  auto tw_start = arg.twiddle + (VecCf::idx_ratio) * (n - 4 * dft_size);
-  auto dst = arg.dst;
-
-  Int l1 = n / 4 * VecCf::idx_ratio;
-  Int l2 = 2 * l1;
-  Int l3 = 3 * l1;
-
-  Int m1 = dft_size * DstCf::idx_ratio;
-  Int m2 = 2 * m1;
-  Int m3 = 3 * m1;
-
-  for(T* end = src + l1; src < end;)
-  {
-    auto tw = tw_start;
-    auto s = src;
-    auto d = dst;
-
-    for(T* end1 = s + dft_size * VecCf::idx_ratio;;)
-    {
-      auto tw0 = VecCf::load(tw, 0);
-      auto tw1 = VecCf::load(tw + VecCf::stride, 0);
-      auto tw2 = VecCf::load(tw + 2 * VecCf::stride, 0);
-      tw += 3 * VecCf::stride;
-
-      C d0, d1, d2, d3;
-      two_passes_inner(
-        VecCf::load(s, 0), VecCf::load(s + l1, 0),
-        VecCf::load(s + l2, 0), VecCf::load(s + l3, 0),
-        d0, d1, d2, d3, tw0, tw1, tw2);
-
-      DstCf::store(d0, d, arg.im_off);
-      DstCf::store(d1, d + m1, arg.im_off);
-      DstCf::store(d2, d + m2, arg.im_off);
-      DstCf::store(d3, d + m3, arg.im_off);
-
-      s += VecCf::stride;
-      d += DstCf::stride;
-      if(is_last || !(s < end1)) break;
-    }
-    src += dft_size * VecCf::idx_ratio;
-    dst += m1 + m3;
-  }
-}
-
 template<typename V>
 void two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   Int n = arg.n;
   Int dft_size = arg.dft_size;
-  auto tw = arg.twiddle + VecCf::idx_ratio * (n - 4 * dft_size);
 
   auto off1 = power2_div(n, dft_size) / 4 * VecCf::stride;
   auto off2 = off1 + off1;
   auto off3 = off2 + off1;
+  
+  auto tw = arg.twiddle + VecCf::idx_ratio * (n - 4 * dft_size);
+  if(arg.offset != 0) tw += 3 * power2_div(arg.offset, off1 + off3);
 
   for(auto p = arg.src, end0 = p + n * VecCf::idx_ratio; p < end0;)
   {
@@ -2114,6 +2012,7 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
   arg.n = state->n;
   arg.im_off = im_off;
   arg.dft_size = 1;
+  arg.offset = 0;
   arg.src = src;
   arg.twiddle = state->twiddle;
   arg.br_table = state->br_table;
