@@ -1801,6 +1801,7 @@ FORCEINLINE void last_three_passes_impl(
   Int im_off,
   typename V::T* src,
   typename V::T* twiddle,
+  Int* br_table,
   typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
@@ -1812,10 +1813,11 @@ FORCEINLINE void last_three_passes_impl(
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
 
-  for(BitReversed br(l1); br.i < l1; br.advance())
+  auto s = src;
+  auto br = br_table;
+  for(auto end = br + l1; br < end; br++)
   {
-    auto s = src + 8 * br.i * VecCf::stride;
-    auto d = dst + br.br * DstCf::stride;
+    auto d = dst + br[0];
 
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
@@ -1888,6 +1890,7 @@ FORCEINLINE void last_three_passes_impl(
       }
     }
 
+    s += 8 * VecCf::stride;
     twiddle += 5 * VecCf::stride;
   }
 }
@@ -1896,14 +1899,14 @@ template<typename V, typename DstCf>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
   last_three_passes_impl<V, DstCf>(
-    arg.n, arg.im_off, arg.src, arg.twiddle, arg.dst);
+    arg.n, arg.im_off, arg.src, arg.twiddle, arg.br_table, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
 {
   last_three_passes_impl<V, DstCf>(
-    n, arg.im_off, arg.src, arg.twiddle, arg.dst);
+    n, arg.im_off, arg.src, arg.twiddle, arg.br_table, arg.dst);
 }
 
 template<typename V> void null_pass(const Arg<typename V::T>& arg) { }
