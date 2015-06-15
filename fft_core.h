@@ -1386,6 +1386,7 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
       arg.im_off);
 }
 
+#if 0
 namespace index_mapping
 {
   Int offset(Int off, Int dft_size, Int npasses, bool dft_size_is_large)
@@ -1794,6 +1795,7 @@ void six_passes(const Arg<typename V::T>& arg)
       n, arg.im_off, nchunks, dft_size, offset, working1, twiddle, dst);
   }
 }
+#endif
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_three_passes_impl(
@@ -1922,12 +1924,16 @@ void init_steps(State<typename V::T>& state)
   {
     Step<T> step;
     step.is_out_of_place = true;
+#if 0
 		if(state.n >= large_fft_size && dft_size == 1)
 		{
 			step.fun_ptr = &first_five_passes<V, SrcCf>;
 			//step.fun_ptr = &null_pass<V>;
       step.npasses = 5;
 		}
+#else
+    if(false) {}
+#endif
 		else if(dft_size == 1 && state.n >= 8 * V::vec_size)
     {
       if(state.n == 8 * V::vec_size)
@@ -1959,6 +1965,7 @@ void init_steps(State<typename V::T>& state)
 
         step.npasses = 3;
       }
+#if 0
       else if(state.n >= large_fft_size && dft_size * 32 == state.n)
       {
         step.fun_ptr = &five_passes<V, DstCf>;
@@ -1979,6 +1986,7 @@ void init_steps(State<typename V::T>& state)
         step.fun_ptr = &four_passes<V, cf::Vec<V>>;
         step.npasses = 4;
       }
+#endif
       else if(dft_size * 4 == state.n)
       {
         step.fun_ptr = &last_two_passes<V, DstCf>;
