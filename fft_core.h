@@ -72,37 +72,14 @@ struct BitReversed
   Uint i;
   Uint br;
   Uint mask;
-  static const Uint table_size_nbits = 1;
-  static const Uint table_size = (Uint(1) << table_size_nbits) - 1;
-  Uint bit_flip_table[table_size];
 
-  BitReversed(Uint limit) :
-    i(0),
-    br(0),
-    mask(limit - 1)
+  FORCEINLINE BitReversed(Uint limit) : i(0), br(0), mask(limit - 1) { }
+
+  FORCEINLINE void advance()
   {
-    for(Uint i = 0; i < table_size; i++)
-    {
-      Uint br_mask = mask >> 1;
-      for(Uint j = i; j & 1; j >>= 1) br_mask >>= 1;
-      br_mask ^= mask;
-      bit_flip_table[i] = br_mask;
-    }
-  }
-
-  void advance()
-  {
-    Uint low_bits = i & table_size;
-    Uint br_mask;
-    if(low_bits != table_size)
-      br_mask = bit_flip_table[low_bits];
-    else
-    {
-      br_mask = mask >> (table_size_nbits + 1);
-      for(Uint j = i >> table_size_nbits; j & 1; j >>= 1) br_mask >>= 1;
-      br_mask ^= mask;
-    }
-
+    Uint br_mask = mask >> 1;
+    for(Uint j = i; j & 1; j >>= 1) br_mask >>= 1;
+    br_mask ^= mask;
     br ^= br_mask;
     i++;
   }
@@ -1094,38 +1071,6 @@ void first_three_passes_ct_size(const Arg<typename V::T>& arg)
   first_three_passes_impl<V, SrcCf>(n, n, arg.im_off, arg.src, arg.dst);
 }
 
-template<typename V, typename DstCf>
-FORCEINLINE void last_pass_impl(
-  Int n,
-  Int im_off,
-  typename V::T* src,
-  typename V::T* twiddle,
-  typename V::T* dst)
-{
-  VEC_TYPEDEFS(V);
-  Int vdft_size = n / 2 / V::vec_size;
-  for(Int i0 = 0, i1 = vdft_size; i0 < vdft_size; i0++, i1++)
-  {
-    auto a = VecCf::load(src + i0 * VecCf::stride, 0);
-    auto b = VecCf::load(src + i1 * VecCf::stride, 0);
-    auto mul = b * VecCf::load(twiddle + i0 * VecCf::stride, 0);
-    DstCf::store(a + mul, dst + i0 * DstCf::stride, im_off);
-    DstCf::store(a - mul, dst + i1 * DstCf::stride, im_off);
-  }
-}
-
-template<typename V, typename DstCf>
-void last_pass_vec(const Arg<typename V::T>& arg)
-{
-  last_pass_impl<V, DstCf>(arg.n, arg.im_off, arg.src, arg.twiddle, arg.dst);
-}
-
-template<typename V, typename DstCf, Int n>
-void last_pass_vec_ct_size(const Arg<typename V::T>& arg)
-{
-  last_pass_impl<V, DstCf>(n, arg.im_off, arg.src, arg.twiddle, arg.dst);
-}
-
 template<typename T>
 FORCEINLINE void two_passes_inner(
   Complex<T> src0, Complex<T> src1, Complex<T> src2, Complex<T> src3,
@@ -1233,17 +1178,16 @@ void last_two_passes(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename DstCf>
-void last_pass(const Arg<typename V::T>& arg)
+FORCEINLINE void last_pass_impl(Int n, Int* br, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int vn = arg.n / V::vec_size;
+  Int vn = n / V::vec_size;
   auto tw = arg.twiddle + arg.offset / 2;
 
   auto src = arg.src;
   auto dst0 = arg.dst; 
   auto dst1 = dst0 + vn / 2 * DstCf::stride; 
 
-  auto br = arg.br_table;
   for(auto end = src + vn * VecCf::stride; src < end; )
   {
     C a0 = VecCf::load(src, 0);
@@ -1256,6 +1200,23 @@ void last_pass(const Arg<typename V::T>& arg)
     DstCf::store(a0 + mul, dst0 + d, arg.im_off);
     DstCf::store(a0 - mul, dst1 + d, arg.im_off);
   }
+}
+
+template<typename V, typename DstCf>
+void last_pass(const Arg<typename V::T>& arg)
+{
+  last_pass_impl<V, DstCf>(arg.n, arg.br_table, arg);
+}
+
+template<typename V, typename DstCf, Int n>
+void last_pass(const Arg<typename V::T>& arg)
+{
+  const Int len = arg.n / V::vec_size / 2;
+  Int br_table[len];
+  for(BitReversed br(len); br.i < len; br.advance())
+    br_table[br.i] = br.br * DstCf::stride;
+
+  last_pass_impl<V, DstCf>(n, br_table, arg);
 }
 
 template<Int sz, Int alignment>
@@ -1581,11 +1542,11 @@ void init_steps(State<typename V::T>& state)
       else
       {
         if(state.n == 2 * V::vec_size)
-          step.fun_ptr = &last_pass_vec_ct_size<V, DstCf, 2 * V::vec_size>;
+          step.fun_ptr = &last_pass<V, DstCf, 2 * V::vec_size>;
         else if(state.n == 4 * V::vec_size)
-          step.fun_ptr = &last_pass_vec_ct_size<V, DstCf, 4 * V::vec_size>;
+          step.fun_ptr = &last_pass<V, DstCf, 4 * V::vec_size>;
         else if(state.n == 8 * V::vec_size)
-          step.fun_ptr = &last_pass_vec_ct_size<V, DstCf, 8 * V::vec_size>;
+          step.fun_ptr = &last_pass<V, DstCf, 8 * V::vec_size>;
         else
           step.fun_ptr = &last_pass<V, DstCf>;
 
