@@ -14,8 +14,10 @@ endif
 .PHONY: all
 all: avx2
 
-%.o: %.c fft_core.h
+%.o: %.c
 	$(CXX) -c -o $@ $< $(CXXFLAGS)
+
+test.o: fft_core.h
 
 test: test.o
 	$(CXX) -o $@ $^ $(LDFLAGS)

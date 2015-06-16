@@ -1276,8 +1276,7 @@ template<Int sz, Int alignment>
 struct AlignedMemory
 {
   char mem[sz + (alignment - 1)];
-  template<typename T>
-  T* get() { return (T*)((Uint(mem) + alignment - 1) & ~(alignment - 1)); }
+  void* get() { return (void*)((Uint(mem) + alignment - 1) & ~(alignment - 1)); }
 };
 
 template<typename V, typename DstCf>
@@ -1301,7 +1300,7 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
     Int stride = vn / m;
 
     AlignedMemory<m * m * VecCf::stride * sizeof(T), align_bytes> mem;
-    T* working = mem.template get<T>();
+    auto working = (T*) mem.get();
 
     const Int br_table[m] = {
       0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
@@ -1859,6 +1858,97 @@ void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
     n, arg.im_off, arg.offset, arg.src, arg.twiddle, arg.br_table, arg.dst);
 }
 
+template<typename V>
+void last_three_passes_in_place(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  Int n = arg.n;
+  Int im_off = arg.im_off;
+  Int offset = arg.offset;
+  T* src = arg.src;
+  T* twiddle = arg.twiddle;
+
+  twiddle += offset * 5 / 8; 
+
+  auto s = src;
+  for(auto end = s + n * VecCf::idx_ratio; s < end;)
+  {
+    C a0, a1, a2, a3, a4, a5, a6, a7;
+    {
+      C tw0 = VecCf::load(twiddle, 0);
+      C tw1 = VecCf::load(twiddle + VecCf::stride, 0);
+      C tw2 = VecCf::load(twiddle + 2 * VecCf::stride, 0);
+
+      {
+        C mul0 =       VecCf::load(s, 0);
+        C mul1 = tw0 * VecCf::load(s + 2 * VecCf::stride, 0);
+        C mul2 = tw1 * VecCf::load(s + 4 * VecCf::stride, 0);
+        C mul3 = tw2 * VecCf::load(s + 6 * VecCf::stride, 0);
+
+        C sum02 = mul0 + mul2;
+        C dif02 = mul0 - mul2;
+        C sum13 = mul1 + mul3;
+        C dif13 = mul1 - mul3;
+
+        a0 = sum02 + sum13; 
+        a1 = dif02 + dif13.mul_neg_i();
+        a2 = sum02 - sum13;
+        a3 = dif02 - dif13.mul_neg_i();
+      }
+
+      {
+        C mul0 =       VecCf::load(s + 1 * VecCf::stride, 0);
+        C mul1 = tw0 * VecCf::load(s + 3 * VecCf::stride, 0);
+        C mul2 = tw1 * VecCf::load(s + 5 * VecCf::stride, 0);
+        C mul3 = tw2 * VecCf::load(s + 7 * VecCf::stride, 0);
+
+        C sum02 = mul0 + mul2;
+        C dif02 = mul0 - mul2;
+        C sum13 = mul1 + mul3;
+        C dif13 = mul1 - mul3;
+
+        a4 = sum02 + sum13;
+        a5 = dif02 + dif13.mul_neg_i();
+        a6 = sum02 - sum13;
+        a7 = dif02 - dif13.mul_neg_i();
+      }
+    }
+
+    {
+      C tw3 = VecCf::load(twiddle + 3 * VecCf::stride, 0);
+      {
+        auto mul = tw3 * a4;
+        VecCf::store(a0 + mul, s + 0, 0);
+        VecCf::store(a0 - mul, s + 1 * VecCf::stride, 0);
+      }
+
+      {
+        auto mul = tw3.mul_neg_i() * a6;
+        VecCf::store(a2 + mul, s + 2 * VecCf::stride, 0);
+        VecCf::store(a2 - mul, s + 3 * VecCf::stride, 0);
+      }
+    }
+
+    {
+      C tw4 = VecCf::load(twiddle + 4 * VecCf::stride, 0);
+      {
+        auto mul = tw4 * a5;
+        VecCf::store(a1 + mul, s + 4 * VecCf::stride, 0);
+        VecCf::store(a1 - mul, s + 5 * VecCf::stride, 0);
+      }
+
+      {
+        auto mul = tw4.mul_neg_i() * a7;
+        VecCf::store(a3 + mul, s + 6 * VecCf::stride, 0);
+        VecCf::store(a3 - mul, s + 7 * VecCf::stride, 0);
+      }
+    }
+
+    s += 8 * VecCf::stride;
+    twiddle += 5 * VecCf::stride;
+  }
+}
+
 template<typename V> void null_pass(const Arg<typename V::T>& arg) { }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -1912,6 +2002,12 @@ void init_steps(State<typename V::T>& state)
           step.fun_ptr = &last_three_passes_vec<V, DstCf>;
 
         step.npasses = 3;
+      }
+      else if(dft_size * 8 == state.n)
+      {
+        step.fun_ptr = &last_three_passes_in_place<V>;
+        step.npasses = 3;
+        step.is_out_of_place = false;
       }
 #if 0
       else if(state.n >= large_fft_size && dft_size * 32 == state.n)
