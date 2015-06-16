@@ -10,7 +10,7 @@ const Int max_int = Int(Uint(-1) >> 1);
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
-#if 1
+#if 0
 
 #define DEBUG_OUTPUT
 
@@ -28,7 +28,7 @@ void print_vec(T a)
 #endif
 
 //Int large_fft_size = 1 << 14;
-Int large_fft_size = 1 << 24;
+Int large_fft_size = 1 << 14;
 Int max_vec_size = 8;
 const Int align_bytes = 64;
 
@@ -1297,23 +1297,18 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   }
   else
   {
-    Int stride = vn / m;
-
+    const Int br_table[m] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
     AlignedMemory<m * m * VecCf::stride * sizeof(T), align_bytes> mem;
     auto working = (T*) mem.get();
-
-    const Int br_table[m] = {
-      0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
+    Int stride = vn / m;
 
     for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
     {
       T* src = arg.src + br.i * m * VecCf::stride;
       for(Int i0 = 0; i0 < m; i0++)
         for(Int i1 = 0; i1 < m; i1++)
-          VecCf::store(
-            VecCf::load(src + (i0 * stride + i1) * VecCf::stride, 0),
-            working + (i0 * m + i1) * VecCf::stride,
-            0);
+          VecCf::store(VecCf::load(src + (i0 * stride + i1) * VecCf::stride, 0),
+            working + (i0 * m + i1) * VecCf::stride, 0);
 
       T* dst = arg.dst + br.br * m * DstCf::stride;
       for(Int i0 = 0; i0 < m; i0++)
@@ -1321,10 +1316,8 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
         T* s = working + br_table[i0] * VecCf::stride;
         T* d = dst + i0 * stride * DstCf::stride;
         for(Int i1 = 0; i1 < m; i1++)
-          DstCf::store(
-            VecCf::load(s + (br_table[i1] << 4) * VecCf::stride, 0),
-            d + i1 * DstCf::stride,
-            im_off);
+          DstCf::store(VecCf::load(s + (br_table[i1] << 4) * VecCf::stride, 0),
+            d + i1 * DstCf::stride, im_off);
       }
     }
   }
@@ -1994,7 +1987,7 @@ void init_steps(State<typename V::T>& state)
     }
     else if(dft_size >= V::vec_size)
     {
-      if(false && dft_size * 8 == state.n)
+      if(state.n < large_fft_size && dft_size * 8 == state.n)
       {
         if(state.n == V::vec_size * 8)
           step.fun_ptr = &last_three_passes_vec_ct_size<V, DstCf, V::vec_size * 8>;
@@ -2031,7 +2024,7 @@ void init_steps(State<typename V::T>& state)
         step.npasses = 4;
       }
 #endif
-      else if(false && dft_size * 4 == state.n)
+      else if(state.n < large_fft_size && dft_size * 4 == state.n)
       {
         step.fun_ptr = &last_two_passes<V, DstCf>;
         step.npasses = 2;
@@ -2075,7 +2068,7 @@ void init_steps(State<typename V::T>& state)
     dft_size <<= step.npasses;
   }
 
-#if 1
+  if(state.n >= large_fft_size)
   {
     Step<T> step;
     step.npasses = 0;
@@ -2085,7 +2078,6 @@ void init_steps(State<typename V::T>& state)
     state.ncopies++;
     step_index++;
   }
-#endif
 
   state.nsteps = step_index;
 

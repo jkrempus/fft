@@ -14,10 +14,11 @@ endif
 .PHONY: all
 all: avx2
 
-%.o: %.c
-	$(CXX) -c -o $@ $< $(CXXFLAGS)
+-include $(wildcard *.d)
 
-test.o: fft_core.h
+%.o: %.cpp
+	$(CXX) -c -o $@ $< $(CXXFLAGS)
+	$(CXX) -MM -MF $(<:.cpp=.d) $< $(CXXFLAGS)
 
 test: test.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
@@ -43,4 +44,4 @@ neon: CXXFLAGS += -fPIE -mfpu=neon -mfloat-abi=softfp -mcpu=cortex-a15
 neon: test
 
 clean:
-	rm *.o
+	rm *.o *.d
