@@ -1211,7 +1211,7 @@ void last_pass(const Arg<typename V::T>& arg)
 template<typename V, typename DstCf, Int n>
 void last_pass(const Arg<typename V::T>& arg)
 {
-  const Int len = arg.n / V::vec_size / 2;
+  const Int len = n / V::vec_size / 2;
   Int br_table[len];
   for(BitReversed br(len); br.i < len; br.advance())
     br_table[br.i] = br.br * DstCf::stride;
