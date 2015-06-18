@@ -29,6 +29,7 @@ void print_vec(T a)
 
 //Int large_fft_size = 1 << 14;
 Int large_fft_size = 1 << 14;
+Int optimal_size = 1 << 10;
 Int max_vec_size = 8;
 const Int align_bytes = 64;
 
@@ -88,7 +89,7 @@ struct BitReversed
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
 {
-#if 1 && defined __GNUC__ || defined __clang__
+#if defined __GNUC__ || defined __clang__
   __builtin_memmove(dst, src, n * sizeof(T));
 #else
   for(Int i = 0; i < n; i++) dst[i] = src[i];
@@ -268,7 +269,8 @@ struct Arg
   Int n;
   Int im_off;
   Int dft_size;
-  Int offset;
+  Int start_offset;
+  Int end_offset;
   T* src;
   T* twiddle;
   T* tiny_twiddle;
@@ -282,6 +284,7 @@ struct Step
   typedef void (*pass_fun_t)(const Arg<T>&);
   short npasses;
   bool is_out_of_place;
+  bool is_recursive;
   pass_fun_t fun_ptr;
 };
 
@@ -1100,15 +1103,20 @@ void two_passes(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   Int n = arg.n;
   Int dft_size = arg.dft_size;
+  auto src = arg.src;
 
-  auto off1 = power2_div(n, dft_size) / 4 * VecCf::stride;
+  auto off1 = (arg.n >> log2(dft_size)) / 4 * VecCf::stride;
   auto off2 = off1 + off1;
   auto off3 = off2 + off1;
   
+  auto start = arg.start_offset * VecCf::idx_ratio;
+  auto end = arg.end_offset * VecCf::idx_ratio;
+  
   auto tw = arg.twiddle + VecCf::idx_ratio * (n - 4 * dft_size);
-  if(arg.offset != 0) tw += 3 * power2_div(arg.offset, off1 + off3);
+  if(start != 0)
+    tw += 3 * VecCf::stride * (start >> log2(off1 + off3));
 
-  for(auto p = arg.src, end0 = p + n * VecCf::idx_ratio; p < end0;)
+  for(auto p = src + start; p < src + end;)
   {
     auto tw0 = VecCf::load(tw, 0);
     auto tw1 = VecCf::load(tw + VecCf::stride, 0);
@@ -1117,6 +1125,9 @@ void two_passes(const Arg<typename V::T>& arg)
 
     for(auto end1 = p + off1;;)
     {
+      ASSERT(p >= arg.src);
+      ASSERT(p + off3 < arg.src + arg.n * VecCf::idx_ratio);
+
       C d0, d1, d2, d3;
       two_passes_inner(
         VecCf::load(p, 0), VecCf::load(p + off1, 0),
@@ -1141,7 +1152,7 @@ void last_two_passes(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   Int vn = arg.n / V::vec_size;
-  auto tw = arg.twiddle + arg.offset * 3 / 4;
+  auto tw = arg.twiddle;
 
   auto src = arg.src;
   
@@ -1182,7 +1193,7 @@ FORCEINLINE void last_pass_impl(Int n, Int* br, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   Int vn = n / V::vec_size;
-  auto tw = arg.twiddle + arg.offset / 2;
+  auto tw = arg.twiddle;
 
   auto src = arg.src;
   auto dst0 = arg.dst; 
@@ -1274,7 +1285,6 @@ template<typename V, typename DstCf>
 FORCEINLINE void last_three_passes_impl(
   Int n,
   Int im_off,
-  Int offset,
   typename V::T* src,
   typename V::T* twiddle,
   Int* br_table,
@@ -1288,8 +1298,6 @@ FORCEINLINE void last_three_passes_impl(
   Int l5 = 5 * l1;
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
-
-  twiddle += offset * 5 / 8; 
 
   auto s = src;
   auto br = br_table;
@@ -1377,14 +1385,14 @@ template<typename V, typename DstCf>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
   last_three_passes_impl<V, DstCf>(
-    arg.n, arg.im_off, arg.offset, arg.src, arg.twiddle, arg.br_table, arg.dst);
+    arg.n, arg.im_off, arg.src, arg.twiddle, arg.br_table, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
 {
   last_three_passes_impl<V, DstCf>(
-    n, arg.im_off, arg.offset, arg.src, arg.twiddle, arg.br_table, arg.dst);
+    n, arg.im_off, arg.src, arg.twiddle, arg.br_table, arg.dst);
 }
 
 template<typename V>
@@ -1393,14 +1401,14 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
   VEC_TYPEDEFS(V);
   Int n = arg.n;
   Int im_off = arg.im_off;
-  Int offset = arg.offset;
-  T* src = arg.src;
-  T* twiddle = arg.twiddle;
+  
+  auto start = arg.start_offset * VecCf::idx_ratio;
+  auto end = arg.end_offset * VecCf::idx_ratio;
+  
+  auto src = arg.src;
+  T* twiddle = arg.twiddle + start * 5 / 8;
 
-  twiddle += offset * 5 / 8; 
-
-  auto s = src;
-  for(auto end = s + n * VecCf::idx_ratio; s < end;)
+  for(auto p = src + start; p < src + end;)
   {
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
@@ -1409,10 +1417,10 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
       C tw2 = VecCf::load(twiddle + 2 * VecCf::stride, 0);
 
       {
-        C mul0 =       VecCf::load(s, 0);
-        C mul1 = tw0 * VecCf::load(s + 2 * VecCf::stride, 0);
-        C mul2 = tw1 * VecCf::load(s + 4 * VecCf::stride, 0);
-        C mul3 = tw2 * VecCf::load(s + 6 * VecCf::stride, 0);
+        C mul0 =       VecCf::load(p, 0);
+        C mul1 = tw0 * VecCf::load(p + 2 * VecCf::stride, 0);
+        C mul2 = tw1 * VecCf::load(p + 4 * VecCf::stride, 0);
+        C mul3 = tw2 * VecCf::load(p + 6 * VecCf::stride, 0);
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -1426,10 +1434,10 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
       }
 
       {
-        C mul0 =       VecCf::load(s + 1 * VecCf::stride, 0);
-        C mul1 = tw0 * VecCf::load(s + 3 * VecCf::stride, 0);
-        C mul2 = tw1 * VecCf::load(s + 5 * VecCf::stride, 0);
-        C mul3 = tw2 * VecCf::load(s + 7 * VecCf::stride, 0);
+        C mul0 =       VecCf::load(p + 1 * VecCf::stride, 0);
+        C mul1 = tw0 * VecCf::load(p + 3 * VecCf::stride, 0);
+        C mul2 = tw1 * VecCf::load(p + 5 * VecCf::stride, 0);
+        C mul3 = tw2 * VecCf::load(p + 7 * VecCf::stride, 0);
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -1447,14 +1455,14 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
       C tw3 = VecCf::load(twiddle + 3 * VecCf::stride, 0);
       {
         auto mul = tw3 * a4;
-        VecCf::store(a0 + mul, s + 0, 0);
-        VecCf::store(a0 - mul, s + 1 * VecCf::stride, 0);
+        VecCf::store(a0 + mul, p + 0, 0);
+        VecCf::store(a0 - mul, p + 1 * VecCf::stride, 0);
       }
 
       {
         auto mul = tw3.mul_neg_i() * a6;
-        VecCf::store(a2 + mul, s + 2 * VecCf::stride, 0);
-        VecCf::store(a2 - mul, s + 3 * VecCf::stride, 0);
+        VecCf::store(a2 + mul, p + 2 * VecCf::stride, 0);
+        VecCf::store(a2 - mul, p + 3 * VecCf::stride, 0);
       }
     }
 
@@ -1462,18 +1470,18 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
       C tw4 = VecCf::load(twiddle + 4 * VecCf::stride, 0);
       {
         auto mul = tw4 * a5;
-        VecCf::store(a1 + mul, s + 4 * VecCf::stride, 0);
-        VecCf::store(a1 - mul, s + 5 * VecCf::stride, 0);
+        VecCf::store(a1 + mul, p + 4 * VecCf::stride, 0);
+        VecCf::store(a1 - mul, p + 5 * VecCf::stride, 0);
       }
 
       {
         auto mul = tw4.mul_neg_i() * a7;
-        VecCf::store(a3 + mul, s + 6 * VecCf::stride, 0);
-        VecCf::store(a3 - mul, s + 7 * VecCf::stride, 0);
+        VecCf::store(a3 + mul, p + 6 * VecCf::stride, 0);
+        VecCf::store(a3 - mul, p + 7 * VecCf::stride, 0);
       }
     }
 
-    s += 8 * VecCf::stride;
+    p += 8 * VecCf::stride;
     twiddle += 5 * VecCf::stride;
   }
 }
@@ -1491,6 +1499,8 @@ void init_steps(State<typename V::T>& state)
   {
     Step<T> step;
     step.is_out_of_place = true;
+    step.is_recursive = false;
+
 		if(dft_size == 1 && state.n >= 8 * V::vec_size)
     {
       if(state.n == 8 * V::vec_size)
@@ -1527,6 +1537,7 @@ void init_steps(State<typename V::T>& state)
         step.fun_ptr = &last_three_passes_in_place<V>;
         step.npasses = 3;
         step.is_out_of_place = false;
+        step.is_recursive = true;
       }
       else if(state.n < large_fft_size && dft_size * 4 == state.n)
       {
@@ -1538,6 +1549,7 @@ void init_steps(State<typename V::T>& state)
         step.fun_ptr = &two_passes<V>;
         step.npasses = 2;
         step.is_out_of_place = false;
+        step.is_recursive = state.n >= large_fft_size;
       }
       else
       {
@@ -1577,6 +1589,7 @@ void init_steps(State<typename V::T>& state)
     Step<T> step;
     step.npasses = 0;
     step.is_out_of_place = true;
+    step.is_recursive = false;
     step.fun_ptr = &bit_reverse_pass<V, DstCf>;
     state.steps[step_index] = step;
     state.ncopies++;
@@ -1648,13 +1661,48 @@ template<typename T>
 void* fft_state_memory_ptr(State<T>* state) { return state->working0; }
 
 template<typename T>
+NOINLINE void recursive_passes(
+  const State<T>* state, Int step, T* p, Int start, Int end)
+{
+  Int dft_size = 1;
+  for(Int i = 0; i < step; i++) dft_size <<= state->steps[i].npasses;
+
+  Arg<T> arg;
+  arg.n = state->n;
+  arg.im_off = 0;
+  arg.dft_size = dft_size;
+  arg.start_offset = start;
+  arg.end_offset = end;
+  arg.src = p;
+  arg.dst = nullptr;
+  arg.twiddle = state->twiddle;
+  arg.br_table = nullptr;
+  arg.tiny_twiddle = nullptr;
+  
+  state->steps[step].fun_ptr(arg);
+
+  if(step + 1 < state->nsteps && state->steps[step + 1].is_recursive)
+  {
+    if(end - start > optimal_size)
+    {
+      Int next_sz = (end - start) >> state->steps[step].npasses;
+      for(Int s = start; s < end; s += next_sz)
+        recursive_passes(state, step + 1, p, s, s + next_sz);
+    }
+    else
+      recursive_passes(state, step + 1, p, start, end);
+  }
+}
+
+template<typename T>
 FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 {
   Arg<T> arg;
   arg.n = state->n;
   arg.im_off = im_off;
   arg.dft_size = 1;
-  arg.offset = 0;
+  arg.start_offset = 0;
+  arg.end_offset = state->n;
   arg.src = src;
   arg.twiddle = state->twiddle;
   arg.br_table = state->br_table;
@@ -1674,11 +1722,20 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 
   arg.src = w0;
   arg.dst = w1;
-  for(Int step = 1; step < state->nsteps - 1; step++)
+  for(Int step = 1; step < state->nsteps - 1; )
   {
-    state->steps[step].fun_ptr(arg);
-    arg.dft_size <<= state->steps[step].npasses;
-    if(state->steps[step].is_out_of_place) swap(arg.src, arg.dst);
+    if(state->steps[step].is_recursive)
+    {
+      recursive_passes(state, step, arg.src, 0, state->n);
+      while(step < state->nsteps && state->steps[step].is_recursive) step++;
+    }
+    else
+    {
+      state->steps[step].fun_ptr(arg);
+      arg.dft_size <<= state->steps[step].npasses;
+      if(state->steps[step].is_out_of_place) swap(arg.src, arg.dst);
+      step++;
+    }
   }
 
   arg.dst = dst;  
