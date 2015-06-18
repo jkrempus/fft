@@ -1710,10 +1710,10 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 
   auto w0 = state->working0;
   auto w1 = state->working1;
-    //im_off == arg.n ? dst :
-    //im_off == -arg.n ? dst + im_off : state->working1;
+    im_off == arg.n ? dst :
+    im_off == -arg.n ? dst + im_off : state->working1;
  
-  if((state->nsteps & 1)) swap(w0, w1);
+  if((state->ncopies & 1)) swap(w0, w1);
 
   arg.src = src;
   arg.dst = w0;
