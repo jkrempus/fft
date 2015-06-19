@@ -10,7 +10,7 @@ const Int max_int = Int(Uint(-1) >> 1);
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
-#if 0
+#if 1
 
 #define DEBUG_OUTPUT
 
@@ -281,11 +281,11 @@ struct Arg
 template<typename T>
 struct Step
 {
-  typedef void (*pass_fun_t)(const Arg<T>&);
+  typedef void (*pass_fun)(const Arg<T>&);
   short npasses;
   bool is_out_of_place;
   bool is_recursive;
-  pass_fun_t fun_ptr;
+  pass_fun fun_ptr;
 };
 
 template<typename T>
@@ -301,6 +301,8 @@ struct State
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
   Int ncopies;
+  typedef void (*tiny_transform_fun_type)(T* src, T* dst, Int im_off);
+  tiny_transform_fun_type tiny_transform_fun;
 };
 
 template<typename T>
@@ -972,6 +974,23 @@ void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename SrcCf>
+void first_pass_scalar(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+  auto src = arg.src;
+  auto dst = arg.dst;
+  auto n = arg.n;
+  for(Int i0 = 0; i0 < n / 2; i0++)
+  {
+    Int i1 = i0 + n / 2;
+    auto a0 = SrcCf::load(src + i0 * SrcCf::stride, arg.im_off);
+    auto a1 = SrcCf::load(src + i1 * SrcCf::stride ,arg.im_off);
+    VecCf::store(a0 + a1, dst + i0 * VecCf::stride, 0);
+    VecCf::store(a0 - a1, dst + i1 * VecCf::stride, 0);
+  }
+}
+
+template<typename V, typename SrcCf>
 void first_two_passes(const Arg<typename V::T>& arg)
 {
   first_two_passes_impl<V, SrcCf>(arg.n, arg);
@@ -1488,12 +1507,42 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
 
 template<typename V> void null_pass(const Arg<typename V::T>& arg) { }
 
+template<typename V, typename SrcCf, typename DstCf, Int n>
+void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
+{
+  VEC_TYPEDEFS(V);
+  if(n == 1)
+  {
+    DstCf::store(SrcCf::load(src, im_off), dst, im_off);
+  }
+  else if(n == 2)
+  {
+    auto a0 = SrcCf::load(src, im_off);
+    auto a1 = SrcCf::load(src + SrcCf::stride, im_off);
+    DstCf::store(a0 + a1, dst, im_off);
+    DstCf::store(a0 - a1, dst + DstCf::stride, im_off);
+  }
+}
+
 template<typename V, typename SrcCf, typename DstCf>
 void init_steps(State<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
   Int step_index = 0;
   state.ncopies = 0;
+
+  if(state.n <= 2)
+  {
+    state.nsteps = 0;
+    state.tiny_transform_fun = 
+      state.n == 0 ?  &tiny_transform<V, SrcCf, DstCf, 0> :
+      state.n == 1 ?  &tiny_transform<V, SrcCf, DstCf, 1> :
+      state.n == 2 ?  &tiny_transform<V, SrcCf, DstCf, 2> : nullptr;
+
+    return;
+  }
+  else
+    state.tiny_transform_fun = nullptr;
 
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
@@ -1520,6 +1569,11 @@ void init_steps(State<typename V::T>& state)
         step.fun_ptr = &first_two_passes<V, SrcCf>;
 
       step.npasses = 2;
+    }
+    else if(dft_size == 1 && V::vec_size == 1)
+    {
+      step.fun_ptr = &first_pass_scalar<V, SrcCf>;
+      step.npasses = 1;
     }
     else if(dft_size >= V::vec_size)
     {
@@ -1633,7 +1687,9 @@ template<typename V>
 Int fft_state_memory_size(Int n)
 {
   VEC_TYPEDEFS(V);
-  if(n <= V::vec_size) return fft_state_memory_size<Scalar<T>>(n);
+  if(n <= V::vec_size && V::vec_size != 1)
+    return fft_state_memory_size<Scalar<T>>(n);
+
   return state_struct_offset<V>(n) + sizeof(State<T>);
 }
 
@@ -1644,7 +1700,9 @@ template<
 State<typename V::T>* fft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  if(n <= V::vec_size) return fft_state<Scalar<T>, SrcCfT, DstCfT>(n, ptr);
+  if(n <= V::vec_size && V::vec_size != 1)
+    return fft_state<Scalar<T>, SrcCfT, DstCfT>(n, ptr);
+
   auto state = (State<T>*)(Uint(ptr) + Uint(state_struct_offset<V>(n)));
   state->n = n;
   state->im_off = n;
@@ -1699,6 +1757,12 @@ NOINLINE void recursive_passes(
 template<typename T>
 FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 {
+  if(state->tiny_transform_fun)
+  {
+    state->tiny_transform_fun(src, dst, im_off);
+    return;
+  }
+
   Arg<T> arg;
   arg.n = state->n;
   arg.im_off = im_off;

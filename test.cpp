@@ -77,6 +77,7 @@ struct TestWrapper<V, CfT, false, is_inverse_>
   template<typename U>
   void set_input(const U* re, const U* im)
   {
+    //TODO: make it work with very small sizes
     Int vn = state->n / V::vec_size;
     for(Int i = 0; i < vn; i++)
     {
