@@ -10,7 +10,7 @@ const Int max_int = Int(Uint(-1) >> 1);
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
-#if 1
+#if 0
 
 #define DEBUG_OUTPUT
 
@@ -304,6 +304,8 @@ struct State
   typedef void (*tiny_transform_fun_type)(T* src, T* dst, Int im_off);
   tiny_transform_fun_type tiny_transform_fun;
 };
+
+template<typename T> struct InverseState;
 
 template<typename T>
 struct SinCosTable { };
@@ -1720,6 +1722,24 @@ State<typename V::T>* fft_state(Int n, void* ptr)
 template<typename T>
 void* fft_state_memory_ptr(State<T>* state) { return state->working0; }
 
+template<typename V>
+Int inverse_fft_state_memory_size(Int n){ return fft_state_memory_size<V>(n); }
+
+template<
+  typename V,
+  template<typename> class SrcCfT,
+  template<typename> class DstCfT>
+InverseState<typename V::T>* inverse_fft_state(Int n, void* ptr)
+{
+  return (InverseState<typename V::T>*) fft_state<V, SrcCfT, DstCfT>(n, ptr);
+}
+
+template<typename T>
+void* inverse_fft_state_memory_ptr(InverseState<T>* state)
+{
+  return fft_state_memory_ptr((State<T>*) state);
+}
+
 template<typename T>
 NOINLINE void recursive_passes(
   const State<T>* state, Int step, T* p, Int start, Int end)
@@ -1815,39 +1835,58 @@ void fft(const State<T>* state, T* src, T* dst)
 }
 
 template<typename T>
-void inverse_fft(const State<T>* state, T* src, T* dst)
+void inverse_fft(const InverseState<T>* state, T* src, T* dst)
 {
-  fft_impl(state, -state->n, src + state->n, dst + state->n);
+  auto const s = (const State<T>*) state;
+  fft_impl(s, -s->n, src + s->n, dst + s->n);
 }
 
-template<typename V, template<typename> class DstCfT>
-void real_last_pass(
-  Int n, typename V::T* src, typename V::T* twiddle, typename V::T* dst)
+template<
+  typename V,
+  template<typename> class SrcCfT,
+  template<typename> class DstCfT,
+  bool inverse>
+void real_pass(
+  Int n,
+  typename V::T* src,
+  Int src_off,
+  typename V::T* twiddle,
+  typename V::T* dst,
+  Int dst_off)
 {
   if(SameType<DstCfT<V>, cf::Vec<V>>::value) ASSERT(0);
   VEC_TYPEDEFS(V);
-  Int src_off = n / 2;
-  Int dst_off = align_size<T>(n / 2 + 1);
 
+  const Int src_ratio = SrcCfT<V>::idx_ratio;
   const Int dst_ratio = DstCfT<V>::idx_ratio;
 
   Vec half = V::vec(0.5);
 
-  Complex<T> middle = {src[n / 4], src[src_off + n / 4]};
+  Complex<T> middle = SrcCfT<Scalar<T>>::load(src + n / 4 * src_ratio, src_off);
 
   for(
     Int i0 = 1, i1 = n / 2 - V::vec_size, iw = 0; 
     i0 <= i1; 
     i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
   {
-    C w = cf::Split<V>::load(twiddle + iw, src_off);
-    C s0 = cf::Split<V>::unaligned_load(src + i0, src_off);
-    C s1 = reverse_complex<V>(cf::Split<V>::load(src + i1, src_off));
+    C w = cf::Split<V>::load(twiddle + iw * src_ratio, src_off);
+    C s0 = SrcCfT<V>::unaligned_load(src + i0 * src_ratio, src_off);
+    C s1 = reverse_complex<V>(SrcCfT<V>::load(src + i1 * src_ratio, src_off));
 
     //printf("%f %f %f %f %f %f\n", w.re, w.im, s0.re, s0.im, s1.re, s1.im);
 
-    C a = (s0 + s1.adj()) * half;
-    C b = ((s0 - s1.adj()) * w) * half;
+    C a, b;
+
+    if(inverse)
+    {
+      a = s0 + s1.adj();
+      b = (s1.adj() - s0) * w.adj();
+    }
+    else
+    {
+      a = (s0 + s1.adj()) * half;
+      b = ((s0 - s1.adj()) * w) * half;
+    }
 
     C d0 = a + b.mul_neg_i();
     C d1 = a.adj() + b.adj().mul_neg_i();
@@ -1857,10 +1896,18 @@ void real_last_pass(
   }
 
   // fixes the aliasing bug
-  DstCfT<Scalar<T>>::store(middle.adj(), dst + n / 4 * dst_ratio, dst_off);
+  DstCfT<Scalar<T>>::store(
+    middle.adj() * (inverse ? 2.0f : 1.0f), dst + n / 4 * dst_ratio, dst_off);
 
+  if(inverse)
   {
-    Complex<T> r0 = {src[0], src[src_off]};
+    T r0 = SrcCfT<Scalar<T>>::load(src, src_off).re;
+    T r1 = SrcCfT<Scalar<T>>::load(src + n / 2 * src_ratio, src_off).re;
+    DstCfT<Scalar<T>>::store({r0 + r1, r0 - r1}, dst, dst_off);
+  }
+  else
+  {
+    Complex<T> r0 = SrcCfT<Scalar<T>>::load(src, src_off);
     DstCfT<Scalar<T>>::store({r0.re + r0.im, 0}, dst, dst_off);
     DstCfT<Scalar<T>>::store({r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
   }
@@ -1871,7 +1918,7 @@ struct RealState
 {
   State<T>* state;
   T* twiddle;
-  void (*last_pass)(Int, T*, T*, T*);
+  void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
 template<typename V>
@@ -1903,7 +1950,7 @@ RealState<typename V::T>* rfft_state(Int n, void* ptr)
   r->state = fft_state<V, cf::Scal, cf::Split>(n / 2, ptr);
 
   r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
-  r->last_pass = &real_last_pass<V, DstCfT>;
+  r->real_pass = &real_pass<V, cf::Split, DstCfT, false>;
   
   Int m =  n / 2;
   compute_twiddle(m, m, r->twiddle, r->twiddle + m);
@@ -1922,6 +1969,63 @@ template<typename T>
 void rfft(const RealState<T>* state, T* src, T* dst)
 {
   fft(state->state, src, state->state->working1);
-  state->last_pass(
-    state->state->n * 2, state->state->working1, state->twiddle, dst);
+  state->real_pass(
+    state->state->n * 2,
+    state->state->working1,
+    state->state->n, 
+    state->twiddle,
+    dst,
+    align_size<T>(state->state->n + 1));
 }
+
+template<typename T>
+struct InverseRealState
+{
+  State<T>* state;
+  T* twiddle;
+  void (*real_pass)(Int, T*, Int, T*, T*, Int);
+};
+
+template<typename V>
+Int inverse_rfft_state_memory_size(Int n)
+{
+  return rfft_state_memory_size<V>(n);
+}
+
+template<typename V, template<typename> class SrcCfT>
+InverseRealState<typename V::T>* inverse_rfft_state(Int n, void* ptr)
+{
+  VEC_TYPEDEFS(V);
+  auto r = (InverseRealState<T>*)(Uint(ptr) + real_state_struct_offset<V>(n));
+
+  r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
+  r->real_pass = &real_pass<V, SrcCfT, cf::Split, true>;
+  r->state = fft_state<V, cf::Split, cf::Scal>(n / 2, ptr);
+
+  Int m =  n / 2;
+  compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+  copy(r->twiddle + 1, m - 1, r->twiddle);
+  copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+  return r;
+}
+
+template<typename T>
+void* inverse_rfft_state_memory_ptr(InverseRealState<T>* state)
+{
+  return fft_state_memory_ptr(state->state);
+}
+
+template<typename T>
+void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
+{
+  state->real_pass(
+    state->state->n * 2,
+    src,
+    align_size<T>(state->state->n + 1),
+    state->twiddle,
+    state->state->working1,
+    state->state->n);
+
+  inverse_fft((InverseState<T>*) state->state, state->state->working1, dst);
+}
+
