@@ -1501,7 +1501,7 @@ void init_steps(State<typename V::T>& state)
     step.is_out_of_place = true;
     step.is_recursive = false;
 
-		if(dft_size == 1 && state.n >= 8 * V::vec_size)
+		if(dft_size == 1 && state.n >= 8 * V::vec_size && V::vec_size == 8)
     {
       if(state.n == 8 * V::vec_size)
         step.fun_ptr = &first_three_passes_ct_size<V, SrcCf, 8 * V::vec_size>;
@@ -1510,7 +1510,7 @@ void init_steps(State<typename V::T>& state)
 
       step.npasses = 3;
     }
-    else if(dft_size == 1 && state.n >= 4 * V::vec_size)
+    else if(dft_size == 1 && state.n >= 4 * V::vec_size && V::vec_size == 4)
     {
       if(state.n == 4 * V::vec_size)
         step.fun_ptr = &first_two_passes_ct_size<V, SrcCf, 4 * V::vec_size>;
@@ -1633,6 +1633,7 @@ template<typename V>
 Int fft_state_memory_size(Int n)
 {
   VEC_TYPEDEFS(V);
+  if(n <= V::vec_size) return fft_state_memory_size<Scalar<T>>(n);
   return state_struct_offset<V>(n) + sizeof(State<T>);
 }
 
@@ -1643,6 +1644,7 @@ template<
 State<typename V::T>* fft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
+  if(n <= V::vec_size) return fft_state<Scalar<T>, SrcCfT, DstCfT>(n, ptr);
   auto state = (State<T>*)(Uint(ptr) + Uint(state_struct_offset<V>(n)));
   state->n = n;
   state->im_off = n;
@@ -1709,9 +1711,9 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
   arg.tiny_twiddle = state->tiny_twiddle;
 
   auto w0 = state->working0;
-  auto w1 = state->working1;
-    //im_off == arg.n ? dst :
-    //im_off == -arg.n ? dst + im_off : state->working1;
+  //auto w1 = state->working1;
+  auto w1 = im_off == arg.n ? dst :
+    im_off == -arg.n ? dst + im_off : state->working1;
  
   if((state->ncopies & 1)) swap(w0, w1);
 

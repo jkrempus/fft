@@ -93,10 +93,7 @@ struct TestWrapper<V, CfT, false, is_inverse_>
     }
   }
  
-  void transform()
- 	{
-	 	(is_inverse ? inverse_fft<T> : fft<T>)(state, src, dst);
- 	}
+  void transform() { (is_inverse ? inverse_fft<T> : fft<T>)(state, src, dst); }
 
   template<typename U>
   void get_output(U* re, U* im)
