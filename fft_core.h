@@ -1905,7 +1905,7 @@ void real_pass(
     i0 <= i1; 
     i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
   {
-    C w = cf::Split<V>::load(twiddle + iw * src_ratio, src_off);
+    C w = cf::Split<V>::load(twiddle + iw, n / 2);
     C s0 = SrcCfT<V>::unaligned_load(src + i0 * src_ratio, src_off);
     C s1 = reverse_complex<V>(SrcCfT<V>::load(src + i1 * src_ratio, src_off));
 

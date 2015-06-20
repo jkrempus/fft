@@ -229,6 +229,7 @@ struct TestWrapper<V, CfT, true, false>
   VEC_TYPEDEFS(V);
   typedef T value_type;
   RealState<T>* state;
+  InverseRealState<T>* inverse_state;
   Int n;
   Int im_offset;
   T* src;
@@ -240,6 +241,8 @@ struct TestWrapper<V, CfT, true, false>
   {
     src = (T*) valloc(n * sizeof(T));
     dst = (T*) valloc(2 * im_offset * sizeof(T));
+    inverse_state = 
+      inverse_rfft_state<V, CfT>(n, valloc(rfft_state_memory_size<V>(n)));
   }
 
   ~TestWrapper()
@@ -252,7 +255,11 @@ struct TestWrapper<V, CfT, true, false>
   template<typename U>
   void set_input(const U* re, const U* im) { std::copy_n(re, n, src); }
  
-  void transform() { rfft(state, src, dst); }
+  void transform()
+  {
+    rfft(state, src, dst);
+    inverse_rfft(inverse_state, dst, src);
+  }
 
   template<typename U>
   void get_output(U* re, U* im)
