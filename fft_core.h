@@ -1836,7 +1836,7 @@ NOINLINE void recursive_passes(
 template<typename T>
 FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 {
-  if(false && state->tiny_transform_fun)
+  if(state->tiny_transform_fun)
   {
     state->tiny_transform_fun(src, dst, im_off);
     return;
