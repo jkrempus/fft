@@ -211,7 +211,7 @@ struct TestWrapper<V, CfT, false, true>
   static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
   typedef T value_type;
-  InverseState<T>* state;
+  State<T>* state;
   TestWrapper(Int n) :
     SplitWrapperBase<T, false, true>(n),
     state(inverse_fft_state<V, CfT, CfT>(

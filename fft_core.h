@@ -247,6 +247,42 @@ namespace complex_format
       V::unaligned_store(a.im, ptr + V::vec_size);
     }
   };
+  
+  template<template<typename> class InputCf>
+  struct Swapped
+  {
+    template<typename V>
+    struct Cf
+    {
+      typedef typename InputCf<V>::T T;
+      typedef typename InputCf<V>::Vec Vec;
+      typedef Complex<Vec> C;
+      static const Int stride = InputCf<V>::stride;
+      static const Int idx_ratio = InputCf<V>::idx_ratio;
+
+      static FORCEINLINE C load(T* ptr, Int off)
+      {
+        C a = InputCf<V>::load(ptr, off);
+        return {a.im, a.re};
+      }
+
+      static FORCEINLINE C unaligned_load(T* ptr, Int off)
+      {
+        C a = InputCf<V>::unaligned_load(ptr, off);
+        return {a.im, a.re};
+      }
+
+      static FORCEINLINE void store(C a, T* ptr, Int off)
+      {
+        InputCf<V>::store({a.im, a.re}, ptr, off);
+      }
+
+      static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
+      {
+        InputCf<V>::unaligned_store({a.im, a.re}, ptr, off);
+      }
+    };
+  };
 }
 
 namespace cf = complex_format;
@@ -304,8 +340,6 @@ struct State
   typedef void (*tiny_transform_fun_type)(T* src, T* dst, Int im_off);
   tiny_transform_fun_type tiny_transform_fun;
 };
-
-template<typename T> struct InverseState;
 
 template<typename T>
 struct SinCosTable { };
@@ -1729,13 +1763,16 @@ template<
   typename V,
   template<typename> class SrcCfT,
   template<typename> class DstCfT>
-InverseState<typename V::T>* inverse_fft_state(Int n, void* ptr)
+State<typename V::T>* inverse_fft_state(Int n, void* ptr)
 {
-  return (InverseState<typename V::T>*) fft_state<V, SrcCfT, DstCfT>(n, ptr);
+  return fft_state<
+    V,
+    cf::Swapped<SrcCfT>::template Cf,
+    cf::Swapped<DstCfT>::template Cf>(n, ptr);
 }
 
 template<typename T>
-void* inverse_fft_state_memory_ptr(InverseState<T>* state)
+void* inverse_fft_state_memory_ptr(State<T>* state)
 {
   return fft_state_memory_ptr((State<T>*) state);
 }
@@ -1835,10 +1872,9 @@ void fft(const State<T>* state, T* src, T* dst)
 }
 
 template<typename T>
-void inverse_fft(const InverseState<T>* state, T* src, T* dst)
+void inverse_fft(const State<T>* state, T* src, T* dst)
 {
-  auto const s = (const State<T>*) state;
-  fft_impl(s, -s->n, src + s->n, dst + s->n);
+  fft_impl(state, state->n, src, dst);
 }
 
 template<
@@ -2026,6 +2062,6 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
     state->state->working1,
     state->state->n);
 
-  inverse_fft((InverseState<T>*) state->state, state->state->working1, dst);
+  inverse_fft(state->state, state->state->working1, dst);
 }
 
