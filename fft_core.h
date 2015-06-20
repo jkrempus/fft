@@ -2036,7 +2036,7 @@ InverseRealState<typename V::T>* inverse_rfft_state(Int n, void* ptr)
 
   r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
   r->real_pass = &real_pass<V, SrcCfT, cf::Split, true>;
-  r->state = fft_state<V, cf::Split, cf::Scal>(n / 2, ptr);
+  r->state = inverse_fft_state<V, cf::Split, cf::Scal>(n / 2, ptr);
 
   Int m =  n / 2;
   compute_twiddle(m, m, r->twiddle, r->twiddle + m);
