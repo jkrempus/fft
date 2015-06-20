@@ -1203,10 +1203,10 @@ void two_passes(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename DstCf>
-void last_two_passes(const Arg<typename V::T>& arg)
+void last_two_passes_impl(Int n, Int* br, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
-  Int vn = arg.n / V::vec_size;
+  Int vn = n / V::vec_size;
   auto tw = arg.twiddle;
 
   auto src = arg.src;
@@ -1216,7 +1216,6 @@ void last_two_passes(const Arg<typename V::T>& arg)
   auto dst2 = dst1 + vn / 4 * DstCf::stride; 
   auto dst3 = dst2 + vn / 4 * DstCf::stride; 
 
-  auto br = arg.br_table;
   for(auto end = src + vn * VecCf::stride; src < end; )
   {
     auto tw0 = VecCf::load(tw, 0);
@@ -1241,6 +1240,23 @@ void last_two_passes(const Arg<typename V::T>& arg)
     DstCf::store(d2, dst2 + d, arg.im_off);
     DstCf::store(d3, dst3 + d, arg.im_off);
   }
+}
+
+template<typename V, typename DstCf>
+void last_two_passes(const Arg<typename V::T>& arg)
+{
+  last_two_passes_impl<V, DstCf>(arg.n, arg.br_table, arg);
+}
+
+template<typename V, typename DstCf, Int n>
+void last_two_passes(const Arg<typename V::T>& arg)
+{
+  const Int len = n / V::vec_size / 4;
+  Int br_table[len];
+  for(BitReversed br(len); br.i < len; br.advance())
+    br_table[br.i] = br.br * DstCf::stride;
+
+  last_two_passes_impl<V, DstCf>(n, br_table, arg);
 }
 
 template<typename V, typename DstCf>
@@ -1595,7 +1611,7 @@ void init_steps(State<typename V::T>& state)
 
       step.npasses = 3;
     }
-    else if(dft_size == 1 && state.n >= 4 * V::vec_size && V::vec_size == 4)
+    else if(dft_size == 1 && state.n >= 4 * V::vec_size && V::vec_size >= 4)
     {
       if(state.n == 4 * V::vec_size)
         step.fun_ptr = &first_two_passes_ct_size<V, SrcCf, 4 * V::vec_size>;
@@ -1631,7 +1647,13 @@ void init_steps(State<typename V::T>& state)
       }
       else if(state.n < large_fft_size && dft_size * 4 == state.n)
       {
-        step.fun_ptr = &last_two_passes<V, DstCf>;
+        if(state.n == V::vec_size * 4)
+          step.fun_ptr = &last_two_passes<V, DstCf, V::vec_size * 4>;
+        else if(state.n == V::vec_size * 8)
+          step.fun_ptr = &last_two_passes<V, DstCf, V::vec_size * 8>;
+        else
+          step.fun_ptr = &last_two_passes<V, DstCf>;
+
         step.npasses = 2;
       }
       else if(dft_size * 4 <= state.n)
@@ -1814,7 +1836,7 @@ NOINLINE void recursive_passes(
 template<typename T>
 FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 {
-  if(state->tiny_transform_fun)
+  if(false && state->tiny_transform_fun)
   {
     state->tiny_transform_fun(src, dst, im_off);
     return;
