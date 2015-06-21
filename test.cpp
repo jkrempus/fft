@@ -45,6 +45,98 @@ T* alloc_complex_array(Int n)
   return (T*) valloc(2 * n * sizeof(T));
 }
 
+template<typename T> struct View
+{
+  static const int maxdim = 64;
+  Int ndim = 0; 
+  Int size[maxdim];
+  Int stride[maxdim];
+  T* data = nullptr;
+  Int chunk_size;
+
+  View() = default;
+
+  View(const View& other)
+    : ndim(other.ndim), data(other.data), chunk_size(other.chunk_size)
+  {
+    std::copy_n(other.size, other.ndim, size);
+    std::copy_n(other.stride, other.ndim - 1, stride);
+  }
+
+  View& operator=(const View& other)
+  {
+    ndim = other.ndim;
+    data = other.data;
+    chunk_size = other.chunk_size;
+    std::copy_n(other.size, other.ndim, size);
+    std::copy_n(other.stride, other.ndim - 1, stride);
+    return *this;
+  }
+
+  View get_plane(Int i)
+  {
+    View<T> r;
+    r.ndim = ndim - 1;
+    r.chunk_size = chunk_size;
+    std::copy_n(size + 1, r.ndim, r.size);
+    std::copy_n(stride + 1, r.ndim - 1, r.stride);
+    r.data = data + stride[0] * i;
+    return r;
+  }
+};
+
+Int chunked_index(Int i, Int chunk_size)
+{
+  if(chunk_size == 0)
+    return i;
+  else
+    return 2 * i - (i & (chunk_size - 1));
+}
+
+template<Int src_chunk_size, typename T>
+void copy_view(const View<T>& src, const View<T>& dst)
+{
+  if(src.ndim == 1)
+    for(Int i = 0; i < src.size[0]; i++)
+      dst.data[chunked_index(i, dst.chunk_size)] =
+        src.data[chunked_index(i, src.chunk_size)];
+  else
+    for(Int i = 0; i < src.size[0]; i++) copy_view(src.plane(i), dst.plane(i));
+}
+
+template<typename V, typename Cf>
+constexpr Int chunk_size()
+{
+  return
+    SameType<cf::Scal<V>, Cf>::value ? 1 :
+    SameType<cf::Vec<V>, Cf>::value ? V::vec_size : 0;
+}
+
+template<typename V, typename Cf>
+constexpr Int get_im_offset(Int split_im_offset)
+{
+  return chunk_size<V, Cf>() ? chunk_size<V, Cf>() : split_im_offset;
+}
+
+template<typename V, typename Cf>
+View<typename V::T> create_view(
+  typename V::T* ptr, const std::vector<Int>& size, Int chunk_size)
+{
+  View<typename V::T> r;
+  r.ndim = size.size();
+  std::copy_n(&size[0], r.ndim, r.size); 
+  Int s = chunk_size;
+  for(Int i = r.ndim - 1; i > 0; i--)
+  {
+    s *= r.size[0];
+    r.stride[i - 1] = 0;
+  }
+
+  r.data = ptr;
+  r.chunk_size = chunk_size;
+  return r;
+}
+
 template<typename T, bool is_real, bool is_inverse>
 struct SplitWrapperBase { };
 
