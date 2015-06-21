@@ -190,24 +190,24 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   void set_input(U* p)
   {
     copy_view(
-      create_view(src, size, 0),
-      create_view(p, size, 1));
+      create_view(p, size, 0),
+      create_view(src, size, 1));
     
     copy_view(
-      create_view(src + product(size), size, 0),
-      create_view(p + 1, size, 1));
+      create_view(p + product(size), size, 0),
+      create_view(src + 1, size, 1));
   }
 
   template<typename U>
   void get_output(U* p)
   {
     copy_view(
-      create_view(p, size, 1),
-      create_view(src, size, 0));
+      create_view(dst, size, 1),
+      create_view(p, size, 0));
     
     copy_view(
-      create_view(p + 1, size, 1),
-      create_view(src + product(size), size, 0));
+      create_view(dst + 1, size, 1),
+      create_view(p + product(size), size, 0));
   }
 };
 
