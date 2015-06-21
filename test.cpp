@@ -93,8 +93,8 @@ Int chunked_index(Int i, Int chunk_size)
     return 2 * i - (i & (chunk_size - 1));
 }
 
-template<Int src_chunk_size, typename T>
-void copy_view(const View<T>& src, const View<T>& dst)
+template<Int src_chunk_size, typename T, typename U>
+void copy_view(const View<T>& src, const View<U>& dst)
 {
   if(src.ndim == 1)
     for(Int i = 0; i < src.size[0]; i++)
@@ -118,11 +118,10 @@ constexpr Int get_im_offset(Int split_im_offset)
   return chunk_size<V, Cf>() ? chunk_size<V, Cf>() : split_im_offset;
 }
 
-template<typename V, typename Cf>
-View<typename V::T> create_view(
-  typename V::T* ptr, const std::vector<Int>& size, Int chunk_size)
+template<typename T>
+View<T> create_view(T* ptr, const std::vector<Int>& size, Int chunk_size)
 {
-  View<typename V::T> r;
+  View<T> r;
   r.ndim = size.size();
   std::copy_n(&size[0], r.ndim, r.size); 
   Int s = chunk_size;
@@ -153,17 +152,13 @@ struct SplitWrapperBase<T, false, is_inverse_>
     dst((T*) valloc(2 * sizeof(T) * n)) { }
 
   template<typename U>
-  void set_input(const U* re, const U* im)
+  void set_input(U* p)
   {
-    std::copy_n(re, n, src);
-    std::copy_n(im, n, src + n);
   }
 
   template<typename U>
-  void get_output(U* re, U* im)
+  void get_output(U* p)
   {
-    std::copy_n(dst, n, re);
-    std::copy_n(dst + n, n, im);
   }
 };
 
@@ -183,23 +178,13 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
     dst((T*) valloc(2 * sizeof(T) * n)) { }
 
   template<typename U>
-  void set_input(const U* re, const U* im)
+  void set_input(U* p)
   {
-    for(Int i = 0; i < n; i++)
-    {
-      src[2 * i] = T(re[i]);
-      src[2 * i + 1] = T(im[i]);
-    }
   }
 
   template<typename U>
-  void get_output(U* re, U* im)
+  void get_output(U* p)
   {
-    for(Int i = 0; i < n; i++)
-    {
-      re[i] = U(dst[2 * i]);
-      im[i] = U(dst[2 * i + 1]);
-    }
   }
 };
 
@@ -216,26 +201,13 @@ struct InterleavedWrapperBase<T, true, false>
     dst((T*) valloc(2 * sizeof(T) * (n / 2 + 1))) { }
 
   template<typename U>
-  void set_input(const U* re, const U* im)
+  void set_input(U* p)
   {
-    std::copy_n(re, n, src);
   }
 
   template<typename U>
-  void get_output(U* re, U* im)
+  void get_output(U* p)
   {
-    Int i = 0;
-    for(; i <= n / 2; i++)
-    {
-      re[i] = U(dst[2 * i]);
-      im[i] = U(dst[2 * i + 1]);
-    }
-    for(; i < n; i++)
-    {
-      Int j = n - i;
-      re[i] = U(dst[2 * j]);
-      im[i] = -U(dst[2 * j + 1]);
-    }
   }
 };
 
@@ -254,20 +226,13 @@ struct InterleavedWrapperBase<T, true, true>
   }
 
   template<typename U>
-  void set_input(const U* re, const U* im)
+  void set_input(U* p)
   {
-    for(Int i = 0; i < im_offset; i++)
-    {
-      src[2 * i] = re[i];
-      src[2 * i + 1] = im[i];
-    }
   }
 
   template<typename U>
-  void get_output(U* re, U* im)
+  void get_output(U* p)
   {
-    std::copy_n(dst, n, re);
-		std::fill_n(im, n, U(0));
   }
 };
 
@@ -287,9 +252,10 @@ struct TestWrapper<V, CfT, false, false>
   VEC_TYPEDEFS(V);
   typedef T value_type;
   State<T>* state;
-  TestWrapper(Int n) :
-    SplitWrapperBase<T, false, false>(n),
-    state(fft_state<V, CfT, CfT>(n, valloc(fft_state_memory_size<V>(n)))) {}
+  TestWrapper(const std::vector<Int>& size) :
+    SplitWrapperBase<T, false, false>(size[0]),
+    state(fft_state<V, CfT, CfT>(
+      size[0], valloc(fft_state_memory_size<V>(size[0])))) {}
 
   ~TestWrapper() { free(fft_state_memory_ptr(state)); }
   void transform() { fft<T>(state, this->src, this->dst); }
@@ -304,10 +270,10 @@ struct TestWrapper<V, CfT, false, true>
   VEC_TYPEDEFS(V);
   typedef T value_type;
   State<T>* state;
-  TestWrapper(Int n) :
-    SplitWrapperBase<T, false, true>(n),
+  TestWrapper(const std::vector<Int>& size) :
+    SplitWrapperBase<T, false, true>(size[0]),
     state(inverse_fft_state<V, CfT, CfT>(
-        n, valloc(inverse_fft_state_memory_size<V>(n)))) {}
+        size[0], valloc(inverse_fft_state_memory_size<V>(size[0])))) {}
 
   ~TestWrapper() { free(inverse_fft_state_memory_ptr(state)); }
   void transform() { inverse_fft<T>(state, this->src, this->dst); }
@@ -326,10 +292,10 @@ struct TestWrapper<V, CfT, true, false>
   Int im_offset;
   T* src;
   T* dst;
-  TestWrapper(Int n) :
-    state(rfft_state<V, CfT>(n, valloc(rfft_state_memory_size<V>(n)))),
-    n(n),
-    im_offset(align_size<T>(n / 2 + 1))
+  TestWrapper(const std::vector<Int>& size) :
+    state(rfft_state<V, CfT>(size[0], valloc(rfft_state_memory_size<V>(size[0])))),
+    n(size[0]),
+    im_offset(align_size<T>(size[0] / 2 + 1))
   {
     src = (T*) valloc(n * sizeof(T));
     dst = (T*) valloc(2 * im_offset * sizeof(T));
@@ -344,9 +310,6 @@ struct TestWrapper<V, CfT, true, false>
     free(dst);
   }
 
-  template<typename U>
-  void set_input(const U* re, const U* im) { std::copy_n(re, n, src); }
- 
   void transform()
   {
     rfft(state, src, dst);
@@ -354,30 +317,13 @@ struct TestWrapper<V, CfT, true, false>
   }
 
   template<typename U>
-  void get_output(U* re, U* im)
+  void set_input(U* p)
   {
-    Int vn = n / V::vec_size;
-    for(Int i = 0; i < vn / 2 + 1; i++)
-    {
-      T p[2 * V::vec_size];
-      auto c = CfT<V>::load(dst + i * CfT<V>::stride, im_offset);
-      cf::Vec<V>::unaligned_store(c, p, 0);
+  }
 
-      for(Int j = 0; j < V::vec_size; j++)
-      {
-        Int k = V::vec_size * i + j;
-        if(k <= n / 2)
-        {
-          re[k] = U(p[j]);
-          im[k] = U(p[j + V::vec_size]);
-          if(k > 0)
-          {
-            re[n - k] = U(p[j]);
-            im[n - k] = -U(p[j + V::vec_size]);
-          }
-        }
-      }
-    }
+  template<typename U>
+  void get_output(U* p)
+  {
   }
 };
 
@@ -393,11 +339,11 @@ struct TestWrapper<V, CfT, true, true>
   Int im_offset;
   T* src;
   T* dst;
-  TestWrapper(Int n) :
-    im_offset(align_size<T>(n / 2 + 1)),
-    n(n),
+  TestWrapper(const std::vector<Int>& size) :
+    im_offset(align_size<T>(size[0] / 2 + 1)),
+    n(size[0]),
     state(inverse_rfft_state<V, CfT>(
-        n, valloc(inverse_rfft_state_memory_size<V>(n))))
+        size[0], valloc(inverse_rfft_state_memory_size<V>(size[0]))))
   {
     src = (T*) valloc(2 * im_offset * sizeof(T));
     dst = (T*) valloc(n * sizeof(T));
@@ -410,20 +356,16 @@ struct TestWrapper<V, CfT, true, true>
     free(dst);
   }
 
-  template<typename U>
-  void set_input(const U* re, const U* im)
- 	{
-    std::copy_n(re, n / 2 + 1, src);
-    std::copy_n(im, n / 2 + 1, src + im_offset);
- 	}
- 
   void transform() { inverse_rfft(state, src, dst); }
 
   template<typename U>
-  void get_output(U* re, U* im)
+  void set_input(U* p)
   {
-    std::copy_n(dst, n, re);
-    std::fill_n(im, n, T(0));
+  }
+
+  template<typename U>
+  void get_output(U* p)
+  {
   }
 };
 
@@ -463,9 +405,10 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
   typedef float value_type;
   fftwf_plan plan;
 
-  FftwTestWrapper(Int n) : InterleavedWrapperBase<T, is_real, is_inverse_>(n)
+  FftwTestWrapper(const std::vector<Int>& size)
+    : InterleavedWrapperBase<T, is_real, is_inverse_>(size[0])
   {
-    plan = make_plan<is_real, is_inverse_>(n, this->src, this->dst);
+    plan = make_plan<is_real, is_inverse_>(size[0], this->src, this->dst);
   }
 
   ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
@@ -483,14 +426,15 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   Complex<T>* twiddle;
   T* working;
 
-  ReferenceFft(Int n) : InterleavedWrapperBase<T, false, is_inverse_>(n)
+  ReferenceFft(const std::vector<Int>& size)
+    : InterleavedWrapperBase<T, false, is_inverse_>(size[0])
   {
-    working = new T[2 * n];
-    twiddle = new Complex<T>[n / 2];
+    working = new T[2 * this->n];
+    twiddle = new Complex<T>[this->n / 2];
     auto pi = std::acos(T(-1));
-    for(Int i = 0; i < n / 2; i++)
+    for(Int i = 0; i < this->n / 2; i++)
     {
-      auto phi = -i * pi / (n / 2);
+      auto phi = -i * pi / (this->n / 2);
       twiddle[i] = {std::cos(phi), std::sin(phi)};
     }
   }
@@ -541,9 +485,9 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 };
 
 template<typename Fft>
-void bench(Int n, double requested_operations)
+void bench(const std::vector<Int>& size, double requested_operations)
 {
-  typedef typename Fft::value_type T;
+  /*typedef typename Fft::value_type T;
   Fft fft(n);
   T* src = alloc_complex_array<T>(n);
   T* dst = alloc_complex_array<T>(n);
@@ -558,16 +502,17 @@ void bench(Int n, double requested_operations)
   for(int i = 0; i < iter; i++) fft.transform();
   double t1 = get_time(); 
 
-  printf("%f gflops\n", operations * 1e-9 / (t1 - t0));
+  printf("%f gflops\n", operations * 1e-9 / (t1 - t0));*/
 }
 
 template<typename Fft0, typename Fft1>
-typename Fft0::value_type compare(Int n)
+typename Fft0::value_type compare(const std::vector<Int>& size)
 {
   static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
-  Fft0 fft0(n);
-  Fft1 fft1(n);
+  Int n = 2; for(auto e : size) n *= e;
+  Fft0 fft0(size);
+  Fft1 fft1(size);
   T* src = alloc_complex_array<T>(n);
   T* dst0 = alloc_complex_array<T>(n);
   T* dst1 = alloc_complex_array<T>(n);
@@ -576,7 +521,7 @@ typename Fft0::value_type compare(Int n)
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
-	//TODO: handle is_inverse
+#if 0 //TODO
   if(Fft0::is_real || Fft1::is_real)
   {
     if(Fft0::is_inverse)
@@ -594,27 +539,16 @@ typename Fft0::value_type compare(Int n)
     else
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
   }
+#endif
 
-  fft0.set_input(src, src + n);
-  fft1.set_input(src, src + n);
+  fft0.set_input(src);
+  fft1.set_input(src);
 
   fft0.transform();
   fft1.transform();
 
-  fft0.get_output(dst0, dst0 + n);
-  fft1.get_output(dst1, dst1 + n);
-
-#if 1
-  //dump(fft1.state->twiddle, n, "t.float32");
-  //dump(fft1.state->state->working, n, "i.float32");
-
-  //dump(fft1.src, n + 2, "src.float32");  
-  //dump(fft1.dst, n, "dst.float32");  
-
-  dump(src, 2 * n, "aa.float64");
-  dump(dst0, 2 * n, "a.float64");
-  dump(dst1, 2 * n, "b.float64");
-#endif
+  fft0.get_output(dst0);
+  fft1.get_output(dst1);
 
   auto sum_sumsq = T(0);
   auto diff_sumsq = T(0);
@@ -646,11 +580,11 @@ template<typename T>
 using CfT = complex_format::Split<T>;
 
 template<typename Fft>
-void test(Int n)
+void test(const std::vector<Int>& size)
 {
   //TODO: Use long double for ReferenceFft
   printf("difference %e\n",
-		 compare<ReferenceFft<double, Fft::is_inverse>, Fft>(n));
+		 compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size));
 }
 
 struct Options
@@ -674,14 +608,18 @@ Options parse_options(int argc, char** argv)
 template<typename Fft>
 void test_or_bench3(const Options& opt)
 {
-  Int log2n;
-  std::stringstream(opt.positional[1]) >> log2n;
-  Int n = 1 << log2n;
+  std::vector<Int> size;
+  for(Int i = 1; i < opt.positional.size(); i++)
+  {    
+    Int log2n;
+    std::stringstream(opt.positional[1]) >> log2n;
+    size.push_back(1 << log2n);
+  }
 
   if(opt.flags.count("-b"))
-    bench<Fft>(n, 1e11);
+    bench<Fft>(size, 1e11);
   else
-    test<Fft>(n);
+    test<Fft>(size);
 }
 
 template<bool is_real, bool is_inverse>
