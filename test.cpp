@@ -73,7 +73,7 @@ template<typename T> struct View
     return *this;
   }
 
-  View get_plane(Int i)
+  View get_plane(Int i) const
   {
     View<T> r;
     r.ndim = ndim - 1;
@@ -93,7 +93,7 @@ Int chunked_index(Int i, Int chunk_size)
     return 2 * i - (i & (chunk_size - 1));
 }
 
-template<Int src_chunk_size, typename T, typename U>
+template<typename T, typename U>
 void copy_view(const View<T>& src, const View<U>& dst)
 {
   if(src.ndim == 1)
@@ -101,7 +101,8 @@ void copy_view(const View<T>& src, const View<U>& dst)
       dst.data[chunked_index(i, dst.chunk_size)] =
         src.data[chunked_index(i, src.chunk_size)];
   else
-    for(Int i = 0; i < src.size[0]; i++) copy_view(src.plane(i), dst.plane(i));
+    for(Int i = 0; i < src.size[0]; i++)
+      copy_view(src.get_plane(i), dst.get_plane(i));
 }
 
 template<typename V, typename Cf>
@@ -162,43 +163,65 @@ struct SplitWrapperBase<T, false, is_inverse_>
   }
 };
 
+template<typename T>
+T product(const std::vector<T>& v)
+{
+  T r(1);
+  for(auto& e : v) r *= e;
+  return r;
+}
+
 template<typename T, bool is_real, bool is_inverse>
 struct InterleavedWrapperBase { };
 
 template<typename T, bool is_inverse_>
 struct InterleavedWrapperBase<T, false, is_inverse_>
 {
-  Int n;
+  std::vector<Int> size;
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(Int n) :
-    n(n),
-    src((T*) valloc(2 * sizeof(T) * n)),
-    dst((T*) valloc(2 * sizeof(T) * n)) { }
+  InterleavedWrapperBase(const std::vector<Int>& size) :
+    size(size),
+    src((T*) valloc(2 * sizeof(T) * product(size))),
+    dst((T*) valloc(2 * sizeof(T) * product(size))) { }
 
   template<typename U>
   void set_input(U* p)
   {
+    copy_view(
+      create_view(src, size, 0),
+      create_view(p, size, 1));
+    
+    copy_view(
+      create_view(src + product(size), size, 0),
+      create_view(p + 1, size, 1));
   }
 
   template<typename U>
   void get_output(U* p)
   {
+    copy_view(
+      create_view(p, size, 1),
+      create_view(src, size, 0));
+    
+    copy_view(
+      create_view(p + 1, size, 1),
+      create_view(src + product(size), size, 0));
   }
 };
 
 template<typename T>
 struct InterleavedWrapperBase<T, true, false>
 {
-  Int n;
+  std::vector<Int> size;
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(Int n) :
-    n(n),
-    src((T*) valloc(sizeof(T) * n)),
-    dst((T*) valloc(2 * sizeof(T) * (n / 2 + 1))) { }
+  InterleavedWrapperBase(const std::vector<Int>& size) :
+    size(size),
+    src((T*) valloc(sizeof(T) * product(size))),
+    dst((T*) valloc(2 * sizeof(T) * (product(size) / 2 + 1))) { }
 
   template<typename U>
   void set_input(U* p)
@@ -214,15 +237,17 @@ struct InterleavedWrapperBase<T, true, false>
 template<typename T>
 struct InterleavedWrapperBase<T, true, true>
 {
-  Int n;
+  std::vector<Int> size;
   Int im_offset;
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(Int n) : n(n), im_offset(align_size<T>(n / 2 + 1))
+  InterleavedWrapperBase(const std::vector<Int>& size) :
+    size(size),
+    im_offset(align_size<T>(product(size) / 2 + 1))
   {
     src = (T*) valloc(2 * sizeof(T) * im_offset);
-    dst = (T*) valloc(sizeof(T) * n);
+    dst = (T*) valloc(sizeof(T) * product(size));
   }
 
   template<typename U>
@@ -406,7 +431,7 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
   fftwf_plan plan;
 
   FftwTestWrapper(const std::vector<Int>& size)
-    : InterleavedWrapperBase<T, is_real, is_inverse_>(size[0])
+    : InterleavedWrapperBase<T, is_real, is_inverse_>(size)
   {
     plan = make_plan<is_real, is_inverse_>(size[0], this->src, this->dst);
   }
@@ -427,14 +452,15 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   T* working;
 
   ReferenceFft(const std::vector<Int>& size)
-    : InterleavedWrapperBase<T, false, is_inverse_>(size[0])
+    : InterleavedWrapperBase<T, false, is_inverse_>(size)
   {
-    working = new T[2 * this->n];
-    twiddle = new Complex<T>[this->n / 2];
+    Int n = this->size[0];
+    working = new T[2 * n];
+    twiddle = new Complex<T>[n / 2];
     auto pi = std::acos(T(-1));
-    for(Int i = 0; i < this->n / 2; i++)
+    for(Int i = 0; i < n / 2; i++)
     {
-      auto phi = -i * pi / (this->n / 2);
+      auto phi = -i * pi / (n / 2);
       twiddle[i] = {std::cos(phi), std::sin(phi)};
     }
   }
@@ -447,19 +473,20 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 
   void transform()
   {
-    copy(this->src, 2 * this->n, this->dst);
+    Int n = this->size[0];
+    copy(this->src, 2 * n, this->dst);
 		if(is_inverse)
-			for(Int i = 0; i < 2 * this->n; i += 2)
+			for(Int i = 0; i < 2 * n; i += 2)
 				std::swap(this->dst[i], this->dst[i + 1]);
 
-    for(Int dft_size = 1; dft_size < this->n; dft_size *= 2)
+    for(Int dft_size = 1; dft_size < n; dft_size *= 2)
     {
       swap(this->dst, working);
 
       typedef complex_format::Scal<Scalar<T>> CF;
-      Int twiddle_stride = this->n / 2 / dft_size;
+      Int twiddle_stride = n / 2 / dft_size;
 
-      for(Int i = 0; i < this->n / 2; i += dft_size)
+      for(Int i = 0; i < n / 2; i += dft_size)
       {
         Int src_i = i;
         Int dst_i = 2 * i;
@@ -467,7 +494,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
         for(; src_i < i + dft_size;)
         {
           auto a = CF::load(working + src_i * CF::stride, 0);
-          auto b = CF::load(working + (src_i + this->n / 2) * CF::stride, 0);
+          auto b = CF::load(working + (src_i + n / 2) * CF::stride, 0);
           auto mul = twiddle[twiddle_i] * b;
           CF::store(a + mul, this->dst + dst_i * CF::stride, 0);
           CF::store(a - mul, this->dst + (dst_i + dft_size) * CF::stride, 0);
@@ -479,7 +506,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
     }
 
 		if(is_inverse)
-			for(Int i = 0; i < 2 * this->n; i += 2)
+			for(Int i = 0; i < 2 * n; i += 2)
 				std::swap(this->dst[i], this->dst[i + 1]);
   }
 };
@@ -510,7 +537,7 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
 {
   static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
-  Int n = 2; for(auto e : size) n *= e;
+  Int n = product(size);
   Fft0 fft0(size);
   Fft1 fft1(size);
   T* src = alloc_complex_array<T>(n);
