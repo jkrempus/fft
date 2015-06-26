@@ -534,70 +534,69 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
 template<typename T, bool is_inverse_>
 struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 {
-  static const bool is_real = false;
-  static const bool is_inverse = is_inverse_;
-  typedef T value_type;
-  Complex<T>* twiddle;
-  T* working;
-
-  ReferenceFft(const std::vector<Int>& size)
-    : InterleavedWrapperBase<T, false, is_inverse_>(size)
+  struct Onedim
   {
-    Int n = this->size[0];
-    working = new T[2 * n];
-    twiddle = new Complex<T>[n / 2];
-    auto pi = std::acos(T(-1));
-    for(Int i = 0; i < n / 2; i++)
+    Complex<T>* twiddle;
+    T* working;
+    Int n;
+    Onedim(Int n) : n(n)
     {
-      auto phi = -i * pi / (n / 2);
-      twiddle[i] = {std::cos(phi), std::sin(phi)};
-    }
-  }
-
-  ~ReferenceFft()
-  {
-    delete twiddle;
-    delete working;
-  }
-
-  void transform()
-  {
-    Int n = this->size[0];
-    copy(this->src, 2 * n, this->dst);
-		if(is_inverse)
-			for(Int i = 0; i < 2 * n; i += 2)
-				std::swap(this->dst[i], this->dst[i + 1]);
-
-    for(Int dft_size = 1; dft_size < n; dft_size *= 2)
-    {
-      swap(this->dst, working);
-
-      typedef complex_format::Scal<Scalar<T>> CF;
-      Int twiddle_stride = n / 2 / dft_size;
-
-      for(Int i = 0; i < n / 2; i += dft_size)
+      working = new T[2 * n];
+      twiddle = new Complex<T>[n / 2];
+      auto pi = std::acos(T(-1));
+      for(Int i = 0; i < n / 2; i++)
       {
-        Int src_i = i;
-        Int dst_i = 2 * i;
-        Int twiddle_i = 0;
-        for(; src_i < i + dft_size;)
-        {
-          auto a = CF::load(working + src_i * CF::stride, 0);
-          auto b = CF::load(working + (src_i + n / 2) * CF::stride, 0);
-          auto mul = twiddle[twiddle_i] * b;
-          CF::store(a + mul, this->dst + dst_i * CF::stride, 0);
-          CF::store(a - mul, this->dst + (dst_i + dft_size) * CF::stride, 0);
-          src_i++;
-          dst_i++;
-          twiddle_i += twiddle_stride;
-        }  
+        auto phi = (is_inverse ? 1 : -1) * i * pi / (n / 2);
+        twiddle[i] = {std::cos(phi), std::sin(phi)};
       }
     }
 
-		if(is_inverse)
-			for(Int i = 0; i < 2 * n; i += 2)
-				std::swap(this->dst[i], this->dst[i + 1]);
-  }
+    ~Onedim()
+    {
+      delete twiddle;
+      delete working;
+    }
+
+    void transform(T* src, T* dst)
+    {
+      copy(src, 2 * n, dst);
+      for(Int dft_size = 1; dft_size < n; dft_size *= 2)
+      {
+        swap(dst, working);
+
+        typedef complex_format::Scal<Scalar<T>> CF;
+        Int twiddle_stride = n / 2 / dft_size;
+
+        for(Int i = 0; i < n / 2; i += dft_size)
+        {
+          Int src_i = i;
+          Int dst_i = 2 * i;
+          Int twiddle_i = 0;
+          for(; src_i < i + dft_size;)
+          {
+            auto a = CF::load(working + src_i * CF::stride, 0);
+            auto b = CF::load(working + (src_i + n / 2) * CF::stride, 0);
+            auto mul = twiddle[twiddle_i] * b;
+            CF::store(a + mul, dst + dst_i * CF::stride, 0);
+            CF::store(a - mul, dst + (dst_i + dft_size) * CF::stride, 0);
+            src_i++;
+            dst_i++;
+            twiddle_i += twiddle_stride;
+          }  
+        }
+      }
+    }
+  };
+
+  static const bool is_real = false;
+  static const bool is_inverse = is_inverse_;
+  typedef T value_type;
+  Onedim onedim;
+
+  ReferenceFft(const std::vector<Int>& size)
+    : InterleavedWrapperBase<T, false, is_inverse_>(size), onedim(size[0]) { }
+
+  void transform() { onedim.transform(this->src, this->dst); }
 };
 
 template<typename Fft>
