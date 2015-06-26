@@ -137,32 +137,6 @@ View<T> create_view(T* ptr, const std::vector<Int>& size, Int chunk_size)
   return r;
 }
 
-template<typename T, bool is_real, bool is_inverse>
-struct SplitWrapperBase { };
-
-template<typename T, bool is_inverse_>
-struct SplitWrapperBase<T, false, is_inverse_>
-{
-  Int n;
-  T* src;
-  T* dst;
-  
-  SplitWrapperBase(Int n) :
-    n(n),
-    src((T*) valloc(2 * sizeof(T) * n)),
-    dst((T*) valloc(2 * sizeof(T) * n)) { }
-
-  template<typename U>
-  void set_input(U* p)
-  {
-  }
-
-  template<typename U>
-  void get_output(U* p)
-  {
-  }
-};
-
 template<typename T>
 T product(const std::vector<T>& v)
 {
@@ -170,6 +144,38 @@ T product(const std::vector<T>& v)
   for(auto& e : v) r *= e;
   return r;
 }
+
+template<typename T, bool is_real, bool is_inverse>
+struct SplitWrapperBase { };
+
+template<typename T, bool is_inverse_>
+struct SplitWrapperBase<T, false, is_inverse_>
+{
+  std::vector<Int> size;
+  T* src;
+  T* dst;
+  
+  SplitWrapperBase(const std::vector<Int> size) :
+    size(size),
+    src((T*) valloc(2 * sizeof(T) * product(size))),
+    dst((T*) valloc(2 * sizeof(T) * product(size))) { }
+
+  template<typename U>
+  void set_input(U* p)
+  {
+    Int n = product(size);
+    copy_view(create_view(p, size, 0), create_view(src, size, 0));
+    copy_view(create_view(p + n, size, 0), create_view(src + n, size, 0));
+  }
+
+  template<typename U>
+  void get_output(U* p)
+  {
+    Int n = product(size);
+    copy_view(create_view(dst, size, 0), create_view(p, size, 0));
+    copy_view(create_view(dst + n, size, 0), create_view(p + n, size, 0));
+  }
+};
 
 template<typename T, bool is_real, bool is_inverse>
 struct InterleavedWrapperBase { };
@@ -189,25 +195,17 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   template<typename U>
   void set_input(U* p)
   {
-    copy_view(
-      create_view(p, size, 0),
-      create_view(src, size, 1));
-    
-    copy_view(
-      create_view(p + product(size), size, 0),
-      create_view(src + 1, size, 1));
+    Int n = product(size);
+    copy_view(create_view(p, size, 0), create_view(src, size, 1));
+    copy_view(create_view(p + n, size, 0), create_view(src + 1, size, 1));
   }
 
   template<typename U>
   void get_output(U* p)
   {
-    copy_view(
-      create_view(dst, size, 1),
-      create_view(p, size, 0));
-    
-    copy_view(
-      create_view(dst + 1, size, 1),
-      create_view(p + product(size), size, 0));
+    Int n = product(size);
+    copy_view(create_view(dst, size, 1), create_view(p, size, 0));
+    copy_view(create_view(dst + 1, size, 1), create_view(p + n, size, 0));
   }
 };
 
@@ -278,7 +276,7 @@ struct TestWrapper<V, CfT, false, false>
   typedef T value_type;
   State<T>* state;
   TestWrapper(const std::vector<Int>& size) :
-    SplitWrapperBase<T, false, false>(size[0]),
+    SplitWrapperBase<T, false, false>(size),
     state(fft_state<V, CfT, CfT>(
       size[0], valloc(fft_state_memory_size<V>(size[0])))) {}
 
@@ -296,7 +294,7 @@ struct TestWrapper<V, CfT, false, true>
   typedef T value_type;
   State<T>* state;
   TestWrapper(const std::vector<Int>& size) :
-    SplitWrapperBase<T, false, true>(size[0]),
+    SplitWrapperBase<T, false, true>(size),
     state(inverse_fft_state<V, CfT, CfT>(
         size[0], valloc(inverse_fft_state_memory_size<V>(size[0])))) {}
 
@@ -514,8 +512,9 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 template<typename Fft>
 void bench(const std::vector<Int>& size, double requested_operations)
 {
-  /*typedef typename Fft::value_type T;
-  Fft fft(n);
+  Int n = product(size);
+  typedef typename Fft::value_type T;
+  Fft fft(size);
   T* src = alloc_complex_array<T>(n);
   T* dst = alloc_complex_array<T>(n);
   
@@ -529,7 +528,7 @@ void bench(const std::vector<Int>& size, double requested_operations)
   for(int i = 0; i < iter; i++) fft.transform();
   double t1 = get_time(); 
 
-  printf("%f gflops\n", operations * 1e-9 / (t1 - t0));*/
+  printf("%f gflops\n", operations * 1e-9 / (t1 - t0));
 }
 
 template<typename Fft0, typename Fft1>
