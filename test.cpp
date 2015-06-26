@@ -97,12 +97,67 @@ template<typename T, typename U>
 void copy_view(const View<T>& src, const View<U>& dst)
 {
   if(src.ndim == 1)
-    for(Int i = 0; i < src.size[0]; i++)
+    for(Int i = 0; i < std::min(src.size[0], dst.size[0]); i++)
       dst.data[chunked_index(i, dst.chunk_size)] =
         src.data[chunked_index(i, src.chunk_size)];
   else
-    for(Int i = 0; i < src.size[0]; i++)
+    for(Int i = 0; i < std::min(src.size[0], dst.size[0]); i++)
       copy_view(src.get_plane(i), dst.get_plane(i));
+}
+
+template<typename T, typename U>
+void fill_view(const T& value, const View<U>& dst)
+{
+  if(dst.ndim == 1)
+    for(Int i = 0; i < dst.size[0]; i++)
+      dst.data[chunked_index(i, dst.chunk_size)] = value;
+  else
+    for(Int i = 0; i < dst.size[0]; i++)
+      copy_view(value, dst.get_plane(i));
+}
+
+template<typename T, typename U, bool is_antisym>
+void copy_symmetric_view(const View<T>& src, const View<U>& dst)
+{
+  struct Recurse
+  {
+    View<T> src;
+    View<T> dst;
+    void f(Int* idx, Int idx_len)
+    {
+      for(Int i = 0; i < dst.size[0]; i++)
+      {
+        idx[idx_len] == i;
+        if(idx_len == src.ndim - 1)
+        {
+          bool mirror = false;
+          for(Int j = 0; j < src.ndim; j++)
+            mirror = mirror || idx[j] >= src.size[j];
+
+          T* s = src.data;
+          T* d = dst.data;
+          for(Int j = 0; j < src.ndim - 1; j++)
+          {
+            s += src.stride[j] * (mirror ? dst.size[j] - idx[j] : idx[j]);
+            d += dst.stride[j] * idx[j];
+          }
+
+          {
+            Int j = src.ndim - 1;
+            s += chunked_index(mirror ? dst.size[j] - idx[j] : idx[j], src.chunk_size);
+            d += chunked_index(idx[j], dst.chunk_size);
+          }
+
+          *d = *s * T(mirror && is_antisym ? -1 : 1);
+        }
+        else
+          f(idx, idx_len + 1);
+      }
+    } 
+  };
+
+  Int idx[View<T>::maxdim];
+  ((Recurse){src, dst}).f(idx, 0);
 }
 
 template<typename V, typename Cf>
