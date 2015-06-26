@@ -83,6 +83,18 @@ template<typename T> struct View
     r.data = data + stride[0] * i;
     return r;
   }
+
+  View sub(Int dim, Int start, Int end) const
+  {
+    View<T> r;
+    r.ndim = ndim;
+    r.chunk_size = chunk_size;
+    std::copy_n(size, ndim, r.size);
+    std::copy_n(stride, ndim - 1, r.stride);
+    r.size[dim] = end - start;
+    r.data = data + (dim < ndim - 1 ? stride[dim] : 1) * start;
+    return r;
+  }
 };
 
 Int chunked_index(Int i, Int chunk_size)
@@ -113,7 +125,7 @@ void fill_view(const T& value, const View<U>& dst)
       dst.data[chunked_index(i, dst.chunk_size)] = value;
   else
     for(Int i = 0; i < dst.size[0]; i++)
-      copy_view(value, dst.get_plane(i));
+      fill_view(value, dst.get_plane(i));
 }
 
 template<bool is_antisym, typename T, typename U>
@@ -306,6 +318,7 @@ template<typename T>
 struct InterleavedWrapperBase<T, true, true>
 {
   std::vector<Int> size;
+  std::vector<Int> symmetric_size;
   Int im_offset;
   T* src;
   T* dst;
@@ -314,6 +327,8 @@ struct InterleavedWrapperBase<T, true, true>
     size(size),
     im_offset(align_size<T>(product(size) / 2 + 1))
   {
+    symmetric_size = size;
+    symmetric_size.back() = symmetric_size.back() / 2 + 1;
     src = (T*) valloc(2 * sizeof(T) * im_offset);
     dst = (T*) valloc(sizeof(T) * product(size));
   }
@@ -321,11 +336,17 @@ struct InterleavedWrapperBase<T, true, true>
   template<typename U>
   void set_input(U* p)
   {
+    Int n = product(size);
+    copy_view(create_view(p, size, 0), create_view(src, symmetric_size, 1));
+    copy_view(create_view(p + n, size, 0), create_view(src + 1, symmetric_size, 1));
   }
 
   template<typename U>
   void get_output(U* p)
   {
+    Int n = product(size);
+    copy_view(create_view(dst, size, 0), create_view(p, size, 0));
+    fill_view(U(0), create_view(p + n, size, 0));
   }
 };
 
@@ -621,17 +642,13 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   {
     if(Fft0::is_inverse)
     {
-#if 0
-      for(Int i = 1; i < n / 2; i++)
-      {
-        Int j = n - i;
-        src[j] = src[i];
-        src[j + n] = -src[i + n];
-      }
+      auto re = create_view(src, size, 0);
+      copy_symmetric_view<false>(re.sub(0, 0, size[0] / 2 + 1), re);
 
-      src[n] = T(0);
-      src[n / 2 + n] = T(0);
-#endif
+      auto im = create_view(src + n, size, 0);
+      copy_symmetric_view<true>(im.sub(0, 0, size[0] / 2 + 1 ), im);
+      src[n + n / 2] = 0;
+      src[n] = 0;
     }
     else
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
