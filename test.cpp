@@ -116,26 +116,27 @@ void fill_view(const T& value, const View<U>& dst)
       copy_view(value, dst.get_plane(i));
 }
 
-template<typename T, typename U, bool is_antisym>
+template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 {
   struct Recurse
   {
     View<T> src;
-    View<T> dst;
-    void f(Int* idx, Int idx_len)
+    View<U> dst;
+    Int idx[View<T>::maxdim];
+    void f(Int idx_len)
     {
-      for(Int i = 0; i < dst.size[0]; i++)
+      for(Int i = 0; i < dst.size[idx_len]; i++)
       {
-        idx[idx_len] == i;
+        idx[idx_len] = i;
         if(idx_len == src.ndim - 1)
         {
+          T* s = src.data;
+          U* d = dst.data;
           bool mirror = false;
           for(Int j = 0; j < src.ndim; j++)
             mirror = mirror || idx[j] >= src.size[j];
 
-          T* s = src.data;
-          T* d = dst.data;
           for(Int j = 0; j < src.ndim - 1; j++)
           {
             s += src.stride[j] * (mirror ? dst.size[j] - idx[j] : idx[j]);
@@ -148,16 +149,15 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
             d += chunked_index(idx[j], dst.chunk_size);
           }
 
-          *d = *s * T(mirror && is_antisym ? -1 : 1);
+          *d = *s * T((mirror && is_antisym) ? -1 : 1);
         }
         else
-          f(idx, idx_len + 1);
+          f(idx_len + 1);
       }
     } 
   };
 
-  Int idx[View<T>::maxdim];
-  ((Recurse){src, dst}).f(idx, 0);
+  ((Recurse){src, dst}).f(0);
 }
 
 template<typename V, typename Cf>
@@ -268,22 +268,37 @@ template<typename T>
 struct InterleavedWrapperBase<T, true, false>
 {
   std::vector<Int> size;
+  std::vector<Int> symmetric_size;
   T* src;
   T* dst;
   
   InterleavedWrapperBase(const std::vector<Int>& size) :
     size(size),
     src((T*) valloc(sizeof(T) * product(size))),
-    dst((T*) valloc(2 * sizeof(T) * (product(size) / 2 + 1))) { }
+    dst((T*) valloc(2 * sizeof(T) * (product(size) / 2 + 1)))
+  {
+    symmetric_size = size;
+    symmetric_size.back() = symmetric_size.back() / 2 + 1;
+  }
 
   template<typename U>
   void set_input(U* p)
   {
+    copy_view(create_view(p, size, 0), create_view(src, size, 0));
   }
 
   template<typename U>
   void get_output(U* p)
   {
+    Int n = product(size);
+
+    copy_symmetric_view<false>(
+      create_view(dst, symmetric_size, 1),
+      create_view(p, size, 0));
+    
+    copy_symmetric_view<true>(
+      create_view(dst + 1, symmetric_size, 1),
+      create_view(p + n, size, 0));
   }
 };
 
@@ -602,11 +617,11 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
-#if 0 //TODO
   if(Fft0::is_real || Fft1::is_real)
   {
     if(Fft0::is_inverse)
     {
+#if 0
       for(Int i = 1; i < n / 2; i++)
       {
         Int j = n - i;
@@ -616,11 +631,11 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
 
       src[n] = T(0);
       src[n / 2 + n] = T(0);
+#endif
     }
     else
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
   }
-#endif
 
   fft0.set_input(src);
   fft1.set_input(src);
@@ -630,6 +645,10 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
 
   fft0.get_output(dst0);
   fft1.get_output(dst1);
+
+  dump(src, 2 * n, "src.float64");
+  dump(dst0, 2 * n, "dst0.float64");
+  dump(dst1, 2 * n, "dst1.float64");
 
   auto sum_sumsq = T(0);
   auto diff_sumsq = T(0);

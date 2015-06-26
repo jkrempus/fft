@@ -6,7 +6,7 @@ else
 	CXXFLAGS += -std=c++11 -Ofast
 endif
 
-ifdef USE_FFTW
+ifdef FFTW
 	CXXFLAGS += -DHAVE_FFTW
 	LDFLAGS += libfftw3f.a
 endif
