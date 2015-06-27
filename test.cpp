@@ -96,6 +96,13 @@ template<typename T> struct View
     r.data = data + (dim < ndim - 1 ? stride[dim] : 1) * start;
     return r;
   }
+
+  T* ptr(Int* idx)
+  {
+    auto p = data + idx[ndim - 1];
+    for(Int i = 0; i < ndim - 1; i++) p += idx[i] * stride[i];
+    return p;
+  }
 };
 
 Int chunked_index(Int i, Int chunk_size)
@@ -155,18 +162,16 @@ void iterate_multidim(const Int* size, Int size_len, const Fun& fun)
   ((Recurse){size, size_len, fun}).f(0);
 }
 
-
 template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 {
   iterate_multidim(dst.size, dst.ndim, [&src, &dst](Int* idx, Int idx_len)
   {
+    bool mirror = false;
+    for(Int j = 0; j < src.ndim; j++) mirror = mirror || idx[j] >= src.size[j];
+
     T* s = src.data;
     U* d = dst.data;
-    bool mirror = false;
-    for(Int j = 0; j < src.ndim; j++)
-      mirror = mirror || idx[j] >= src.size[j];
-
     for(Int j = 0; j < src.ndim - 1; j++)
     {
       s += src.stride[j] * (mirror ? dst.size[j] - idx[j] : idx[j]);
@@ -625,9 +630,39 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   void transform()
   {
     onedim[0].transform(this->src, this->dst);
-    /*for(Int dim = 0; dim < size.size(); dim++)
+    for(Int dim = 0; dim < this->size.size(); dim++)
     {
-    }*/
+      Int s[maxdim];
+      copy(&this->size[0], this->size.size(), s);
+      s[dim] = 1;
+      iterate_multidim(s, this->size.size(), [this, dim](Int* idx, Int idx_len)
+      {
+        Int n = this->size[dim];
+        working.resize(2 * n);
+        auto src_view = create_view(this->src, this->size, 1);
+        auto dst_view = create_view(this->dst, this->size, 1);
+        auto ps = src_view.ptr(idx);
+        auto pd = dst_view.ptr(idx);
+        if(dim == this->size.size() - 1)
+          onedim[dim].transform(ps, pd);
+        else
+        {
+          for(Int i = 0; i < n; i++)
+          {
+            working[2 * i] = ps[i * src_view.stride[dim]];
+            working[2 * i + 1] = ps[i * src_view.stride[dim] + 1];
+          }
+
+          onedim[dim].transform(&working[0], &working[0]); 
+          
+          for(Int i = 0; i < n; i++)
+          {
+            pd[i * src_view.stride[dim]] = working[2 * i];
+            pd[i * src_view.stride[dim] + 1] = working[2 * i + 1];
+          }
+        }
+      });
+    }
   }
 };
 
