@@ -45,9 +45,10 @@ T* alloc_complex_array(Int n)
   return (T*) valloc(2 * n * sizeof(T));
 }
 
+const int maxdim = 64;
+
 template<typename T> struct View
 {
-  static const int maxdim = 64;
   Int ndim = 0; 
   Int size[maxdim];
   Int stride[maxdim];
@@ -128,48 +129,58 @@ void fill_view(const T& value, const View<U>& dst)
       fill_view(value, dst.get_plane(i));
 }
 
-template<bool is_antisym, typename T, typename U>
-void copy_symmetric_view(const View<T>& src, const View<U>& dst)
+
+template<typename Fun>
+void iterate_multidim(const Int* size, Int size_len, const Fun& fun)
 {
   struct Recurse
   {
-    View<T> src;
-    View<U> dst;
-    Int idx[View<T>::maxdim];
+    const Int* size;
+    Int size_len;
+    const Fun& fun;
+    Int idx[maxdim];
     void f(Int idx_len)
     {
-      for(Int i = 0; i < dst.size[idx_len]; i++)
+      for(Int i = 0; i < size[idx_len]; i++)
       {
         idx[idx_len] = i;
-        if(idx_len == src.ndim - 1)
-        {
-          T* s = src.data;
-          U* d = dst.data;
-          bool mirror = false;
-          for(Int j = 0; j < src.ndim; j++)
-            mirror = mirror || idx[j] >= src.size[j];
-
-          for(Int j = 0; j < src.ndim - 1; j++)
-          {
-            s += src.stride[j] * (mirror ? dst.size[j] - idx[j] : idx[j]);
-            d += dst.stride[j] * idx[j];
-          }
-
-          {
-            Int j = src.ndim - 1;
-            s += chunked_index(mirror ? dst.size[j] - idx[j] : idx[j], src.chunk_size);
-            d += chunked_index(idx[j], dst.chunk_size);
-          }
-
-          *d = *s * T((mirror && is_antisym) ? -1 : 1);
-        }
+        if(idx_len == size_len - 1)
+          fun(idx, size_len);
         else
           f(idx_len + 1);
       }
     } 
   };
 
-  ((Recurse){src, dst}).f(0);
+  ((Recurse){size, size_len, fun}).f(0);
+}
+
+
+template<bool is_antisym, typename T, typename U>
+void copy_symmetric_view(const View<T>& src, const View<U>& dst)
+{
+  iterate_multidim(dst.size, dst.ndim, [&src, &dst](Int* idx, Int idx_len)
+  {
+    T* s = src.data;
+    U* d = dst.data;
+    bool mirror = false;
+    for(Int j = 0; j < src.ndim; j++)
+      mirror = mirror || idx[j] >= src.size[j];
+
+    for(Int j = 0; j < src.ndim - 1; j++)
+    {
+      s += src.stride[j] * (mirror ? dst.size[j] - idx[j] : idx[j]);
+      d += dst.stride[j] * idx[j];
+    }
+
+    {
+      Int j = src.ndim - 1;
+      s += chunked_index(mirror ? dst.size[j] - idx[j] : idx[j], src.chunk_size);
+      d += chunked_index(idx[j], dst.chunk_size);
+    }
+
+    *d = *s * T((mirror && is_antisym) ? -1 : 1);
+  });
 }
 
 template<typename V, typename Cf>
@@ -572,9 +583,10 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 
     void transform(T* src, T* dst)
     {
+      copy(src, 2 * n, dst);
       for(Int dft_size = 1; dft_size < n; dft_size *= 2)
       {
-        copy(dft_size == 1 ? src : dst, 2 * n, &working[0]);
+        copy(dst, 2 * n, &working[0]);
         typedef complex_format::Scal<Scalar<T>> CF;
         Int twiddle_stride = n / 2 / dft_size;
         for(Int i = 0; i < n / 2; i += dft_size)
@@ -602,17 +614,20 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   static const bool is_inverse = is_inverse_;
   typedef T value_type;
   std::vector<Onedim> onedim;
+  std::vector<T> working;
 
   ReferenceFft(const std::vector<Int>& size)
     : InterleavedWrapperBase<T, false, is_inverse_>(size)
   {
     for(auto e : size) onedim.emplace_back(e);
-    
   }
 
   void transform()
   {
     onedim[0].transform(this->src, this->dst);
+    /*for(Int dim = 0; dim < size.size(); dim++)
+    {
+    }*/
   }
 };
 
