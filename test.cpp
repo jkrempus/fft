@@ -521,30 +521,52 @@ struct TestWrapper<V, CfT, true, true>
 
 #ifdef HAVE_FFTW
 template<bool is_real, bool is_inverse, typename T>
-fftwf_plan make_plan(Int n, T* src, T* dst);
+fftwf_plan make_plan(const std::vector<Int>& size, T* src, T* dst);
 
 const unsigned fftw_flags = FFTW_PATIENT;
 
-template<> fftwf_plan make_plan<false, false, float>(Int n, float* src, float* dst)
+template<> fftwf_plan make_plan<false, false, float>(
+  const std::vector<Int>& size, float* src, float* dst)
 {
-  return fftwf_plan_dft_1d(
-    n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_FORWARD, fftw_flags);
+  int idx[maxdim];
+  std::copy_n(&size[0], size.size(), idx);
+  return fftwf_plan_dft(
+    size.size(), idx, 
+    (fftwf_complex*) src, (fftwf_complex*) dst,
+    FFTW_FORWARD, fftw_flags);
 }
 
-template<> fftwf_plan make_plan<false, true, float>(Int n, float* src, float* dst)
+template<> fftwf_plan make_plan<false, true, float>(
+  const std::vector<Int>& size, float* src, float* dst)
 {
-  return fftwf_plan_dft_1d(
-    n, (fftwf_complex*) src, (fftwf_complex*) dst, FFTW_BACKWARD, fftw_flags);
+  int idx[maxdim];
+  std::copy_n(&size[0], size.size(), idx);
+  return fftwf_plan_dft(
+    size.size(), idx, 
+    (fftwf_complex*) src, (fftwf_complex*) dst,
+    FFTW_BACKWARD, fftw_flags);
 }
 
-template<> fftwf_plan make_plan<true, false, float>(Int n, float* src, float* dst)
+template<> fftwf_plan make_plan<true, false, float>(
+  const std::vector<Int>& size, float* src, float* dst)
 {
-  return fftwf_plan_dft_r2c_1d(n, src, (fftwf_complex*) dst, fftw_flags);
+  int idx[maxdim];
+  std::copy_n(&size[0], size.size(), idx);
+  return fftwf_plan_dft_r2c(
+    size.size(), idx, 
+    src, (fftwf_complex*) dst,
+    fftw_flags);
 }
 
-template<> fftwf_plan make_plan<true, true, float>(Int n, float* src, float* dst)
+template<> fftwf_plan make_plan<true, true, float>(
+  const std::vector<Int>& size, float* src, float* dst)
 {
-  return fftwf_plan_dft_c2r_1d(n, (fftwf_complex*) src, dst, fftw_flags);
+  int idx[maxdim];
+  std::copy_n(&size[0], size.size(), idx);
+  return fftwf_plan_dft_c2r(
+    size.size(), idx, 
+    (fftwf_complex*) src, dst,
+    fftw_flags);
 }
 
 template<typename T, bool is_real_, bool is_inverse_>
@@ -558,7 +580,7 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
   FftwTestWrapper(const std::vector<Int>& size)
     : InterleavedWrapperBase<T, is_real, is_inverse_>(size)
   {
-    plan = make_plan<is_real, is_inverse_>(size[0], this->src, this->dst);
+    plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
   }
 
   ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
@@ -838,7 +860,7 @@ void test_or_bench0(const Options& opt)
 int main(int argc, char** argv)
 {
   Options opt = parse_options(argc, argv);
-  if(opt.positional.size() != 2) abort();
+  if(opt.positional.size() < 2) abort();
   test_or_bench0(opt);
   return 0;
 }
