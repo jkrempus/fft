@@ -244,6 +244,47 @@ struct SplitWrapperBase<T, false, is_inverse_>
   }
 };
 
+template<typename T>
+struct SplitWrapperBase<T, true, false>
+{
+  Int im_off;
+  std::vector<Int> size;
+  std::vector<Int> symmetric_size;
+  T* src;
+  T* dst;
+  
+  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
+    im_off(im_off),
+    size(size),
+    src((T*) valloc(sizeof(T) * product(size))),
+    dst((T*) valloc(2 * sizeof(T) * im_off))
+  {
+    symmetric_size = size;
+    symmetric_size.back() = symmetric_size.back() / 2 + 1;
+  }
+
+  template<typename U>
+  void set_input(U* p)
+  {
+    copy_view(create_view(p, size, 0), create_view(src, size, 0));
+  }
+
+  template<typename U>
+  void get_output(U* p)
+  {
+    Int n = product(size);
+
+    copy_symmetric_view<false>(
+      create_view(dst, symmetric_size, 0),
+      create_view(p, size, 0));
+    
+    copy_symmetric_view<true>(
+      create_view(dst + im_off, symmetric_size, 0),
+      create_view(p + n, size, 0));
+  }
+};
+
+
 template<typename T, bool is_real, bool is_inverse>
 struct InterleavedWrapperBase { };
 
@@ -395,49 +436,28 @@ struct TestWrapper<V, CfT, false, true>
 
 template<typename V, template<typename> class CfT>
 struct TestWrapper<V, CfT, true, false>
+: public SplitWrapperBase<typename V::T, true, false>
 {
   static const bool is_real = true;
   static const bool is_inverse = false;
   VEC_TYPEDEFS(V);
-  typedef T value_type;
+  typedef typename V::T value_type;
   RealState<T>* state;
-  InverseRealState<T>* inverse_state;
-  Int n;
-  Int im_offset;
-  T* src;
-  T* dst;
-  TestWrapper(const std::vector<Int>& size) :
-    state(rfft_state<V, CfT>(size[0], valloc(rfft_state_memory_size<V>(size[0])))),
-    n(size[0]),
-    im_offset(align_size<T>(size[0] / 2 + 1))
+
+  static Int im_offset(const std::vector<Int>& size)
   {
-    src = (T*) valloc(n * sizeof(T));
-    dst = (T*) valloc(2 * im_offset * sizeof(T));
-    inverse_state = 
-      inverse_rfft_state<V, CfT>(n, valloc(rfft_state_memory_size<V>(n)));
+    return align_size<T>(size[0] / 2 + 1);
   }
 
-  ~TestWrapper()
-  {
-    free(rfft_state_memory_ptr(state));
-    free(src);
-    free(dst);
-  }
+  TestWrapper(const std::vector<Int>& size) :
+    SplitWrapperBase<T, true, false>(size, im_offset(size)),
+    state(rfft_state<V, CfT>(size[0], valloc(rfft_state_memory_size<V>(size[0])))) {}
+
+  ~TestWrapper() { free(rfft_state_memory_ptr(state)); }
 
   void transform()
   {
-    rfft(state, src, dst);
-    inverse_rfft(inverse_state, dst, src);
-  }
-
-  template<typename U>
-  void set_input(U* p)
-  {
-  }
-
-  template<typename U>
-  void get_output(U* p)
-  {
+    rfft(state, this->src, this->dst);
   }
 };
 
@@ -546,7 +566,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
       auto pi = std::acos(T(-1));
       for(Int i = 0; i < n / 2; i++)
       {
-        auto phi = (is_inverse ? 1 : -1) * i * pi / (n / 2);
+        auto phi = (is_inverse_ ? 1 : -1) * i * pi / (n / 2);
         twiddle[i] = {std::cos(phi), std::sin(phi)};
       }
     }
@@ -559,14 +579,11 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 
     void transform(T* src, T* dst)
     {
-      copy(src, 2 * n, dst);
       for(Int dft_size = 1; dft_size < n; dft_size *= 2)
       {
-        swap(dst, working);
-
+        copy(dft_size == 1 ? src : dst, 2 * n, working);
         typedef complex_format::Scal<Scalar<T>> CF;
         Int twiddle_stride = n / 2 / dft_size;
-
         for(Int i = 0; i < n / 2; i += dft_size)
         {
           Int src_i = i;
