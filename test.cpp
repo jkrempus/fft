@@ -556,13 +556,12 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 {
   struct Onedim
   {
-    Complex<T>* twiddle;
-    T* working;
+    std::vector<Complex<T>> twiddle;
+    std::vector<T> working;
     Int n;
-    Onedim(Int n) : n(n)
+    
+    Onedim(Int n) : n(n), working(2 * n), twiddle(n / 2)
     {
-      working = new T[2 * n];
-      twiddle = new Complex<T>[n / 2];
       auto pi = std::acos(T(-1));
       for(Int i = 0; i < n / 2; i++)
       {
@@ -571,17 +570,11 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
       }
     }
 
-    ~Onedim()
-    {
-      delete twiddle;
-      delete working;
-    }
-
     void transform(T* src, T* dst)
     {
       for(Int dft_size = 1; dft_size < n; dft_size *= 2)
       {
-        copy(dft_size == 1 ? src : dst, 2 * n, working);
+        copy(dft_size == 1 ? src : dst, 2 * n, &working[0]);
         typedef complex_format::Scal<Scalar<T>> CF;
         Int twiddle_stride = n / 2 / dft_size;
         for(Int i = 0; i < n / 2; i += dft_size)
@@ -591,8 +584,8 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
           Int twiddle_i = 0;
           for(; src_i < i + dft_size;)
           {
-            auto a = CF::load(working + src_i * CF::stride, 0);
-            auto b = CF::load(working + (src_i + n / 2) * CF::stride, 0);
+            auto a = CF::load(&working[0] + src_i * CF::stride, 0);
+            auto b = CF::load(&working[0] + (src_i + n / 2) * CF::stride, 0);
             auto mul = twiddle[twiddle_i] * b;
             CF::store(a + mul, dst + dst_i * CF::stride, 0);
             CF::store(a - mul, dst + (dst_i + dft_size) * CF::stride, 0);
@@ -608,12 +601,19 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   static const bool is_real = false;
   static const bool is_inverse = is_inverse_;
   typedef T value_type;
-  Onedim onedim;
+  std::vector<Onedim> onedim;
 
   ReferenceFft(const std::vector<Int>& size)
-    : InterleavedWrapperBase<T, false, is_inverse_>(size), onedim(size[0]) { }
+    : InterleavedWrapperBase<T, false, is_inverse_>(size)
+  {
+    for(auto e : size) onedim.emplace_back(e);
+    
+  }
 
-  void transform() { onedim.transform(this->src, this->dst); }
+  void transform()
+  {
+    onedim[0].transform(this->src, this->dst);
+  }
 };
 
 template<typename Fft>
