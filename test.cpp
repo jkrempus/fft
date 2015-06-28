@@ -99,7 +99,7 @@ template<typename T> struct View
     return r;
   }
 
-  T* ptr(Int* idx)
+  T* ptr(Int* idx) const
   {
     auto p = data + idx[ndim - 1];
     for(Int i = 0; i < ndim - 1; i++) p += idx[i] * stride[i];
@@ -173,8 +173,6 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
     bool mirror = false;
     for(Int j = 0; j < src.ndim; j++) mirror = mirror || idx[j] >= src.size[j];
     
-    printf("idx %d %d %d %d\n", idx_len, idx[0], idx[1], mirror);
-
     T* s = src.data;
     U* d = dst.data;
     for(Int j = 0; j < src.ndim - 1; j++)
@@ -208,20 +206,31 @@ constexpr Int get_im_offset(Int split_im_offset)
 }
 
 template<typename T>
+void print_view(const View<T>& v)
+{
+  printf("view %p (");
+  for(Int i = 0; i < v.ndim; i++) printf("%s%d", i == 0 ? "" : " ", v.size[i]);
+  printf(") (");
+  for(Int i = 0; i < v.ndim - 1; i++) printf("%s%d", i == 0 ? "" : " ", v.stride[i]);
+  printf(")\n");
+}
+
+template<typename T>
 View<T> create_view(T* ptr, const std::vector<Int>& size, Int chunk_size)
 {
   View<T> r;
   r.ndim = size.size();
   std::copy_n(&size[0], r.ndim, r.size); 
-  Int s = chunk_size;
+  Int s = chunk_size ? 2 : 1;
   for(Int i = r.ndim - 1; i > 0; i--)
   {
-    s *= r.size[0];
-    r.stride[i - 1] = 0;
+    s *= r.size[i];
+    r.stride[i - 1] = s;
   }
 
   r.data = ptr;
   r.chunk_size = chunk_size;
+  //printf("create_view "); print_view(r);
   return r;
 }
 
@@ -325,10 +334,10 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   void set_input(U* p)
   {
     Int n = product(size);
-    array_ipc::send_array("a", p, 2 * n);
+    array_ipc::send("a", p, 2 * n);
     copy_view(create_view(p, size, 0), create_view(src, size, 1));
     copy_view(create_view(p + n, size, 0), create_view(src + 1, size, 1));
-    array_ipc::send_array("a", src, 2 * n);
+    array_ipc::send("a", src, 2 * n);
   }
 
   template<typename U>
@@ -366,8 +375,6 @@ struct InterleavedWrapperBase<T, true, false>
   void get_output(U* p)
   {
     Int n = product(size);
-
-    dump(dst, 2 * product(symmetric_size), "tmp.float32");
 
     copy_symmetric_view<false>(
       create_view(dst, symmetric_size, 1),
@@ -588,7 +595,6 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
   FftwTestWrapper(const std::vector<Int>& size)
     : InterleavedWrapperBase<T, is_real, is_inverse_>(size)
   {
-    printf("size0 %d %d %d\n", size.size(), size[0], size[1]);
     plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
   }
 
@@ -598,7 +604,6 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
   {
     Int n = product(this->size);
     fftwf_execute(plan);
-    //dump(this->dst, 2 * n, "b.float32");
   }
 };
 #endif
@@ -665,36 +670,35 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 
   void transform()
   {
-    onedim[0].transform(this->src, this->dst);
+    copy(this->src, 2 * product(this->size), this->dst);
     for(Int dim = 0; dim < this->size.size(); dim++)
     {
       Int s[maxdim];
       copy(&this->size[0], this->size.size(), s);
       s[dim] = 1;
-      iterate_multidim(s, this->size.size(), [this, dim](Int* idx, Int idx_len)
+      auto dst_view = create_view(this->dst, this->size, 1);
+      iterate_multidim(s, this->size.size(),
+      [this, dim, dst_view](Int* idx, Int idx_len)
       {
         Int n = this->size[dim];
         working.resize(2 * n);
-        auto src_view = create_view(this->src, this->size, 1);
-        auto dst_view = create_view(this->dst, this->size, 1);
-        auto ps = src_view.ptr(idx);
-        auto pd = dst_view.ptr(idx);
+        auto p = dst_view.ptr(idx);
         if(dim == this->size.size() - 1)
-          onedim[dim].transform(ps, pd);
+          onedim[dim].transform(p, p);
         else
         {
           for(Int i = 0; i < n; i++)
           {
-            working[2 * i] = ps[i * src_view.stride[dim]];
-            working[2 * i + 1] = ps[i * src_view.stride[dim] + 1];
+            working[2 * i] = p[i * dst_view.stride[dim]];
+            working[2 * i + 1] = p[i * dst_view.stride[dim] + 1];
           }
 
           onedim[dim].transform(&working[0], &working[0]); 
           
           for(Int i = 0; i < n; i++)
           {
-            pd[i * src_view.stride[dim]] = working[2 * i];
-            pd[i * src_view.stride[dim] + 1] = working[2 * i + 1];
+            p[i * dst_view.stride[dim]] = working[2 * i];
+            p[i * dst_view.stride[dim] + 1] = working[2 * i + 1];
           }
         }
       });
@@ -765,9 +769,9 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   fft0.get_output(dst0);
   fft1.get_output(dst1);
 
-  dump(src, 2 * n, "src.float64");
-  dump(dst0, 2 * n, "dst0.float64");
-  dump(dst1, 2 * n, "dst1.float64");
+  array_ipc::send("s", src, 2 * n);
+  array_ipc::send("d0", dst0, 2 * n);
+  array_ipc::send("d1", dst1, 2 * n);
 
   auto sum_sumsq = T(0);
   auto diff_sumsq = T(0);

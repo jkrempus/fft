@@ -10,10 +10,7 @@
 namespace array_ipc
 {
 
-enum class PackageType
-{
-  onedim_array,
-};
+enum class PackageType { onedim_array };
 
 template<typename T> int64_t element_type_id();
 
@@ -25,7 +22,11 @@ void write_all(int sock, const void* buf, size_t n)
   while(n > 0)
   {
     int r = write(sock, buf, n);
-    if(r <= 0)  abort();
+    if(r <= 0) 
+    {
+      perror("write()\n");
+      abort();
+    }
     n -= r;
     buf = (void*)(size_t(buf) + r);
   }
@@ -56,16 +57,18 @@ static int uds_connect(const char* name)
 {
   int sock = socket(AF_UNIX, SOCK_STREAM, 0);
   if (sock < 0) {
-    perror("opening stream socket");
-    exit(1);
+    perror("socket()\n");
+    abort();
   }
 
   struct sockaddr_un server;
   server.sun_family = AF_UNIX;
   strcpy(server.sun_path, name);
 
-  if (connect(sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un)) < 0) {
+  int r = connect(sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un));
+  if (r < 0) {
     close(sock);
+    perror("connect()");
     abort();
   }
 
@@ -73,7 +76,7 @@ static int uds_connect(const char* name)
 }
 
 template<typename T>
-void send_array(const char* name, T* ptr, size_t len)
+void send(const char* name, T* ptr, size_t len)
 {
   int sock = uds_connect("/tmp/array_ipc");
   write_array(sock, name, ptr, len);
@@ -85,7 +88,7 @@ void send_array(const char* name, T* ptr, size_t len)
 int main()
 {
   float a[] = {1, 2, 3, 4};
-  array_ipc::send_array("a", a, 4);
+  array_ipc::send("a", a, 4);
   return 0;
 }
 #endif

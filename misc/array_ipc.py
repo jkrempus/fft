@@ -3,6 +3,7 @@ from ctypes import *
 import socket
 import os
 import sys
+import threading
 
 elemetype_dict = { 0 : float32, 1 : float64 }
 
@@ -36,7 +37,7 @@ def read_array(sock):
 
     return name, r;
 
-def listen(address, callback):
+def create_server(address):
     try: 
         os.unlink(address)
     except:
@@ -44,7 +45,26 @@ def listen(address, callback):
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(address)
-    server.listen(5)
+    server.listen(100)
+    return server
+
+
+def listen_loop(server, callback):
     while True:
+        print "accepting..."
         sock, _ = server.accept()
+        print "accepted."
         callback(*read_array(sock))
+        print "done."
+        sock.close()
+
+received = dict()
+def store_callback(name, arr):
+    received[name] = received.get(name, [])
+    received[name].append(arr)
+
+def listen(address, callback = store_callback):
+    server = create_server(address) 
+    threading.Thread(target=listen_loop, args=(server, callback)).start()
+    return server
+
