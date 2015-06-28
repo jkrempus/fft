@@ -17,6 +17,8 @@
 #include "fftw3.h"
 #endif
 
+#include "misc/array_ipc.h"
+
 extern "C" void* valloc(size_t);
 
 double get_time()
@@ -323,10 +325,10 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   void set_input(U* p)
   {
     Int n = product(size);
-    if(sizeof(T) == 4) dump(p, 2 * n, "a.float32");
+    array_ipc::send_array("a", p, 2 * n);
     copy_view(create_view(p, size, 0), create_view(src, size, 1));
     copy_view(create_view(p + n, size, 0), create_view(src + 1, size, 1));
-    if(sizeof(T) == 4) dump(src, 2 * n, "b.float32");
+    array_ipc::send_array("a", src, 2 * n);
   }
 
   template<typename U>

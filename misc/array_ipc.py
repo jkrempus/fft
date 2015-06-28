@@ -34,7 +34,7 @@ def read_array(sock):
     r = zeros((data_len), dtype=elemtype)
     memmove(r.ctypes.data, create_string_buffer(data), byte_len);
 
-    return r;
+    return name, r;
 
 def listen(address, callback):
     try: 
@@ -44,7 +44,7 @@ def listen(address, callback):
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(address)
-    server.listen(1)
+    server.listen(5)
     while True:
         sock, _ = server.accept()
         callback(*read_array(sock))
