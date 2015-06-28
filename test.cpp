@@ -49,6 +49,14 @@ T* alloc_complex_array(Int n)
 
 const int maxdim = 64;
 
+Int chunked_index(Int i, Int chunk_size)
+{
+  if(chunk_size == 0)
+    return i;
+  else
+    return 2 * i - (i & (chunk_size - 1));
+}
+
 template<typename T> struct View
 {
   Int ndim = 0; 
@@ -101,19 +109,11 @@ template<typename T> struct View
 
   T* ptr(Int* idx) const
   {
-    auto p = data + idx[ndim - 1];
+    auto p = data + chunked_index(idx[ndim - 1], chunk_size);
     for(Int i = 0; i < ndim - 1; i++) p += idx[i] * stride[i];
     return p;
   }
 };
-
-Int chunked_index(Int i, Int chunk_size)
-{
-  if(chunk_size == 0)
-    return i;
-  else
-    return 2 * i - (i & (chunk_size - 1));
-}
 
 template<typename T, typename U>
 void copy_view(const View<T>& src, const View<U>& dst)
@@ -678,13 +678,15 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
       s[dim] = 1;
       auto dst_view = create_view(this->dst, this->size, 1);
       iterate_multidim(s, this->size.size(),
-      [this, dim, dst_view](Int* idx, Int idx_len)
+        [this, dim, dst_view](Int* idx, Int idx_len)
       {
         Int n = this->size[dim];
         working.resize(2 * n);
         auto p = dst_view.ptr(idx);
         if(dim == this->size.size() - 1)
+        {
           onedim[dim].transform(p, p);
+        }
         else
         {
           for(Int i = 0; i < n; i++)
