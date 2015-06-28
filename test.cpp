@@ -165,10 +165,13 @@ void iterate_multidim(const Int* size, Int size_len, const Fun& fun)
 template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 {
+  printf("size %d %d %d\n", src.ndim, dst.size[0], dst.size[1]);
   iterate_multidim(dst.size, dst.ndim, [&src, &dst](Int* idx, Int idx_len)
   {
     bool mirror = false;
     for(Int j = 0; j < src.ndim; j++) mirror = mirror || idx[j] >= src.size[j];
+    
+    printf("idx %d %d %d %d\n", idx_len, idx[0], idx[1], mirror);
 
     T* s = src.data;
     U* d = dst.data;
@@ -320,8 +323,10 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   void set_input(U* p)
   {
     Int n = product(size);
+    if(sizeof(T) == 4) dump(p, 2 * n, "a.float32");
     copy_view(create_view(p, size, 0), create_view(src, size, 1));
     copy_view(create_view(p + n, size, 0), create_view(src + 1, size, 1));
+    if(sizeof(T) == 4) dump(src, 2 * n, "b.float32");
   }
 
   template<typename U>
@@ -341,13 +346,12 @@ struct InterleavedWrapperBase<T, true, false>
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(const std::vector<Int>& size) :
-    size(size),
-    src((T*) valloc(sizeof(T) * product(size))),
-    dst((T*) valloc(2 * sizeof(T) * (product(size) / 2 + 1)))
+  InterleavedWrapperBase(const std::vector<Int>& size) : size(size)
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
+    dst = (T*) valloc(2 * sizeof(T) * product(symmetric_size));
+    src = (T*) valloc(sizeof(T) * product(size));
   }
 
   template<typename U>
@@ -360,6 +364,8 @@ struct InterleavedWrapperBase<T, true, false>
   void get_output(U* p)
   {
     Int n = product(size);
+
+    dump(dst, 2 * product(symmetric_size), "tmp.float32");
 
     copy_symmetric_view<false>(
       create_view(dst, symmetric_size, 1),
@@ -580,12 +586,18 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
   FftwTestWrapper(const std::vector<Int>& size)
     : InterleavedWrapperBase<T, is_real, is_inverse_>(size)
   {
+    printf("size0 %d %d %d\n", size.size(), size[0], size[1]);
     plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
   }
 
   ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
 
-  void transform() { fftwf_execute(plan); }
+  void transform()
+  {
+    Int n = product(this->size);
+    fftwf_execute(plan);
+    //dump(this->dst, 2 * n, "b.float32");
+  }
 };
 #endif
 
@@ -817,7 +829,7 @@ void test_or_bench3(const Options& opt)
   for(Int i = 1; i < opt.positional.size(); i++)
   {    
     Int log2n;
-    std::stringstream(opt.positional[1]) >> log2n;
+    std::stringstream(opt.positional[i]) >> log2n;
     size.push_back(1 << log2n);
   }
 
