@@ -172,18 +172,23 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
   {
     bool mirror = false;
     for(Int j = 0; j < src.ndim; j++) mirror = mirror || idx[j] >= src.size[j];
-    
+
     T* s = src.data;
     U* d = dst.data;
     for(Int j = 0; j < src.ndim - 1; j++)
     {
-      s += src.stride[j] * (mirror ? dst.size[j] - idx[j] : idx[j]);
+      s += src.stride[j] *
+      (mirror ? (dst.size[j] - 1) & (dst.size[j] - idx[j]) : idx[j]);
+
       d += dst.stride[j] * idx[j];
     }
 
     {
       Int j = src.ndim - 1;
-      s += chunked_index(mirror ? dst.size[j] - idx[j] : idx[j], src.chunk_size);
+      s += chunked_index(
+        mirror ? (dst.size[j] - 1) & (dst.size[j] - idx[j]) : idx[j],
+        src.chunk_size);
+
       d += chunked_index(idx[j], dst.chunk_size);
     }
 
