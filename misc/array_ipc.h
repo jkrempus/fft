@@ -67,9 +67,11 @@ static int uds_connect(const char* name)
 
   int r = connect(sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un));
   if (r < 0) {
+    /*
     close(sock);
     perror("connect()");
-    abort();
+    abort();*/
+    return -1;
   }
 
   return sock;
@@ -79,8 +81,11 @@ template<typename T>
 void send(const char* name, T* ptr, size_t len)
 {
   int sock = uds_connect("/tmp/array_ipc");
-  write_array(sock, name, ptr, len);
-  close(sock);  
+  if(sock >= 0)
+  {
+    write_array(sock, name, ptr, len);
+    close(sock);  
+  }
 }
 }
 

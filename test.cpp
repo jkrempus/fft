@@ -139,61 +139,35 @@ void fill_view(const T& value, const View<U>& dst)
 }
 
 
-template<typename Fun>
-void iterate_multidim(const Int* size, Int size_len, const Fun& fun)
-{
-  struct Recurse
-  {
-    const Int* size;
-    Int size_len;
-    const Fun& fun;
-    Int idx[maxdim];
-    void f(Int idx_len)
-    {
-      for(Int i = 0; i < size[idx_len]; i++)
-      {
-        idx[idx_len] = i;
-        if(idx_len == size_len - 1)
-          fun(idx, size_len);
-        else
-          f(idx_len + 1);
-      }
-    } 
-  };
-
-  ((Recurse){size, size_len, fun}).f(0);
-}
-
 template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 {
-  printf("size %d %d %d\n", src.ndim, dst.size[0], dst.size[1]);
-  iterate_multidim(dst.size, dst.ndim, [&src, &dst](Int* idx, Int idx_len)
+  for(IterateMultidim it(dst.ndim, dst.size); !it.empty(); it.advance())
   {
     bool mirror = false;
-    for(Int j = 0; j < src.ndim; j++) mirror = mirror || idx[j] >= src.size[j];
+    for(Int j = 0; j < src.ndim; j++) mirror = mirror || it.idx[j] >= src.size[j];
 
     T* s = src.data;
     U* d = dst.data;
     for(Int j = 0; j < src.ndim - 1; j++)
     {
       s += src.stride[j] *
-      (mirror ? (dst.size[j] - 1) & (dst.size[j] - idx[j]) : idx[j]);
+      (mirror ? (dst.size[j] - 1) & (dst.size[j] - it.idx[j]) : it.idx[j]);
 
-      d += dst.stride[j] * idx[j];
+      d += dst.stride[j] * it.idx[j];
     }
 
     {
       Int j = src.ndim - 1;
       s += chunked_index(
-        mirror ? (dst.size[j] - 1) & (dst.size[j] - idx[j]) : idx[j],
+        mirror ? (dst.size[j] - 1) & (dst.size[j] - it.idx[j]) : it.idx[j],
         src.chunk_size);
 
-      d += chunked_index(idx[j], dst.chunk_size);
+      d += chunked_index(it.idx[j], dst.chunk_size);
     }
 
     *d = *s * T((mirror && is_antisym) ? -1 : 1);
-  });
+  }
 }
 
 template<typename V, typename Cf>
@@ -682,12 +656,11 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
       copy(&this->size[0], this->size.size(), s);
       s[dim] = 1;
       auto dst_view = create_view(this->dst, this->size, 1);
-      iterate_multidim(s, this->size.size(),
-        [this, dim, dst_view](Int* idx, Int idx_len)
+      for(IterateMultidim it(this->size.size(), s); !it.empty(); it.advance())
       {
         Int n = this->size[dim];
         working.resize(2 * n);
-        auto p = dst_view.ptr(idx);
+        auto p = dst_view.ptr(it.idx);
         if(dim == this->size.size() - 1)
         {
           onedim[dim].transform(p, p);
@@ -708,7 +681,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
             p[i * dst_view.stride[dim] + 1] = working[2 * i + 1];
           }
         }
-      });
+      }
     }
   }
 };

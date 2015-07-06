@@ -86,6 +86,36 @@ struct BitReversed
   }
 };
 
+struct IterateMultidim
+{
+  Int ndim;
+  const Int* size;  
+  Int idx[sizeof(Int) * 8];
+
+  IterateMultidim(Int ndim, const Int* size) : ndim(ndim), size(size)
+  {
+    ASSERT(ndim < sizeof(idx) / sizeof(idx[0]));
+    for(Int i = 0; i < ndim; i++) idx[i] = 0;
+  }
+
+  bool empty()
+  {
+    return idx[0] == size[0];
+  }
+
+  void advance()
+  {
+    for(Int i = ndim - 1; i >= 0; i--)
+    {
+      idx[i]++;
+      if(idx[i] < size[i]) return;
+      idx[i] = 0;
+    }
+
+    idx[0] = size[0];
+  }
+};
+
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
 {
@@ -2087,3 +2117,9 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
+struct StridedState
+{
+  Int n;
+  Int im_off;
+  Int* br_table;
+};
