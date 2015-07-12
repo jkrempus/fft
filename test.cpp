@@ -138,6 +138,7 @@ void fill_view(const T& value, const View<U>& dst)
       fill_view(value, dst.plane(i));
 }
 
+Int mirror_idx(Int size, Int idx) { return (size - 1) & (size - idx); }
 
 template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
@@ -150,31 +151,18 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
     Int s = 0;
     Int s_mirrored = 0;
     Int d = 0;
-    for(Int j = 0; j < src.ndim - 1; j++)
-    {
-      s += src.stride[j] * it.idx[j];
-      s_mirrored += src.stride[j] * ((dst.size[j] - 1) & (dst.size[j] - it.idx[j]));
-      d += dst.stride[j] * it.idx[j];
-    }
-
-    {
-      Int j = src.ndim - 1;
-      s += chunked_index(it.idx[j], src.chunk_size);
-      s_mirrored += chunked_index(
-        (dst.size[j] - 1) & (dst.size[j] - it.idx[j]), src.chunk_size);
-
-      d += chunked_index(it.idx[j], dst.chunk_size);
-    }
+    Int midx[maxdim];
+    for(Int j = 0; j < src.ndim; j++) midx[j] = mirror_idx(dst.size[j], it.idx[j]);
 
     if(is_antisym)
     {
-      if(s == s_mirrored)
-        dst.data[d] = 0;
+      if(it.idx == midx)
+        *dst.ptr(it.idx) = 0;
       else
-        dst.data[d] = mirror ? -src.data[s_mirrored] : src.data[s];
+        *dst.ptr(it.idx) = mirror ? -*src.ptr(midx) : *src.ptr(it.idx);
     }
     else
-      dst.data[d] = mirror ? src.data[s_mirrored] : src.data[s];
+      *dst.ptr(it.idx) = mirror ? *src.ptr(midx) : *src.ptr(it.idx);
   }
 }
 
@@ -737,11 +725,28 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   {
     if(Fft0::is_inverse)
     {
-      auto re = create_view(src, size, 0);
-      copy_symmetric_view<false>(re.sub(0, 0, size[0] / 2 + 1), re);
+      auto tmp = new T[2 * n];
 
-      auto im = create_view(src + n, size, 0);
-      copy_symmetric_view<true>(im.sub(0, 0, size[0] / 2 + 1 ), im);
+      auto tmp_re = create_view(tmp, size, 0);
+      auto src_re = create_view(src, size, 0);
+      auto tmp_im = create_view(tmp + n, size, 0);
+      auto src_im = create_view(src + n, size, 0);
+      copy_view(src_re, tmp_re);
+      copy_view(src_im, tmp_im);
+      for(IterateMultidim it(src_re.ndim, src_re.size); !it.empty(); it.advance())
+      {
+        Int midx[maxdim];
+        for(Int i = 0; i < src_re.ndim; i++)
+          midx[i] = mirror_idx(src_re.size[i], it.idx[i]);
+
+        *src_re.ptr(it.idx) = *tmp_re.ptr(it.idx) + *tmp_re.ptr(midx);
+        *src_re.ptr(midx) = *tmp_re.ptr(it.idx) + *tmp_re.ptr(midx);
+        
+        *src_im.ptr(it.idx) = *tmp_im.ptr(midx) - *tmp_im.ptr(it.idx);
+        *src_im.ptr(midx) = *tmp_im.ptr(it.idx) - *tmp_im.ptr(midx);
+      }
+
+      delete [] tmp;
     }
     else
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
