@@ -84,7 +84,7 @@ template<typename T> struct View
     return *this;
   }
 
-  View get_plane(Int i) const
+  View plane(Int i) const
   {
     View<T> r;
     r.ndim = ndim - 1;
@@ -124,7 +124,7 @@ void copy_view(const View<T>& src, const View<U>& dst)
         src.data[chunked_index(i, src.chunk_size)];
   else
     for(Int i = 0; i < std::min(src.size[0], dst.size[0]); i++)
-      copy_view(src.get_plane(i), dst.get_plane(i));
+      copy_view(src.plane(i), dst.plane(i));
 }
 
 template<typename T, typename U>
@@ -135,7 +135,7 @@ void fill_view(const T& value, const View<U>& dst)
       dst.data[chunked_index(i, dst.chunk_size)] = value;
   else
     for(Int i = 0; i < dst.size[0]; i++)
-      fill_view(value, dst.get_plane(i));
+      fill_view(value, dst.plane(i));
 }
 
 
@@ -147,26 +147,34 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
     bool mirror = false;
     for(Int j = 0; j < src.ndim; j++) mirror = mirror || it.idx[j] >= src.size[j];
 
-    T* s = src.data;
-    U* d = dst.data;
+    Int s = 0;
+    Int s_mirrored = 0;
+    Int d = 0;
     for(Int j = 0; j < src.ndim - 1; j++)
     {
-      s += src.stride[j] *
-      (mirror ? (dst.size[j] - 1) & (dst.size[j] - it.idx[j]) : it.idx[j]);
-
+      s += src.stride[j] * it.idx[j];
+      s_mirrored += src.stride[j] * ((dst.size[j] - 1) & (dst.size[j] - it.idx[j]));
       d += dst.stride[j] * it.idx[j];
     }
 
     {
       Int j = src.ndim - 1;
-      s += chunked_index(
-        mirror ? (dst.size[j] - 1) & (dst.size[j] - it.idx[j]) : it.idx[j],
-        src.chunk_size);
+      s += chunked_index(it.idx[j], src.chunk_size);
+      s_mirrored += chunked_index(
+        (dst.size[j] - 1) & (dst.size[j] - it.idx[j]), src.chunk_size);
 
       d += chunked_index(it.idx[j], dst.chunk_size);
     }
 
-    *d = *s * T((mirror && is_antisym) ? -1 : 1);
+    if(is_antisym)
+    {
+      if(s == s_mirrored)
+        dst.data[d] = 0;
+      else
+        dst.data[d] = mirror ? -src.data[s_mirrored] : src.data[s];
+    }
+    else
+      dst.data[d] = mirror ? src.data[s_mirrored] : src.data[s];
   }
 }
 
@@ -313,10 +321,8 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   void set_input(U* p)
   {
     Int n = product(size);
-    array_ipc::send("a", p, 2 * n);
     copy_view(create_view(p, size, 0), create_view(src, size, 1));
     copy_view(create_view(p + n, size, 0), create_view(src + 1, size, 1));
-    array_ipc::send("a", src, 2 * n);
   }
 
   template<typename U>
@@ -724,6 +730,9 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
+  
+  array_ipc::send("s_before", src, 2 * n);
+
   if(Fft0::is_real || Fft1::is_real)
   {
     if(Fft0::is_inverse)
@@ -733,12 +742,12 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
 
       auto im = create_view(src + n, size, 0);
       copy_symmetric_view<true>(im.sub(0, 0, size[0] / 2 + 1 ), im);
-      src[n + n / 2] = 0;
-      src[n] = 0;
     }
     else
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
   }
+  
+  array_ipc::send("s", src, 2 * n);
 
   fft0.set_input(src);
   fft1.set_input(src);
@@ -749,7 +758,6 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   fft0.get_output(dst0);
   fft1.get_output(dst1);
 
-  array_ipc::send("s", src, 2 * n);
   array_ipc::send("d0", dst0, 2 * n);
   array_ipc::send("d1", dst1, 2 * n);
 

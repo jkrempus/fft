@@ -98,10 +98,7 @@ struct IterateMultidim
     for(Int i = 0; i < ndim; i++) idx[i] = 0;
   }
 
-  bool empty()
-  {
-    return idx[0] == size[0];
-  }
+  bool empty() { return idx[0] == size[0]; }
 
   void advance()
   {
@@ -2117,9 +2114,33 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
+template<typename T>
 struct StridedState
 {
   Int n;
   Int im_off;
+  T* working0;
+  T* working1;
+  T* twiddle;
   Int* br_table;
+  T* tiny_twiddle;
 };
+
+
+template<typename V>
+Int strided_state_struct_offset(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return 
+    2 * n * sizeof(T) + // working0
+    2 * n * sizeof(T) + // working1
+    2 * n * sizeof(T) + // twiddle
+    n * sizeof(Int);    // br_table
+}
+
+template<typename V>
+Int strided_fft_state_memory_size(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return strided_state_struct_offset<V>(n) + sizeof(StridedState<T>);
+}

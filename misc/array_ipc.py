@@ -58,7 +58,10 @@ def listen_loop(server, callback):
         print "done."
         sock.close()
 
-received = dict()
+class Received(dict):
+    def __getattr__(self, key): return self[key][-1]
+
+received = Received()
 def store_callback(name, arr):
     received[name] = received.get(name, [])
     received[name].append(arr)
