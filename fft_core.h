@@ -827,14 +827,16 @@ void compute_twiddle(
       end_re - size, end_im - size);
 }
 
-template<typename V>
-void init_twiddle(State<typename V::T>& state)
+template<typename V, typename NumPassesCallback>
+void init_twiddle(
+  const NumPassesCallback& num_passes_callback,
+  Int n,
+  typename V::T* working,
+  typename V::T* dst,
+  typename V::T* tiny_dst)
 {
   VEC_TYPEDEFS(V);
 
-  auto dst = state.twiddle;
-  auto n = state.n;
-  auto im_off = state.im_off;
   auto end_re = dst + n;
   auto end_im = dst + 2 * n;
   end_re[-1] = T(0);
@@ -850,7 +852,7 @@ void init_twiddle(State<typename V::T>& state)
 
   for(Int size = 2; size < V::vec_size; size *= 2)
   {
-    auto re = state.tiny_twiddle + 2 * V::vec_size * tiny_log2(size);
+    auto re = tiny_dst + 2 * V::vec_size * tiny_log2(size);
     auto im = re + V::vec_size;
 
     for(Int j = 0; j < V::vec_size; j++)
@@ -863,32 +865,31 @@ void init_twiddle(State<typename V::T>& state)
   for(Int si = 0, di = 0; si < n;
     si += cf::Split<V>::stride, di += cf::Vec<V>::stride)
   {
-    cf::Vec<V>::store(cf::Split<V>::load(dst + si, n), state.working0 + di, 0);
+    cf::Vec<V>::store(cf::Split<V>::load(dst + si, n), working + di, 0);
   }
 
-  copy(state.working0, 2 * n, dst);
+  copy(working, 2 * n, dst);
 
   // It's all in Vec format after this point
   typedef cf::Vec<V> CF;
-
-  Int dft_size = 1;
-  for(Int s = 0; s < state.nsteps; s++)
+  
+  for(Int dft_size = 1, s = 0; dft_size < n; s++)
   {
-    auto step = state.steps[s];
     //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
+    Int npasses = num_passes_callback(s);
 
-		if(step.npasses == 5 && dft_size == 1)
+		if(npasses == 5 && dft_size == 1)
 		{
 			Int ds = dft_size << 3;
-			auto src_row0 = state.working0 + (n - 4 * ds) * CF::idx_ratio;
+			auto src_row0 = working + (n - 4 * ds) * CF::idx_ratio;
 			auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
 			for(Int i = 0; i < ds * CF::idx_ratio; i += CF::stride)
 				store_two_pass_twiddle<V>(CF::load(src_row0 + i, 0), dst_row0 + 3 * i);
 		}
-    else if(step.npasses == 3 && dft_size >= V::vec_size)
+    else if(npasses == 3 && dft_size >= V::vec_size)
     {
-      auto src_row0 = state.working0 + (n - 4 * dft_size) * CF::idx_ratio;
-      auto src_row1 = state.working0 + (n - 8 * dft_size) * CF::idx_ratio;
+      auto src_row0 = working + (n - 4 * dft_size) * CF::idx_ratio;
+      auto src_row1 = working + (n - 8 * dft_size) * CF::idx_ratio;
       auto dst_row1 = dst + (n - 8 * dft_size) * CF::idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
       BitReversed br(vdft_size);
@@ -907,9 +908,9 @@ void init_twiddle(State<typename V::T>& state)
           dst_row1 + 5 * br.br * CF::stride + 4 * CF::stride, 0);
       }
     }
-    else if(step.npasses == 2 && dft_size >= V::vec_size)
+    else if(npasses == 2 && dft_size >= V::vec_size)
     {
-      auto src_row0 = state.working0 + (n - 4 * dft_size) * CF::idx_ratio;
+      auto src_row0 = working + (n - 4 * dft_size) * CF::idx_ratio;
       auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
       BitReversed br(vdft_size);
@@ -920,9 +921,9 @@ void init_twiddle(State<typename V::T>& state)
           dst_row0 + 3 * br.br * CF::stride);
       }
     }
-    else if(step.npasses == 1 && dft_size >= V::vec_size)
+    else if(npasses == 1 && dft_size >= V::vec_size)
     {
-      auto src_row0 = state.working0 + (n - 2 * dft_size) * CF::idx_ratio;
+      auto src_row0 = working + (n - 2 * dft_size) * CF::idx_ratio;
       auto dst_row0 = dst + (n - 2 * dft_size) * CF::idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
       BitReversed br(vdft_size);
@@ -933,8 +934,7 @@ void init_twiddle(State<typename V::T>& state)
           0);
     }
 
-
-    dft_size <<= step.npasses;
+    dft_size <<= npasses;
   }
 }
 
@@ -1797,7 +1797,10 @@ State<typename V::T>* fft_state(Int n, void* ptr)
   state->tiny_twiddle = state->twiddle + 2 * n;
   state->br_table = (Int*)(Uint(state->tiny_twiddle) + tiny_twiddle_bytes<V>());
   init_steps<V, SrcCfT<V>, DstCfT<V>>(*state);
-  init_twiddle<V>(*state);
+
+  init_twiddle<V>([state](Int s){ return state->steps[s].npasses; },
+    n, state->working0, state->twiddle, state->tiny_twiddle);
+
   init_br_table<V, DstCfT<V>>(*state);
   return state;
 }

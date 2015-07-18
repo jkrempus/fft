@@ -723,14 +723,13 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
 
   if(Fft0::is_real || Fft1::is_real)
   {
+    auto src_re = create_view(src, size, 0);
+    auto src_im = create_view(src + n, size, 0);
     if(Fft0::is_inverse)
     {
-      auto tmp = new T[2 * n];
-
-      auto tmp_re = create_view(tmp, size, 0);
-      auto src_re = create_view(src, size, 0);
-      auto tmp_im = create_view(tmp + n, size, 0);
-      auto src_im = create_view(src + n, size, 0);
+      std::vector<T> tmp(2 * n);
+      auto tmp_re = create_view(&tmp[0], size, 0);
+      auto tmp_im = create_view(&tmp[n], size, 0);
       copy_view(src_re, tmp_re);
       copy_view(src_im, tmp_im);
       for(IterateMultidim it(src_re.ndim, src_re.size); !it.empty(); it.advance())
@@ -740,13 +739,11 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
           midx[i] = mirror_idx(src_re.size[i], it.idx[i]);
 
         *src_re.ptr(it.idx) = *tmp_re.ptr(it.idx) + *tmp_re.ptr(midx);
-        *src_re.ptr(midx) = *tmp_re.ptr(it.idx) + *tmp_re.ptr(midx);
-        
-        *src_im.ptr(it.idx) = *tmp_im.ptr(midx) - *tmp_im.ptr(it.idx);
-        *src_im.ptr(midx) = *tmp_im.ptr(it.idx) - *tmp_im.ptr(midx);
-      }
+        *src_re.ptr(midx  ) = *tmp_re.ptr(it.idx) + *tmp_re.ptr(midx);
 
-      delete [] tmp;
+        *src_im.ptr(it.idx) = *tmp_im.ptr(midx  ) - *tmp_im.ptr(it.idx);
+        *src_im.ptr(midx  ) = *tmp_im.ptr(it.idx) - *tmp_im.ptr(midx);
+      }
     }
     else
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
