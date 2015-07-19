@@ -2118,32 +2118,161 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
 }
 
 template<typename T>
-struct StridedState
+struct MultiState
 {
   Int n;
+  Int m;
   Int im_off;
-  T* working0;
-  T* working1;
+  T* working;
   T* twiddle;
-  Int* br_table;
-  T* tiny_twiddle;
+  typedef void (*fun_ptr)(const MultiState* state, T* data);
 };
 
-
 template<typename V>
-Int strided_state_struct_offset(Int n)
+Int multi_fft_state_struct_offset(Int n)
 {
   VEC_TYPEDEFS(V);
-  return 
-    2 * n * sizeof(T) + // working0
-    2 * n * sizeof(T) + // working1
-    2 * n * sizeof(T) + // twiddle
-    n * sizeof(Int);    // br_table
+  return align_size(
+    2 * n * sizeof(T) +
+    2 * n * sizeof(T));
+};
+
+template<typename V>
+Int multi_fft_state_memory_size(Int n)
+{
+  VEC_TYPEDEFS(V);
+  return multi_fft_state_struct_offset<V>(n) + sizeof(MultiState<T>);
 }
 
 template<typename V>
-Int strided_fft_state_memory_size(Int n)
+NOINLINE void multi_two_passes_inner(
+  typename V::T* a0,
+  typename V::T* a1,
+  typename V::T* a2,
+  typename V::T* a3,
+  Complex<typename V::Vec> t0,
+  Complex<typename V::Vec> t1,
+  Complex<typename V::Vec> t2,
+  Int m,
+  Int im_off)
 {
   VEC_TYPEDEFS(V);
-  return strided_state_struct_offset<V>(n) + sizeof(StridedState<T>);
+  typedef cf::Split<V> Cf;
+  for(Int i = 0; i < m * Cf::idx_ratio; i += Cf::stride)
+  {
+    C b0 = Cf::load(a0 + i, im_off);
+    C b1 = Cf::load(a1 + i, im_off);
+    C b2 = Cf::load(a2 + i, im_off);
+    C b3 = Cf::load(a3 + i, im_off);
+    two_passes_inner(b0, b1, b2, b3, b0, b1, b2, b3, t0, t1, t2);
+    Cf::store(b0, a0 + i, im_off);
+    Cf::store(b1, a1 + i, im_off);
+    Cf::store(b2, a2 + i, im_off);
+    Cf::store(b3, a3 + i, im_off);
+  }
+}
+
+template<typename V>
+void multi_two_passes(
+  Int n,
+  Int m,
+  Int dft_size,
+  Int start,
+  Int end,
+  typename V::T* twiddle,
+  typename V::T* data)
+{
+  VEC_TYPEDEFS(V);
+
+  Int stride = n >> log2(dft_size);
+  auto tw = twiddle + n - 4 * dft_size;
+  if(start != 0) tw += 3 * (start >> log2(stride));
+
+  for(Int i = start; i < end; i += stride)
+  {
+    auto tw0 = {VecCf::vec(tw[0]), VecCf::vec(tw[1])}; 
+    auto tw1 = {VecCf::vec(tw[2]), VecCf::vec(tw[3])}; 
+    auto tw2 = {VecCf::vec(tw[4]), VecCf::vec(tw[5])}; 
+    tw += 6;
+
+    for(Int j = i; j < stride / 4; j++)
+      multi_two_passes_inner<V>(
+        data + (j + 0 * stride / 4) * m,
+        data + (j + 1 * stride / 4) * m,
+        data + (j + 2 * stride / 4) * m,
+        data + (j + 3 * stride / 4) * m,
+        tw0, tw1, tw2, m, n * m);
+  }
+}
+
+template<typename V>
+NOINLINE void multi_one_pass_inner(
+  typename V::T* a0,
+  typename V::T* a1,
+  Complex<typename V::Vec> t,
+  Int m,
+  Int im_off)
+{
+  VEC_TYPEDEFS(V);
+  typedef cf::Split<V> Cf;
+  for(Int i = 0; i < m * Cf::idx_ratio; i += Cf::stride)
+  {
+    C b0 = Cf::load(a0 + i, im_off);
+    C mul = Cf::load(a1 + i, im_off) * t;
+    Cf::store(b0 + mul, a0 + i, im_off);
+    Cf::store(b0 - mul, a1 + i, im_off);
+  }
+}
+
+template<typename V>
+void multi_last_pass(
+  Int n,
+  Int m,
+  Int start,
+  Int end,
+  typename V::T* twiddle,
+  typename V::T* data)
+{
+  VEC_TYPEDEFS(V);
+  for(Int i = start; i < end; i += 2)
+  {
+    auto tw = {VecCf::vec(twiddle[i]), VecCf::vec(tw[i + 1])}; 
+    multi_one_pass_inner(data + i * m, data + (i + 1) * m, tw, m, m * n);
+  }
+}
+
+// The result is bit reversed
+template<typename V>
+void multi_fft(const MultiState<typename V::T>& state, typename V::T* data)
+{
+  Int n = state.n;
+  Int m = state.m;
+  for(Int dft_size = 1; dft_size < n;)
+  {
+    if(dft_size * 2 == n)
+    {
+      multi_last_pass<V>(n, m, 0, n, state.twiddle, data);
+      dft_size *= 2;
+    }
+    else
+    {
+      multi_two_passes<V>(n, m, dft_size, 0, n, state.twiddle, data);
+      dft_size *= 4;
+    } 
+  }
+}
+
+template<typename V>
+MultiState<typename V::T> multi_fft_state(Int n, Int m, void* ptr)
+{
+  VEC_TYPEDEFS(V);
+  auto r = (MultiState<T>*) (Uint(ptr) + multi_fft_state_struct_offset<V>(n));
+  r->n = n;
+  r->m = m;
+  r->im_off = n * m;
+  r->working = (T*) ptr;
+  r->twiddle = r->working + 2 * n;
+  init_twiddle<V>(
+    [n](Int s){ return (Int(1) << (s + 2)) > n ? 1 : 2; },
+    n, r->working, r->twiddle, nullptr);
 }
