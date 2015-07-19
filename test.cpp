@@ -47,8 +47,6 @@ T* alloc_complex_array(Int n)
   return (T*) valloc(2 * n * sizeof(T));
 }
 
-const int maxdim = 64;
-
 Int chunked_index(Int i, Int chunk_size)
 {
   if(chunk_size == 0)
