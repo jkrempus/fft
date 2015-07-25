@@ -113,16 +113,17 @@ struct IterateMultidim
   }
 };
 
-template<T>
+template<typename T>
 struct PtrRange
 {
   T* begin_;
   T* end_;
   T* begin(){ return begin_; }
-  T* end(){ return end_; } };
+  T* end(){ return end_; }
+};
 
-template<T> PtrRange<T> ptr_range(T* p, Int size) { return {p, p + size}; }
-template<T> PtrRange<T> ptr_range(T* b, T* e) { return {b, e}; }
+template<typename T> PtrRange<T> ptr_range(T* p, Int size) { return {p, p + size}; }
+template<typename T> PtrRange<T> ptr_range(T* b, T* e) { return {b, e}; }
 
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
@@ -2347,12 +2348,12 @@ Int multidim_state_memory_size(Int ndim, Int* dim)
   Int r = align_size(sizeof(MultidimState<T>));
 
   Int working_size = 2 * sizeof(T) * product(ptr_range(dim, ndim));
-  r = align_size(total_size_bytes<T>(ndim, dim) + working_size);
+  r = align_size(working_size);
 
-  for(Int i = 0; i < ndim; i++)
-    r = align_size(r + multi_state_memory_size(dim[i]);
+  for(Int i = 0; i < ndim - 1; i++)
+    r = align_size(r + multi_state_memory_size<V>(dim[i]));
 
-  r = align_size(r + fft_state_memory_size(dim[ndim - 1]));
+  r = align_size(r + fft_state_memory_size<V>(dim[ndim - 1]));
 
   return r;
 }
@@ -2362,18 +2363,19 @@ MultidimState<typename V::T> multidim_state(Int ndim, Int* dim, void* mem)
 {
   VEC_TYPEDEFS(V);
   auto s = (MultidimState<typename V::T>*) mem;
+  s->ndim = ndim;
   mem = (void*) align_size(Uint(mem) + sizeof(MultidimState<T>));
   s->working = (T*) mem;
  
   s->num_elements = product(ptr_range(dim, ndim));
   Int working_size = 2 * sizeof(T) * s->num_elements;
-  mem = (void*) align_size(Uint(mem) + working_size
+  mem = (void*) align_size(Uint(mem) + working_size);
   
-  for(Int i = 0; i < ndim; i++)
+  for(Int i = 0; i < ndim - 1; i++)
   {
     Int m = product(ptr_range(dim + i + 1, dim + ndim));
-    s->transforms[i] = multi_fft_state<V>(n, m, s->num_elements, mem);
-    mem = (void*) align_size(Uint(mem) + multi_state_memory_size(dim[i]);
+    s->transforms[i] = multi_fft_state<V>(dim[i], m, s->num_elements, mem);
+    mem = (void*) align_size(Uint(mem) + multi_state_memory_size<V>(dim[i]));
   }
 
   s->last_transform = fft_state<V>(dim[ndim - 1], mem);
@@ -2388,7 +2390,7 @@ void multidim_fft_impl(
   if(ndim == 1) fft_impl(last_transform, im_off, src, dst);
   else
   {
-    transform->fun_ptr(transform, src);
+    transforms->fun_ptr(transforms, src);
 
     Int m = transforms->m;
     Int n = transforms->n;
@@ -2402,12 +2404,12 @@ void multidim_fft_impl(
 template<typename T>
 void multidim_fft(MultidimState<T>* state, T* src, T* dst)
 {
-  copy(src, num_elements, state->working);
+  copy(src, 2 * state->num_elements, state->working);
   multidim_fft_impl(
     state->ndim,
     state->transforms,
     state->last_transform,
-    state->im_off,
+    state->num_elements,
     state->working,
     dst); 
 }
