@@ -2129,7 +2129,23 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
-#if 1
+template<typename V>
+void multi_first_pass(
+  Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
+{
+  VEC_TYPEDEFS(V);
+  typedef cf::Split<V> Cf;
+  
+  auto stride = n * m / 2;
+  for(Int i = 0; i < n * m / 2; i += V::vec_size)
+  {
+    C a0 = Cf::load(src + i, im_off);
+    C a1 = Cf::load(src + stride + i, im_off);
+    Cf::store(a0 + a1, dst + i, im_off);
+    Cf::store(a0 - a1, dst + i + stride, im_off);
+  }
+}
+
 template<typename V>
 void multi_first_two_passes(
   Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
@@ -2170,7 +2186,6 @@ void multi_first_two_passes(
     Cf::store(c3, d3 + i, im_off);
   }
 }
-#endif
 
 template<typename V>
 NOINLINE void multi_two_passes_inner(
@@ -2213,25 +2228,21 @@ void multi_two_passes(
 {
   VEC_TYPEDEFS(V);
 
-  Int stride = n >> log2(dft_size);
-  auto tw = twiddle + 2 * (n - 4 * dft_size);
-  if(start != 0) tw += 6 * (start >> log2(stride));
+  Int stride = end - start;
+  ASSERT(stride * dft_size == n);
+  auto tw = twiddle + 2 * (n - 4 * dft_size) + 6 * (start >> log2(stride));
 
-  for(Int i = start; i < end; i += stride)
-  {
-    C tw0 = {V::vec(tw[0]), V::vec(tw[1])}; 
-    C tw1 = {V::vec(tw[2]), V::vec(tw[3])}; 
-    C tw2 = {V::vec(tw[4]), V::vec(tw[5])}; 
-    tw += 6;
+  C tw0 = {V::vec(tw[0]), V::vec(tw[1])}; 
+  C tw1 = {V::vec(tw[2]), V::vec(tw[3])}; 
+  C tw2 = {V::vec(tw[4]), V::vec(tw[5])}; 
 
-    for(Int j = i; j < i + stride / 4; j++)
-      multi_two_passes_inner<V>(
-        data + (j + 0 * stride / 4) * m,
-        data + (j + 1 * stride / 4) * m,
-        data + (j + 2 * stride / 4) * m,
-        data + (j + 3 * stride / 4) * m,
-        tw0, tw1, tw2, m, im_off);
-  }
+  for(Int j = start; j < start + stride / 4; j++)
+    multi_two_passes_inner<V>(
+      data + (j + 0 * stride / 4) * m,
+      data + (j + 1 * stride / 4) * m,
+      data + (j + 2 * stride / 4) * m,
+      data + (j + 3 * stride / 4) * m,
+      tw0, tw1, tw2, m, im_off);
 }
 
 template<typename V>
@@ -2245,19 +2256,18 @@ void multi_last_pass(
   typename V::T* data)
 {
   VEC_TYPEDEFS(V);
-  for(Int i = start; i < end; i += 2)
+  ASSERT(end - start == 2);
+
+  C tw = {V::vec(twiddle[start]), V::vec(twiddle[start + 1])}; 
+  auto p0 = data + start * m;
+  auto p1 = data + (start + 1) * m;   
+  typedef cf::Split<V> Cf;
+  for(Int start = 0; start < m * Cf::idx_ratio; start += Cf::stride)
   {
-    C tw = {V::vec(twiddle[i]), V::vec(twiddle[i + 1])}; 
-    auto p0 = data + i * m;
-    auto p1 = data + (i + 1) * m;   
-    typedef cf::Split<V> Cf;
-    for(Int i = 0; i < m * Cf::idx_ratio; i += Cf::stride)
-    {
-      C b0 = Cf::load(p0 + i, im_off);
-      C mul = Cf::load(p1 + i, im_off) * tw;
-      Cf::store(b0 + mul, p0 + i, im_off);
-      Cf::store(b0 - mul, p1 + i, im_off);
-    }
+    C b0 = Cf::load(p0 + start, im_off);
+    C mul = Cf::load(p1 + start, im_off) * tw;
+    Cf::store(b0 + mul, p0 + start, im_off);
+    Cf::store(b0 - mul, p1 + start, im_off);
   }
 }
 
@@ -2268,11 +2278,11 @@ struct MultiState
   Int m;
   T* working;
   T* twiddle;
-  void (*fun_ptr)(const MultiState<T>* state, T* data, Int im_off);
+  void (*fun_ptr)(const MultiState<T>* state, T* src, T* dst, Int im_off);
 };
 
 template<typename V>
-void multi_fft_impl(
+void multi_fft_recurse(
   const MultiState<typename V::T>* s,
   Int start,
   Int end,
@@ -2282,15 +2292,12 @@ void multi_fft_impl(
 {
   if(4 * dft_size <= s->n)
   {
-    if(dft_size == 1)
-      multi_first_two_passes<V>(s->n, s->m, im_off, data, data);
-    else
-      multi_two_passes<V>(s->n, s->m, dft_size, start, end, im_off, s->twiddle, data);
+    multi_two_passes<V>(s->n, s->m, dft_size, start, end, im_off, s->twiddle, data);
 
     Int l = (end - start) / 4;
     if(4 * dft_size < s->n)
       for(Int i = start; i < end; i += l)
-        multi_fft_impl<V>(s, i, i + l, dft_size * 4, data, im_off);
+        multi_fft_recurse<V>(s, i, i + l, dft_size * 4, data, im_off);
   }
   else
     multi_last_pass<V>(s->n, s->m, start, end, im_off, s->twiddle, data);
@@ -2298,9 +2305,26 @@ void multi_fft_impl(
 
 // The result is bit reversed
 template<typename V>
-void multi_fft(const MultiState<typename V::T>* s, typename V::T* data, Int im_off)
+void multi_fft(
+  const MultiState<typename V::T>* s,
+  typename V::T* src,
+  typename V::T* dst,
+  Int im_off)
 {
-  multi_fft_impl<V>(s, 0, s->n, 1, data, im_off);
+  if(s->n == 1)
+  {
+    copy(src, s->n, dst);
+    copy(src + im_off, s->n, dst + im_off);
+  }
+  if(s->n == 2)
+    multi_first_pass<V>(s->n, s->m, im_off, src, dst);
+  else
+  {
+    multi_first_two_passes<V>(s->n, s->m, im_off, src, dst);
+    if(s->n > 4) 
+      for(Int i = 0; i < s->n; i += s->n / 4)
+        multi_fft_recurse<V>(s, i, i + s->n / 4, 4, dst, im_off);
+  }
 }
 
 template<typename V>
@@ -2400,21 +2424,21 @@ MultidimState<typename V::T>* multidim_fft_state(Int ndim, const Int* dim, void*
 template<typename T>
 void multidim_fft_impl(
   Int ndim, MultiState<T>** transforms, State<T>* last_transform,
-  Int im_off, T* src, T* dst)
+  Int im_off, T* src, T* working, T* dst)
 {
   ASSERT(ndim > 0);
   if(ndim == 1) fft_impl(last_transform, im_off, src, dst);
   else
   {
-    transforms[0]->fun_ptr(transforms[0], src, im_off);
+    transforms[0]->fun_ptr(transforms[0], src, working, im_off);
 
     Int m = transforms[0]->m;
     Int n = transforms[0]->n;
     for(BitReversed br(n); br.i < n; br.advance())
     {
-      multidim_fft_impl(
-        ndim - 1, transforms + 1, last_transform, im_off,
-        src + br.i * m, dst + br.br * m);
+      auto s = working + br.i * m;
+      auto d = dst + br.br * m;
+      multidim_fft_impl(ndim - 1, transforms + 1, last_transform, im_off, s, s, d);
     }
   }
 }
@@ -2422,17 +2446,12 @@ void multidim_fft_impl(
 template<typename T>
 void multidim_fft(MultidimState<T>* state, T* src, T* dst)
 {
-  if(state->ndim == 1)
-    fft_impl(state->last_transform, state->num_elements, src, dst);
-  else
-  {
-    copy(src, 2 * state->num_elements, state->working);
-    multidim_fft_impl<T>(
-      state->ndim,
-      state->transforms,
-      state->last_transform,
-      state->num_elements,
-      state->working,
-      dst); 
-  }
+  multidim_fft_impl<T>(
+    state->ndim,
+    state->transforms,
+    state->last_transform,
+    state->num_elements,
+    src,
+    state->working,
+    dst);
 }
