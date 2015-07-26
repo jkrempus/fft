@@ -2129,46 +2129,44 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
-template<typename V>
+template<typename V, typename SrcCf, typename DstCf>
 void multi_first_pass(
   Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
-  typedef cf::Split<V> Cf;
-  
-  auto stride = n * m / 2;
-  for(Int i = 0; i < n * m / 2; i += V::vec_size)
+  auto soff = n * m / 2 * SrcCf::idx_ratio;
+  auto doff = n * m / 2 * DstCf::idx_ratio;
+  for(auto end = src + soff; src < end;)
   {
-    C a0 = Cf::load(src + i, im_off);
-    C a1 = Cf::load(src + stride + i, im_off);
-    Cf::store(a0 + a1, dst + i, im_off);
-    Cf::store(a0 - a1, dst + i + stride, im_off);
+    C a0 = SrcCf::load(src, im_off);
+    C a1 = SrcCf::load(src + soff, im_off);
+    DstCf::store(a0 + a1, dst, im_off);
+    DstCf::store(a0 - a1, dst + doff, im_off);
+    src += SrcCf::stride;
+    dst += DstCf::stride;
   }
 }
 
-template<typename V>
+template<typename V, typename SrcCf, typename DstCf>
 void multi_first_two_passes(
   Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
-  typedef cf::Split<V> Cf;
 
-  T* s0 = src + 0 * n * m / 4;
-  T* s1 = src + 1 * n * m / 4;
-  T* s2 = src + 2 * n * m / 4;
-  T* s3 = src + 3 * n * m / 4;
+  auto soff1 = SrcCf::idx_ratio * n * m / 4;
+  auto soff2 = 2 * soff1;
+  auto soff3 = 3 * soff1;
 
-  T* d0 = dst + 0 * n * m / 4;
-  T* d1 = dst + 1 * n * m / 4;
-  T* d2 = dst + 2 * n * m / 4;
-  T* d3 = dst + 3 * n * m / 4;
+  auto doff1 = DstCf::idx_ratio * n * m / 4;
+  auto doff2 = 2 * doff1;
+  auto doff3 = 3 * doff1;
 
-  for(Int i = 0; i < n * m / 4; i += V::vec_size)
+  for(auto end = src + soff1; src < end;)
   {
-    C a0 = Cf::load(s0 + i, im_off);
-    C a1 = Cf::load(s1 + i, im_off);
-    C a2 = Cf::load(s2 + i, im_off);
-    C a3 = Cf::load(s3 + i, im_off);
+    C a0 = SrcCf::load(src, im_off);
+    C a1 = SrcCf::load(src + soff1, im_off);
+    C a2 = SrcCf::load(src + soff2, im_off);
+    C a3 = SrcCf::load(src + soff3, im_off);
 
     C b0 = a0 + a2;
     C b2 = a0 - a2;
@@ -2180,14 +2178,17 @@ void multi_first_two_passes(
     C c2 = b2 + b3.mul_neg_i();
     C c3 = b2 - b3.mul_neg_i();
 
-    Cf::store(c0, d0 + i, im_off);
-    Cf::store(c1, d1 + i, im_off);
-    Cf::store(c2, d2 + i, im_off);
-    Cf::store(c3, d3 + i, im_off);
+    DstCf::store(c0, dst, im_off);
+    DstCf::store(c1, dst + doff1, im_off);
+    DstCf::store(c2, dst + doff2, im_off);
+    DstCf::store(c3, dst + doff3, im_off);
+
+    src += SrcCf::stride;
+    dst += DstCf::stride;
   }
 }
 
-template<typename V>
+template<typename V, typename Cf>
 NOINLINE void multi_two_passes_inner(
   typename V::T* a0,
   typename V::T* a1,
@@ -2200,7 +2201,6 @@ NOINLINE void multi_two_passes_inner(
   Int im_off)
 {
   VEC_TYPEDEFS(V);
-  typedef cf::Split<V> Cf;
   for(Int i = 0; i < m * Cf::idx_ratio; i += Cf::stride)
   {
     C b0 = Cf::load(a0 + i, im_off);
@@ -2215,7 +2215,7 @@ NOINLINE void multi_two_passes_inner(
   }
 }
 
-template<typename V>
+template<typename V, typename Cf>
 void multi_two_passes(
   Int n,
   Int m,
@@ -2237,11 +2237,11 @@ void multi_two_passes(
   C tw2 = {V::vec(tw[4]), V::vec(tw[5])}; 
 
   for(Int j = start; j < start + stride / 4; j++)
-    multi_two_passes_inner<V>(
-      data + (j + 0 * stride / 4) * m,
-      data + (j + 1 * stride / 4) * m,
-      data + (j + 2 * stride / 4) * m,
-      data + (j + 3 * stride / 4) * m,
+    multi_two_passes_inner<V, Cf>(
+      data + (j + 0 * stride / 4) * m * Cf::idx_ratio,
+      data + (j + 1 * stride / 4) * m * Cf::idx_ratio,
+      data + (j + 2 * stride / 4) * m * Cf::idx_ratio,
+      data + (j + 3 * stride / 4) * m * Cf::idx_ratio,
       tw0, tw1, tw2, m, im_off);
 }
 
@@ -2281,7 +2281,7 @@ struct MultiState
   void (*fun_ptr)(const MultiState<T>* state, T* src, T* dst, Int im_off);
 };
 
-template<typename V>
+template<typename V, typename Cf>
 void multi_fft_recurse(
   const MultiState<typename V::T>* s,
   Int start,
@@ -2292,19 +2292,20 @@ void multi_fft_recurse(
 {
   if(4 * dft_size <= s->n)
   {
-    multi_two_passes<V>(s->n, s->m, dft_size, start, end, im_off, s->twiddle, data);
+    multi_two_passes<V, Cf>(
+      s->n, s->m, dft_size, start, end, im_off, s->twiddle, data);
 
     Int l = (end - start) / 4;
     if(4 * dft_size < s->n)
       for(Int i = start; i < end; i += l)
-        multi_fft_recurse<V>(s, i, i + l, dft_size * 4, data, im_off);
+        multi_fft_recurse<V, Cf>(s, i, i + l, dft_size * 4, data, im_off);
   }
   else
     multi_last_pass<V>(s->n, s->m, start, end, im_off, s->twiddle, data);
 }
 
 // The result is bit reversed
-template<typename V>
+template<typename V, typename SrcCf, typename DstCf>
 void multi_fft(
   const MultiState<typename V::T>* s,
   typename V::T* src,
@@ -2317,13 +2318,13 @@ void multi_fft(
     copy(src + im_off, s->n, dst + im_off);
   }
   if(s->n == 2)
-    multi_first_pass<V>(s->n, s->m, im_off, src, dst);
+    multi_first_pass<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
   else
   {
-    multi_first_two_passes<V>(s->n, s->m, im_off, src, dst);
+    multi_first_two_passes<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
     if(s->n > 4) 
       for(Int i = 0; i < s->n; i += s->n / 4)
-        multi_fft_recurse<V>(s, i, i + s->n / 4, 4, dst, im_off);
+        multi_fft_recurse<V, DstCf>(s, i, i + s->n / 4, 4, dst, im_off);
   }
 }
 
@@ -2356,7 +2357,7 @@ MultiState<typename V::T>* multi_fft_state(Int n, Int m, void* ptr)
     [n](Int s, Int dft_size){ return 4 * dft_size <= n ? 2 : 1; },
     n, r->working, r->twiddle, nullptr);
 
-  r->fun_ptr = &multi_fft<V>;
+  r->fun_ptr = &multi_fft<V, cf::Split<V>, cf::Split<V>>;
   return r;
 }
 
