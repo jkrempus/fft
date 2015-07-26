@@ -1,3 +1,5 @@
+#include "misc/array_ipc.h"
+
 #include "fft_core.h"
 
 #include <string>
@@ -16,8 +18,6 @@
 #ifdef HAVE_FFTW
 #include "fftw3.h"
 #endif
-
-#include "misc/array_ipc.h"
 
 extern "C" void* valloc(size_t);
 
@@ -408,14 +408,16 @@ struct TestWrapper<V, CfT, false, false>
   static const bool is_inverse = false;
   VEC_TYPEDEFS(V);
   typedef T value_type;
-  State<T>* state;
+  MultidimState<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, false>(size),
-    state(fft_state<V, CfT, CfT>(
-      size[0], valloc(fft_state_memory_size<V>(size[0])))) {}
+    state(multidim_fft_state<V>(
+      size.size(),
+      &size[0],
+      valloc(multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  ~TestWrapper() { free(fft_state_memory_ptr(state)); }
-  void transform() { fft<T>(state, this->src, this->dst); }
+  //~TestWrapper() { free(fft_state_memory_ptr(state)); }
+  void transform() { multidim_fft<T>(state, this->src, this->dst); }
 };
 
 template<typename V, template<typename> class CfT>
