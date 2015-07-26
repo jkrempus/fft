@@ -2389,6 +2389,9 @@ template<typename V>
 Int multidim_state_memory_size(Int ndim, const Int* dim)
 {
   VEC_TYPEDEFS(V);
+  if(dim[ndim - 1] < 2 * V::vec_size)
+    return multidim_state_memory_size<Scalar<T>>(ndim, dim);
+
   Int r = align_size(sizeof(MultidimState<T>));
 
   Int working_size = 2 * sizeof(T) * product(ptr_range(dim, ndim));
@@ -2409,6 +2412,9 @@ template<
 MultidimState<typename V::T>* multidim_fft_state(Int ndim, const Int* dim, void* mem)
 {
   VEC_TYPEDEFS(V);
+  if(dim[ndim - 1] < 2 * V::vec_size)
+    return multidim_fft_state<Scalar<T>, SrcCfT, DstCfT>(ndim, dim, mem);
+
   auto s = (MultidimState<typename V::T>*) mem;
   s->ndim = ndim;
   s->working_idx_ratio = cf::Vec<V>::idx_ratio;
