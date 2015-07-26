@@ -2132,13 +2132,7 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
 #if 1
 template<typename V>
 void multi_first_two_passes(
-  Int n,
-  Int m,
-  Int start,
-  Int end,
-  Int im_off,
-  typename V::T* src,
-  typename V::T* dst)
+  Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
   typedef cf::Split<V> Cf;
@@ -2280,41 +2274,33 @@ struct MultiState
 template<typename V>
 void multi_fft_impl(
   const MultiState<typename V::T>* s,
+  Int start,
+  Int end,
+  Int dft_size,
   typename V::T* data,
   Int im_off)
 {
-  Int dft_size = 1;
-
-  if(s->n >= 4)
+  if(4 * dft_size <= s->n)
   {
-    multi_first_two_passes<V>(s->n, s->m, 0, s->n, im_off, data, data);
-    dft_size *= 4;
+    if(dft_size == 1)
+      multi_first_two_passes<V>(s->n, s->m, im_off, data, data);
+    else
+      multi_two_passes<V>(s->n, s->m, dft_size, start, end, im_off, s->twiddle, data);
+
+    Int l = (end - start) / 4;
+    if(4 * dft_size < s->n)
+      for(Int i = start; i < end; i += l)
+        multi_fft_impl<V>(s, i, i + l, dft_size * 4, data, im_off);
   }
-
-  for(; dft_size <= s->n / 4; dft_size *= 4)
-    multi_two_passes<V>(s->n, s->m, dft_size, 0, s->n, im_off, s->twiddle, data);
-
-  if(dft_size < s->n)
-    multi_last_pass<V>(s->n, s->m, 0, s->n, im_off, s->twiddle, data);
+  else
+    multi_last_pass<V>(s->n, s->m, start, end, im_off, s->twiddle, data);
 }
 
 // The result is bit reversed
 template<typename V>
 void multi_fft(const MultiState<typename V::T>* s, typename V::T* data, Int im_off)
 {
-  Int dft_size = 1;
-
-  if(s->n >= 4)
-  {
-    multi_first_two_passes<V>(s->n, s->m, 0, s->n, im_off, data, data);
-    dft_size *= 4;
-  }
-
-  for(; dft_size <= s->n / 4; dft_size *= 4)
-    multi_two_passes<V>(s->n, s->m, dft_size, 0, s->n, im_off, s->twiddle, data);
-
-  if(dft_size < s->n)
-    multi_last_pass<V>(s->n, s->m, 0, s->n, im_off, s->twiddle, data);
+  multi_fft_impl<V>(s, 0, s->n, 1, data, im_off);
 }
 
 template<typename V>
