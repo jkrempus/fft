@@ -411,7 +411,7 @@ struct TestWrapper<V, CfT, false, false>
   MultidimState<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, false>(size),
-    state(multidim_fft_state<V>(
+    state(multidim_fft_state<V, CfT, CfT>(
       size.size(),
       &size[0],
       valloc(multidim_state_memory_size<V>(size.size(), &size[0])))) {}
