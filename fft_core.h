@@ -848,6 +848,7 @@ void init_twiddle(
   typename V::T* tiny_dst)
 {
   VEC_TYPEDEFS(V);
+  if(n <= 2) return;
 
   auto end_re = dst + n;
   auto end_im = dst + 2 * n;
@@ -2389,7 +2390,7 @@ template<typename V>
 Int multidim_state_memory_size(Int ndim, const Int* dim)
 {
   VEC_TYPEDEFS(V);
-  if(dim[ndim - 1] < 2 * V::vec_size)
+  if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
     return multidim_state_memory_size<Scalar<T>>(ndim, dim);
 
   Int r = align_size(sizeof(MultidimState<T>));
@@ -2412,7 +2413,7 @@ template<
 MultidimState<typename V::T>* multidim_fft_state(Int ndim, const Int* dim, void* mem)
 {
   VEC_TYPEDEFS(V);
-  if(dim[ndim - 1] < 2 * V::vec_size)
+  if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
     return multidim_fft_state<Scalar<T>, SrcCfT, DstCfT>(ndim, dim, mem);
 
   auto s = (MultidimState<typename V::T>*) mem;
