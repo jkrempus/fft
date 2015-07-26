@@ -2129,12 +2129,11 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
-#if 0
+#if 1
 template<typename V>
 void multi_first_two_passes(
   Int n,
   Int m,
-  Int dft_size,
   Int start,
   Int end,
   Int im_off,
@@ -2278,11 +2277,39 @@ struct MultiState
   void (*fun_ptr)(const MultiState<T>* state, T* data, Int im_off);
 };
 
+template<typename V>
+void multi_fft_impl(
+  const MultiState<typename V::T>* s,
+  typename V::T* data,
+  Int im_off)
+{
+  Int dft_size = 1;
+
+  if(s->n >= 4)
+  {
+    multi_first_two_passes<V>(s->n, s->m, 0, s->n, im_off, data, data);
+    dft_size *= 4;
+  }
+
+  for(; dft_size <= s->n / 4; dft_size *= 4)
+    multi_two_passes<V>(s->n, s->m, dft_size, 0, s->n, im_off, s->twiddle, data);
+
+  if(dft_size < s->n)
+    multi_last_pass<V>(s->n, s->m, 0, s->n, im_off, s->twiddle, data);
+}
+
 // The result is bit reversed
 template<typename V>
 void multi_fft(const MultiState<typename V::T>* s, typename V::T* data, Int im_off)
 {
   Int dft_size = 1;
+
+  if(s->n >= 4)
+  {
+    multi_first_two_passes<V>(s->n, s->m, 0, s->n, im_off, data, data);
+    dft_size *= 4;
+  }
+
   for(; dft_size <= s->n / 4; dft_size *= 4)
     multi_two_passes<V>(s->n, s->m, dft_size, 0, s->n, im_off, s->twiddle, data);
 
@@ -2409,12 +2436,17 @@ void multidim_fft_impl(
 template<typename T>
 void multidim_fft(MultidimState<T>* state, T* src, T* dst)
 {
-  copy(src, 2 * state->num_elements, state->working);
-  multidim_fft_impl<T>(
-    state->ndim,
-    state->transforms,
-    state->last_transform,
-    state->num_elements,
-    state->working,
-    dst); 
+  if(state->ndim == 1)
+    fft_impl(state->last_transform, state->num_elements, src, dst);
+  else
+  {
+    copy(src, 2 * state->num_elements, state->working);
+    multidim_fft_impl<T>(
+      state->ndim,
+      state->transforms,
+      state->last_transform,
+      state->num_elements,
+      state->working,
+      dst); 
+  }
 }
