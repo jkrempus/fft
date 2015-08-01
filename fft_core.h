@@ -2151,13 +2151,12 @@ void multi_first_pass(
 template<typename V, typename SrcCf, typename DstCf>
 void multi_first_two_passes(
   Int n, Int m,
-  Int im_off,
-  typename V::T* src, //Int src_im_off, Int src_stride,
-  typename V::T* dst)//, Int dst_im_off)
+  typename V::T* src, Int src_im_off, Int src_stride,
+  typename V::T* dst, Int dst_im_off)
 {
   VEC_TYPEDEFS(V);
 
-  auto soff1 = SrcCf::idx_ratio * n * m / 4;
+  auto soff1 = SrcCf::idx_ratio * n * src_stride / 4;
   auto soff2 = 2 * soff1;
   auto soff3 = 3 * soff1;
 
@@ -2167,14 +2166,14 @@ void multi_first_two_passes(
 
   for(auto i = 0; i < n / 4; i++)
   {
-    auto s = src + i * m * SrcCf::idx_ratio;
+    auto s = src + i * src_stride * SrcCf::idx_ratio;
     auto d = dst + i * m * DstCf::idx_ratio;
     for(auto end = s + m * SrcCf::idx_ratio; s < end;)
     {
-      C a0 = SrcCf::load(s, im_off);
-      C a1 = SrcCf::load(s + soff1, im_off);
-      C a2 = SrcCf::load(s + soff2, im_off);
-      C a3 = SrcCf::load(s + soff3, im_off);
+      C a0 = SrcCf::load(s, src_im_off);
+      C a1 = SrcCf::load(s + soff1, src_im_off);
+      C a2 = SrcCf::load(s + soff2, src_im_off);
+      C a3 = SrcCf::load(s + soff3, src_im_off);
 
       C b0 = a0 + a2;
       C b2 = a0 - a2;
@@ -2186,10 +2185,10 @@ void multi_first_two_passes(
       C c2 = b2 + b3.mul_neg_i();
       C c3 = b2 - b3.mul_neg_i();
 
-      DstCf::store(c0, d, im_off);
-      DstCf::store(c1, d + doff1, im_off);
-      DstCf::store(c2, d + doff2, im_off);
-      DstCf::store(c3, d + doff3, im_off);
+      DstCf::store(c0, d, dst_im_off);
+      DstCf::store(c1, d + doff1, dst_im_off);
+      DstCf::store(c2, d + doff2, dst_im_off);
+      DstCf::store(c3, d + doff3, dst_im_off);
 
       s += SrcCf::stride;
       d += DstCf::stride;
@@ -2315,7 +2314,12 @@ struct MultiState
   Int m;
   T* working;
   T* twiddle;
-  void (*fun_ptr)(const MultiState<T>* state, T* src, T* dst, Int im_off);
+  void (*fun_ptr)(
+    const MultiState<T>* state,
+    T* src,
+    T* dst,
+    Int im_off,
+    bool interleaved_src_rows);
 };
 
 template<typename V, typename Cf>
@@ -2347,7 +2351,8 @@ void multi_fft(
   const MultiState<typename V::T>* s,
   typename V::T* src,
   typename V::T* dst,
-  Int im_off)
+  Int im_off,
+  bool interleaved_src_rows)
 {
   if(s->n == 1)
   {
@@ -2358,8 +2363,12 @@ void multi_fft(
     multi_first_pass<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
   else
   {
-    multi_first_two_passes<V, SrcCf, DstCf>(
-      s->n, s->m, im_off, src, dst);
+    if(interleaved_src_rows)
+      multi_first_two_passes<V, SrcCf, DstCf>(
+        s->n, s->m, src, s->m, 2 * s->m, dst, im_off);
+    else
+      multi_first_two_passes<V, SrcCf, DstCf>(
+        s->n, s->m, src, im_off, s->m, dst, im_off);
 
     if(s->n > 4) 
       for(Int i = 0; i < s->n; i += s->n / 4)
@@ -2469,7 +2478,6 @@ MultidimState<typename V::T>* multidim_fft_state(Int ndim, const Int* dim, void*
     s->last_transform = fft_state<V, SrcCfT, DstCfT>(dim[ndim - 1], mem);
   else
   {
-    typedef cf::Vec<V> VecCf;
     for(Int i = 0; i < ndim - 1; i++)
     {
       Int m = product(ptr_range(dim + i + 1, dim + ndim));
@@ -2496,7 +2504,8 @@ void multidim_fft_impl(
   if(idim == s->ndim - 1) fft_impl(s->last_transform, im_off, src, dst);
   else
   {
-    s->transforms[idim]->fun_ptr(s->transforms[idim], src, working, im_off);
+    s->transforms[idim]->fun_ptr(
+      s->transforms[idim], src, working, im_off, false);
 
     Int m = s->transforms[idim]->m;
     Int n = s->transforms[idim]->n;
@@ -2514,3 +2523,132 @@ void multidim_fft(MultidimState<T>* state, T* src, T* dst)
 {
   multidim_fft_impl<T>(0, state, state->num_elements, src, state->working, dst);
 }
+
+template<typename T>
+struct InverseMultidimState
+{
+  MultidimState<T> state;
+};
+
+template<typename T>
+void inverse_multidim_fft(InverseMultidimState<T>* state, T* src, T* dst)
+{
+  auto s = &state->state;
+  multidim_fft_impl<T>(0, s, s->num_elements, src, s->working, dst);
+}
+
+template<typename V>
+Int inverse_multidim_state_memory_size(Int ndim, const Int* dim)
+{
+  return multidim_state_memory_size<V>(ndim, dim); 
+}
+
+template<
+  typename V,
+  template<typename> class SrcCfT,
+  template<typename> class DstCfT>
+InverseMultidimState<typename V::T>* inverse_multidim_fft_state(
+  Int ndim, const Int* dim, void* mem)
+{
+  VEC_TYPEDEFS(V);
+  return (InverseMultidimState<T>*) multidim_fft_state<
+    V,
+    cf::Swapped<SrcCfT>::template Cf,
+    cf::Swapped<DstCfT>::template Cf>(ndim, dim, mem);
+}
+
+#if 1
+template<
+  typename V,
+  template<typename> class SrcCfT,
+  template<typename> class DstCfT,
+  bool inverse>
+void multi_real_pass(
+  Int n, Int m,
+  typename V::T* src, Int src_im_off,
+  typename V::T* twiddle,
+  typename V::T* dst, Int dst_im_off)
+{
+  if(SameType<DstCfT<V>, cf::Vec<V>>::value) ASSERT(0);
+  VEC_TYPEDEFS(V);
+
+  Vec half = V::vec(0.5);
+
+  for(Int i = 0; i < n / 2 - 1; i++)
+  {
+    C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
+
+    auto s0 = src + (i + 1) * m * SrcCfT<V>::idx_ratio; 
+    auto d0 = dst + (i + 1) * m * DstCfT<V>::idx_ratio; 
+    auto s1 = src + (n - i - 1) * m * SrcCfT<V>::idx_ratio; 
+    auto d1 = dst + (n - i - 1) * m * DstCfT<V>::idx_ratio; 
+
+    for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
+    {
+      C sval0 = SrcCfT<V>::load(s0, src_im_off);
+      C sval1 = SrcCfT<V>::load(s1, src_im_off);
+
+      C a, b;
+
+      if(inverse)
+      {
+        a = s0 + s1.adj();
+        b = (s1.adj() - s0) * w.adj();
+      }
+      else
+      {
+        a = (s0 + s1.adj()) * half;
+        b = ((s0 - s1.adj()) * w) * half;
+      }
+
+      C dval0 = a + b.mul_neg_i();
+      C dval1 = a.adj() + b.adj().mul_neg_i();
+
+      DstCfT<V>::store(dval0, d0, dst_im_off);
+      DstCfT<V>::store(dval1, d1, dst_im_off);
+
+      s0 += SrcCfT<V>::stride;
+      s1 += SrcCfT<V>::stride;
+      d0 += DstCfT<V>::stride;
+      d1 += DstCfT<V>::stride;
+    }
+  }
+
+  {
+    if(inverse)
+    {
+      auto s0 = src; 
+      auto s1 = src + n / 2 * m * SrcCfT<V>::idx_ratio; 
+      auto d = dst; 
+
+      for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
+      {
+        C r0 = SrcCfT<V>::load(s0, src_im_off).re;
+        C r1 = SrcCfT<V>::load(s1, src_im_off).re;
+        DstCfT<V>::store({r0 + r1, r0 - r1}, d, dst_im_off);
+
+        s0 += SrcCfT<V>::stride;
+        s1 += SrcCfT<V>::stride;
+        d += DstCfT<V>::stride;
+      }
+    }
+    else
+    {
+      auto s = src; 
+      auto d0 = dst; 
+      auto d1 = dst + (n / 2) * m * DstCfT<V>::idx_ratio; 
+
+      for(auto end = s + m * SrcCfT<V>::idx_ratio; s < end;)
+      {
+        C r0 = SrcCfT<V>::load(s, src_im_off);
+        DstCfT<V>::store({r0.re + r0.im, 0}, d0, dst_im_off);
+        DstCfT<V>::store({r0.re - r0.im, 0}, d1, dst_im_off);
+        
+        s += SrcCfT<V>::stride;
+        d0 += DstCfT<V>::stride;
+        d1 += DstCfT<V>::stride;
+      }
+    }
+  }
+}
+#endif

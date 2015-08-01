@@ -428,14 +428,16 @@ struct TestWrapper<V, CfT, false, true>
   static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
   typedef T value_type;
-  State<T>* state;
+  InverseMultidimState<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, true>(size),
-    state(inverse_fft_state<V, CfT, CfT>(
-        size[0], valloc(inverse_fft_state_memory_size<V>(size[0])))) {}
+    state(inverse_multidim_fft_state<V, CfT, CfT>(
+      size.size(),
+      &size[0],
+      valloc(inverse_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  ~TestWrapper() { free(inverse_fft_state_memory_ptr(state)); }
-  void transform() { inverse_fft<T>(state, this->src, this->dst); }
+  //~TestWrapper() { free(fft_state_memory_ptr(state)); }
+  void transform() { inverse_multidim_fft<T>(state, this->src, this->dst); }
 };
 
 template<typename V, template<typename> class CfT>
