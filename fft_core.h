@@ -2150,7 +2150,10 @@ void multi_first_pass(
 
 template<typename V, typename SrcCf, typename DstCf>
 void multi_first_two_passes(
-  Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
+  Int n, Int m,
+  Int im_off,
+  typename V::T* src, //Int src_im_off, Int src_stride,
+  typename V::T* dst)//, Int dst_im_off)
 {
   VEC_TYPEDEFS(V);
 
@@ -2162,6 +2165,38 @@ void multi_first_two_passes(
   auto doff2 = 2 * doff1;
   auto doff3 = 3 * doff1;
 
+  for(auto i = 0; i < n / 4; i++)
+  {
+    auto s = src + i * m * SrcCf::idx_ratio;
+    auto d = dst + i * m * DstCf::idx_ratio;
+    for(auto end = s + m * SrcCf::idx_ratio; s < end;)
+    {
+      C a0 = SrcCf::load(s, im_off);
+      C a1 = SrcCf::load(s + soff1, im_off);
+      C a2 = SrcCf::load(s + soff2, im_off);
+      C a3 = SrcCf::load(s + soff3, im_off);
+
+      C b0 = a0 + a2;
+      C b2 = a0 - a2;
+      C b1 = a1 + a3;
+      C b3 = a1 - a3;
+
+      C c0 = b0 + b1;
+      C c1 = b0 - b1;
+      C c2 = b2 + b3.mul_neg_i();
+      C c3 = b2 - b3.mul_neg_i();
+
+      DstCf::store(c0, d, im_off);
+      DstCf::store(c1, d + doff1, im_off);
+      DstCf::store(c2, d + doff2, im_off);
+      DstCf::store(c3, d + doff3, im_off);
+
+      s += SrcCf::stride;
+      d += DstCf::stride;
+    }
+  }
+
+#if 0
   for(auto end = src + soff1; src < end;)
   {
     C a0 = SrcCf::load(src, im_off);
@@ -2187,6 +2222,7 @@ void multi_first_two_passes(
     src += SrcCf::stride;
     dst += DstCf::stride;
   }
+#endif
 }
 
 template<typename V, typename Cf>
@@ -2322,7 +2358,9 @@ void multi_fft(
     multi_first_pass<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
   else
   {
-    multi_first_two_passes<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
+    multi_first_two_passes<V, SrcCf, DstCf>(
+      s->n, s->m, im_off, src, dst);
+
     if(s->n > 4) 
       for(Int i = 0; i < s->n; i += s->n / 4)
         multi_fft_recurse<V, DstCf>(s, i, i + s->n / 4, 4, dst, im_off);
