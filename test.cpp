@@ -44,7 +44,9 @@ void dump(T_* ptr, Int n, const char* name, ...)
 template<typename T>
 T* alloc_complex_array(Int n)
 {
-  return (T*) valloc(2 * n * sizeof(T));
+  auto r = (T*) valloc(2 * n * sizeof(T));
+  printf("allocated range %p %p\n", r, r + 2 * n * sizeof(T));
+  return r;
 }
 
 Int chunked_index(Int i, Int chunk_size)
@@ -259,8 +261,8 @@ struct SplitWrapperBase<T, true, false>
   SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
     im_off(im_off),
     size(size),
-    src((T*) valloc(sizeof(T) * product(size))),
-    dst((T*) valloc(2 * sizeof(T) * im_off))
+    src(alloc_complex_array<T>(product(size) / 2)),
+    dst(alloc_complex_array<T>(im_off))
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
@@ -448,22 +450,24 @@ struct TestWrapper<V, CfT, true, false>
   static const bool is_inverse = false;
   VEC_TYPEDEFS(V);
   typedef typename V::T value_type;
-  RealState<T>* state;
+  RealMultidimState<T>* state;
 
   static Int im_offset(const std::vector<Int>& size)
   {
-    return align_size<T>(size[0] / 2 + 1);
+    Int inner = product(ptr_range(&size[1], size.size() - 1));
+    return align_size<T>((size[0] / 2 + 1) * inner);
   }
 
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, false>(size, im_offset(size)),
-    state(rfft_state<V, CfT>(size[0], valloc(rfft_state_memory_size<V>(size[0])))) {}
+    state(real_multidim_fft_state<V, CfT>(size.size(), &size[0], 
+      valloc(real_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  ~TestWrapper() { free(rfft_state_memory_ptr(state)); }
+  //~TestWrapper() { free(rfft_state_memory_ptr(state)); }
 
   void transform()
   {
-    rfft(state, this->src, this->dst);
+    real_multidim_fft(state, this->src, this->dst);
   }
 };
 

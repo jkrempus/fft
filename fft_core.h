@@ -888,7 +888,6 @@ void init_twiddle(
   
   for(Int dft_size = 1, s = 0; dft_size < n; s++)
   {
-    //printf("nsteps %d npasses %d\n", step.nsteps, step.npasses);
     Int npasses = num_passes_callback(s, dft_size);
 
 		if(npasses == 5 && dft_size == 1)
@@ -2498,14 +2497,15 @@ MultidimState<typename V::T>* multidim_fft_state(Int ndim, const Int* dim, void*
 
 template<typename T>
 void multidim_fft_impl(
-  Int idim, MultidimState<T>* s, Int im_off, T* src, T* working, T* dst)
+  Int idim, MultidimState<T>* s, Int im_off, T* src, T* working, T* dst,
+  bool interleaved_src_rows)
 {
   ASSERT(idim < s->ndim);
   if(idim == s->ndim - 1) fft_impl(s->last_transform, im_off, src, dst);
   else
   {
     s->transforms[idim]->fun_ptr(
-      s->transforms[idim], src, working, im_off, false);
+      s->transforms[idim], src, working, im_off, interleaved_src_rows);
 
     Int m = s->transforms[idim]->m;
     Int n = s->transforms[idim]->n;
@@ -2513,7 +2513,8 @@ void multidim_fft_impl(
     {
       auto next_src = working + br.i * m * s->working_idx_ratio;
       auto next_dst = dst + br.br * m * s->dst_idx_ratio;
-      multidim_fft_impl(idim + 1, s, im_off, next_src, next_src, next_dst);
+      multidim_fft_impl(idim + 1, s, im_off, next_src, next_src, next_dst,
+        interleaved_src_rows);
     }
   }
 }
@@ -2521,7 +2522,8 @@ void multidim_fft_impl(
 template<typename T>
 void multidim_fft(MultidimState<T>* state, T* src, T* dst)
 {
-  multidim_fft_impl<T>(0, state, state->num_elements, src, state->working, dst);
+  multidim_fft_impl<T>(
+    0, state, state->num_elements, src, state->working, dst, false);
 }
 
 template<typename T>
@@ -2534,7 +2536,7 @@ template<typename T>
 void inverse_multidim_fft(InverseMultidimState<T>* state, T* src, T* dst)
 {
   auto s = &state->state;
-  multidim_fft_impl<T>(0, s, s->num_elements, src, s->working, dst);
+  multidim_fft_impl<T>(0, s, s->num_elements, src, s->working, dst, false);
 }
 
 template<typename V>
@@ -2557,7 +2559,6 @@ InverseMultidimState<typename V::T>* inverse_multidim_fft_state(
     cf::Swapped<DstCfT>::template Cf>(ndim, dim, mem);
 }
 
-#if 1
 template<
   typename V,
   template<typename> class SrcCfT,
@@ -2574,14 +2575,15 @@ void multi_real_pass(
 
   Vec half = V::vec(0.5);
 
-  for(Int i = 0; i < n / 2 - 1; i++)
+  for(Int i = 0; i < n / 4; i++)
   {
     C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
 
     auto s0 = src + (i + 1) * m * SrcCfT<V>::idx_ratio; 
+    auto s1 = src + (n / 2 - i - 1) * m * SrcCfT<V>::idx_ratio; 
+    
     auto d0 = dst + (i + 1) * m * DstCfT<V>::idx_ratio; 
-    auto s1 = src + (n - i - 1) * m * SrcCfT<V>::idx_ratio; 
-    auto d1 = dst + (n - i - 1) * m * DstCfT<V>::idx_ratio; 
+    auto d1 = dst + (n / 2 - i - 1) * m * DstCfT<V>::idx_ratio; 
 
     for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
     {
@@ -2592,13 +2594,13 @@ void multi_real_pass(
 
       if(inverse)
       {
-        a = s0 + s1.adj();
-        b = (s1.adj() - s0) * w.adj();
+        a = sval0 + sval1.adj();
+        b = (sval1.adj() - sval0) * w.adj();
       }
       else
       {
-        a = (s0 + s1.adj()) * half;
-        b = ((s0 - s1.adj()) * w) * half;
+        a = (sval0 + sval1.adj()) * half;
+        b = ((sval0 - sval1.adj()) * w) * half;
       }
 
       C dval0 = a + b.mul_neg_i();
@@ -2609,46 +2611,118 @@ void multi_real_pass(
 
       s0 += SrcCfT<V>::stride;
       s1 += SrcCfT<V>::stride;
+
       d0 += DstCfT<V>::stride;
       d1 += DstCfT<V>::stride;
     }
   }
 
+  if(inverse)
   {
-    if(inverse)
+    auto s0 = src; 
+    auto s1 = src + n / 2 * m * SrcCfT<V>::idx_ratio; 
+    auto d = dst; 
+
+    for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
     {
-      auto s0 = src; 
-      auto s1 = src + n / 2 * m * SrcCfT<V>::idx_ratio; 
-      auto d = dst; 
+      Vec r0 = SrcCfT<V>::load(s0, src_im_off).re;
+      Vec r1 = SrcCfT<V>::load(s1, src_im_off).re;
+      DstCfT<V>::store({r0 + r1, r0 - r1}, d, dst_im_off);
 
-      for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
-      {
-        C r0 = SrcCfT<V>::load(s0, src_im_off).re;
-        C r1 = SrcCfT<V>::load(s1, src_im_off).re;
-        DstCfT<V>::store({r0 + r1, r0 - r1}, d, dst_im_off);
-
-        s0 += SrcCfT<V>::stride;
-        s1 += SrcCfT<V>::stride;
-        d += DstCfT<V>::stride;
-      }
+      s0 += SrcCfT<V>::stride;
+      s1 += SrcCfT<V>::stride;
+      d += DstCfT<V>::stride;
     }
-    else
-    {
-      auto s = src; 
-      auto d0 = dst; 
-      auto d1 = dst + (n / 2) * m * DstCfT<V>::idx_ratio; 
+  }
+  else
+  {
+    auto s = src; 
+    auto d0 = dst; 
+    auto d1 = dst + (n / 2) * m * DstCfT<V>::idx_ratio; 
 
-      for(auto end = s + m * SrcCfT<V>::idx_ratio; s < end;)
-      {
-        C r0 = SrcCfT<V>::load(s, src_im_off);
-        DstCfT<V>::store({r0.re + r0.im, 0}, d0, dst_im_off);
-        DstCfT<V>::store({r0.re - r0.im, 0}, d1, dst_im_off);
-        
-        s += SrcCfT<V>::stride;
-        d0 += DstCfT<V>::stride;
-        d1 += DstCfT<V>::stride;
-      }
+    for(auto end = s + m * SrcCfT<V>::idx_ratio; s < end;)
+    {
+      C r0 = SrcCfT<V>::load(s, src_im_off);
+      DstCfT<V>::store({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
+      DstCfT<V>::store({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
+      
+      s += SrcCfT<V>::stride;
+      d0 += DstCfT<V>::stride;
+      d1 += DstCfT<V>::stride;
     }
   }
 }
-#endif
+
+template<typename T>
+struct RealMultidimState
+{
+  MultidimState<T>* multidim_state;
+  T* twiddle;
+  Int outer_n;
+  Int inner_n;
+  void (*real_pass)(
+    Int n, Int m,
+    T* src, Int src_im_off,
+    T* twiddle,
+    T* dst, Int dst_im_off);
+};
+
+template<typename V>
+Int real_multidim_state_memory_size(Int ndim, const Int* dim)
+{
+  VEC_TYPEDEFS(V)
+  Int half_dim[maxdim];
+  copy(dim, ndim, half_dim);
+  half_dim[0] /= 2;
+
+  Int r = 0;
+  r = align_size(r + sizeof(RealMultidimState<T>));
+  r = align_size(r + sizeof(T) * dim[0]);
+  r = align_size(r + multidim_state_memory_size<V>(ndim, half_dim));
+  return r;
+}
+
+template<typename V, template<typename> class DstCfT>
+RealMultidimState<typename V::T>*
+real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
+{
+  VEC_TYPEDEFS(V)
+
+  Int half_dim[maxdim];
+  copy(dim, ndim, half_dim);
+  half_dim[0] /= 2;
+
+  auto r = (RealMultidimState<T>*) mem;
+  mem = (void*) align_size(Uint(mem) + sizeof(RealMultidimState<T>*));
+  r->twiddle = (T*) mem;
+  r->outer_n = dim[0];
+  r->inner_n = product(ptr_range(dim + 1, ndim - 1));
+  mem = (void*) align_size(Uint(mem) + r->outer_n * sizeof(T));
+  r->multidim_state = multidim_fft_state<V, cf::Split, cf::Split>(
+    ndim, half_dim, mem);
+
+  r->real_pass = &multi_real_pass<V, cf::Split, DstCfT, false>;
+
+  Int m =  r->outer_n / 2;
+  compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+  copy(r->twiddle + 1, m - 1, r->twiddle);
+  copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+
+  return r;
+}
+
+template<typename T>
+Int real_multidim_fft(RealMultidimState<T>* state, T* src, T* dst)
+{
+  auto ms = state->multidim_state;
+  multidim_fft_impl(0, ms, ms->num_elements, src, dst, ms->working, true);
+  //array_ipc::send("rmsrc", src, ms->num_elements * 2);
+  //array_ipc::send("rmdst", ms->working, ms->num_elements * 2);
+
+  state->real_pass(
+    state->outer_n, state->inner_n,
+    ms->working, ms->num_elements,
+    state->twiddle,
+    dst, (state->outer_n / 2 + 1) * state->inner_n);
+}
+
