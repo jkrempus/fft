@@ -11,7 +11,7 @@ const Int max_int = Int(Uint(-1) >> 1);
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
-#if 0
+#if 1
 
 #define DEBUG_OUTPUT
 
@@ -2355,12 +2355,8 @@ void multi_fft(
   bool interleaved_src_rows)
 {
   if(s->n == 1)
-  {
-    dst[0] = src[0];
-    //TODO: what about other formats
-    dst[im_off] = src[im_off];
-  }
-  if(s->n == 2)
+    complex_copy<V, SrcCf, DstCf>(src, im_off, s->m, dst, im_off);
+  else if(s->n == 2)
     multi_first_pass<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
   else
   {
@@ -2594,7 +2590,6 @@ void multi_real_pass(
   typename V::T* twiddle,
   typename V::T* dst, Int dst_im_off)
 {
-  if(SameType<DstCfT<V>, cf::Vec<V>>::value) ASSERT(0);
   VEC_TYPEDEFS(V);
 
   Vec half = V::vec(0.5);
@@ -2665,6 +2660,7 @@ void multi_real_pass(
     auto d0 = dst; 
     auto d1 = dst + (n / 2) * m * DstCfT<V>::idx_ratio; 
 
+    printf("m %d\n", m);
     for(auto end = s + m * SrcCfT<V>::idx_ratio; s < end;)
     {
       C r0 = SrcCfT<V>::load(s, src_im_off);
@@ -2682,9 +2678,12 @@ template<typename T>
 struct RealMultidimState
 {
   T* twiddle;
-  T* working;
+  T* working0;
+  T* working1;
   Int outer_n;
   Int inner_n;
+  Int im_off;
+  Int dst_idx_ratio;
   RealState<T>* onedim_transform;
   MultidimState<T>* multidim_transform;
   MultiState<T>* first_transform;
@@ -2694,6 +2693,12 @@ struct RealMultidimState
     T* twiddle,
     T* dst, Int dst_im_off);
 };
+
+Int real_multidim_im_off(Int ndim, const Int* dim)
+{
+  return align_size(
+    product(ptr_range(dim + 1, dim + ndim)) * (dim[0] / 2 + 1));
+}
 
 template<typename V>
 Int real_multidim_state_memory_size(Int ndim, const Int* dim)
@@ -2707,7 +2712,8 @@ Int real_multidim_state_memory_size(Int ndim, const Int* dim)
   else
   {
     r = align_size(r + sizeof(T) * dim[0]);
-    r = align_size(r + sizeof(T) * product(ptr_range(dim, ndim)));
+    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off(ndim, dim));
+    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off(ndim, dim));
     r = align_size(r + multi_state_memory_size<V>(dim[0] / 2));
     r = align_size(r + multidim_state_memory_size<V>(ndim - 1, dim + 1));
   }
@@ -2725,23 +2731,30 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   if(ndim == 1)
   {
      r->onedim_transform = rfft_state<V, DstCfT>(dim[0], mem);
-     r->working = nullptr;
+     r->dst_idx_ratio = 0;
+     r->working0 = nullptr;
+     r->working1 = nullptr;
      r->twiddle = nullptr;
      r->outer_n = 0;
      r->inner_n = 0;
+     r->im_off = 0;
      r->multidim_transform = nullptr;
      r->first_transform = nullptr;
      r->real_pass = nullptr;
   }
   else
   {
+    r->dst_idx_ratio = DstCfT<V>::idx_ratio;
     r->outer_n = dim[0];
     r->inner_n = product(ptr_range(dim + 1, dim + ndim));
     r->onedim_transform = nullptr;
+    r->im_off = real_multidim_im_off(ndim, dim);
     r->twiddle = (T*) mem;
     mem = (void*) align_size(Uint(mem) + sizeof(T) * dim[0]);
-    r->working = (T*) mem;
-    mem = (void*) align_size(Uint(mem) + sizeof(T) * product(ptr_range(dim, ndim)));
+    r->working0 = (T*) mem;
+    mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
+    r->working1 = (T*) mem;
+    mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
     r->first_transform = multi_fft_state<V, cf::Split, cf::Vec>(
       r->outer_n / 2, r->inner_n, mem);
 
@@ -2759,28 +2772,39 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
 }
 
 template<typename T>
-void real_multidim_fft(RealMultidimState<T>* state, T* src, T* dst)
+void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
 {
-  if(state->onedim_transform) return rfft(state->onedim_transform, src, dst);
+  if(s->onedim_transform) return rfft(s->onedim_transform, src, dst);
 
-  state->first_transform->fun_ptr(
-    state->first_transform,
+  array_ipc::send("s", src, s->inner_n * s->outer_n);  
+
+  s->first_transform->fun_ptr(
+    s->first_transform,
     src,
-    state->working,
-    state->outer_n / 2 * state->inner_n,
+    s->working0,
+    s->outer_n / 2 * s->inner_n,
     true);
+  
+  array_ipc::send("f", s->working0, s->inner_n * s->outer_n);  
 
-  state->real_pass(
-    state->outer_n, state->inner_n,
-    state->working, state->outer_n / 2 * state->inner_n,
-    state->twiddle,
-    dst, (state->outer_n / 2 + 1) * state->inner_n);
+  s->real_pass(
+    s->outer_n, s->inner_n,
+    s->working0, s->outer_n / 2 * s->inner_n,
+    s->twiddle,
+    s->working1, s->im_off);
+  
+  array_ipc::send("r", dst, s->inner_n * (s->outer_n / 2 + 1) * 2);  
 
-  for(Int i = 0; i < state->outer_n / 2 + 1 ; i++)
-  {
-    const Int idx_ratio = 2; // because we have VecCf in dst
-    auto d = dst + i * state->inner_n * idx_ratio;
-    auto ms = state->multidim_transform;
-    multidim_fft_impl(0, ms, ms->num_elements, d, ms->working, d, true);
-  }
+  const Int working_idx_ratio = 2; // because we have cf::Vec in working
+  for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
+    multidim_fft_impl(
+      0,
+      s->multidim_transform,
+      s->im_off,
+      s->working1 + i * s->inner_n * working_idx_ratio,
+      s->multidim_transform->working,
+      dst + i * s->inner_n * s->dst_idx_ratio,
+      false);
+  
+  array_ipc::send("d", dst, s->inner_n * (s->outer_n / 2 + 1) * 2);  
 }
