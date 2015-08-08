@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+#include <iostream>
 #include <sys/time.h>
 #include <fstream>
 #include <unistd.h>
@@ -140,6 +141,13 @@ void fill_view(const T& value, const View<U>& dst)
 
 Int mirror_idx(Int size, Int idx) { return (size - 1) & (size - idx); }
 
+template<typename A>
+void print_range(const A& a)
+{
+  for(auto& e : a) std::cout << e << " ";
+  std::cout << std::endl;
+}
+
 template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 {
@@ -156,7 +164,10 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 
     if(is_antisym)
     {
-      if(it.idx == midx)
+      bool is_equal = true;
+      for(Int j = 0; j < src.ndim; j++) is_equal = is_equal && it.idx[j] == midx[j];
+
+      if(is_equal)
         *dst.ptr(it.idx) = 0;
       else
         *dst.ptr(it.idx) = mirror ? -*src.ptr(midx) : *src.ptr(it.idx);
@@ -265,7 +276,7 @@ struct SplitWrapperBase<T, true, false>
     dst(alloc_complex_array<T>(im_off))
   {
     symmetric_size = size;
-    symmetric_size.back() = symmetric_size.back() / 2 + 1;
+    symmetric_size.front() = symmetric_size.front() / 2 + 1;
   }
 
   template<typename U>
@@ -282,7 +293,7 @@ struct SplitWrapperBase<T, true, false>
     copy_symmetric_view<false>(
       create_view(dst, symmetric_size, 0),
       create_view(p, size, 0));
-    
+  
     copy_symmetric_view<true>(
       create_view(dst + im_off, symmetric_size, 0),
       create_view(p + n, size, 0));
@@ -725,7 +736,7 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
 
   for(Int i = 0; i < n * 2; i++) src[i] = dist(mt);
   
-  array_ipc::send("s_before", src, 2 * n);
+  //array_ipc::send("s_before", src, 2 * n);
 
   if(Fft0::is_real || Fft1::is_real)
   {
@@ -755,7 +766,7 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
   }
   
-  array_ipc::send("s", src, 2 * n);
+  //array_ipc::send("s", src, 2 * n);
 
   fft0.set_input(src);
   fft1.set_input(src);

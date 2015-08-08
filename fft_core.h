@@ -121,6 +121,9 @@ struct PtrRange
   T* end_;
   T* begin(){ return begin_; }
   T* end(){ return end_; }
+  
+  const T* begin() const { return begin_; }
+  const T* end() const { return end_; }
 };
 
 template<typename T> PtrRange<T> ptr_range(T* p, Int size) { return {p, p + size}; }
@@ -2694,9 +2697,10 @@ struct RealMultidimState
     T* dst, Int dst_im_off);
 };
 
+template<typename T>
 Int real_multidim_im_off(Int ndim, const Int* dim)
 {
-  return align_size(
+  return align_size<T>(
     product(ptr_range(dim + 1, dim + ndim)) * (dim[0] / 2 + 1));
 }
 
@@ -2712,8 +2716,8 @@ Int real_multidim_state_memory_size(Int ndim, const Int* dim)
   else
   {
     r = align_size(r + sizeof(T) * dim[0]);
-    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off(ndim, dim));
-    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off(ndim, dim));
+    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off<T>(ndim, dim));
+    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off<T>(ndim, dim));
     r = align_size(r + multi_state_memory_size<V>(dim[0] / 2));
     r = align_size(r + multidim_state_memory_size<V>(ndim - 1, dim + 1));
   }
@@ -2748,7 +2752,7 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
     r->outer_n = dim[0];
     r->inner_n = product(ptr_range(dim + 1, dim + ndim));
     r->onedim_transform = nullptr;
-    r->im_off = real_multidim_im_off(ndim, dim);
+    r->im_off = real_multidim_im_off<T>(ndim, dim);
     r->twiddle = (T*) mem;
     mem = (void*) align_size(Uint(mem) + sizeof(T) * dim[0]);
     r->working0 = (T*) mem;
@@ -2793,7 +2797,7 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
     s->twiddle,
     s->working1, s->im_off);
   
-  array_ipc::send("r", dst, s->inner_n * (s->outer_n / 2 + 1) * 2);  
+  array_ipc::send("r", s->working1, s->im_off * 2);  
 
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
@@ -2806,5 +2810,5 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
       dst + i * s->inner_n * s->dst_idx_ratio,
       false);
   
-  array_ipc::send("d", dst, s->inner_n * (s->outer_n / 2 + 1) * 2);  
+  array_ipc::send("d", dst, s->im_off * 2);  
 }
