@@ -2135,19 +2135,28 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
 
 template<typename V, typename SrcCf, typename DstCf>
 void multi_first_pass(
-  Int n, Int m, Int im_off, typename V::T* src, typename V::T* dst)
+  Int n, Int m,
+  typename V::T* src, Int src_im_off, Int src_stride,
+  typename V::T* dst, Int dst_im_off)
 {
   VEC_TYPEDEFS(V);
-  auto soff = n * m / 2 * SrcCf::idx_ratio;
-  auto doff = n * m / 2 * DstCf::idx_ratio;
-  for(auto end = src + soff; src < end;)
+
+  auto soff1 = SrcCf::idx_ratio * n * src_stride / 2;
+  auto doff1 = DstCf::idx_ratio * n * m / 2;
+
+  for(auto i = 0; i < n / 2; i++)
   {
-    C a0 = SrcCf::load(src, im_off);
-    C a1 = SrcCf::load(src + soff, im_off);
-    DstCf::store(a0 + a1, dst, im_off);
-    DstCf::store(a0 - a1, dst + doff, im_off);
-    src += SrcCf::stride;
-    dst += DstCf::stride;
+    auto s = src + i * src_stride * SrcCf::idx_ratio;
+    auto d = dst + i * m * DstCf::idx_ratio;
+    for(auto end = s + m * SrcCf::idx_ratio; s < end;)
+    {
+      C a0 = SrcCf::load(s, src_im_off);
+      C a1 = SrcCf::load(s + soff1, src_im_off);
+      DstCf::store(a0 + a1, d, dst_im_off);
+      DstCf::store(a0 - a1, d + doff1, dst_im_off);
+      s += SrcCf::stride;
+      d += DstCf::stride;
+    }
   }
 }
 
@@ -2197,34 +2206,6 @@ void multi_first_two_passes(
       d += DstCf::stride;
     }
   }
-
-#if 0
-  for(auto end = src + soff1; src < end;)
-  {
-    C a0 = SrcCf::load(src, im_off);
-    C a1 = SrcCf::load(src + soff1, im_off);
-    C a2 = SrcCf::load(src + soff2, im_off);
-    C a3 = SrcCf::load(src + soff3, im_off);
-
-    C b0 = a0 + a2;
-    C b2 = a0 - a2;
-    C b1 = a1 + a3;
-    C b3 = a1 - a3;
-
-    C c0 = b0 + b1;
-    C c1 = b0 - b1;
-    C c2 = b2 + b3.mul_neg_i();
-    C c3 = b2 - b3.mul_neg_i();
-
-    DstCf::store(c0, dst, im_off);
-    DstCf::store(c1, dst + doff1, im_off);
-    DstCf::store(c2, dst + doff2, im_off);
-    DstCf::store(c3, dst + doff3, im_off);
-
-    src += SrcCf::stride;
-    dst += DstCf::stride;
-  }
-#endif
 }
 
 template<typename V, typename Cf>
@@ -2360,7 +2341,14 @@ void multi_fft(
   if(s->n == 1)
     complex_copy<V, SrcCf, DstCf>(src, im_off, s->m, dst, im_off);
   else if(s->n == 2)
-    multi_first_pass<V, SrcCf, DstCf>(s->n, s->m, im_off, src, dst);
+  {
+    if(interleaved_src_rows)
+      multi_first_pass<V, SrcCf, DstCf>(
+        s->n, s->m, src, s->m, 2 * s->m, dst, im_off);
+    else
+      multi_first_pass<V, SrcCf, DstCf>(
+        s->n, s->m, src, im_off, s->m, dst, im_off);
+  }
   else
   {
     if(interleaved_src_rows)
