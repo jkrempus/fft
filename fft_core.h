@@ -1977,7 +1977,7 @@ void real_pass(
     C s0 = SrcCfT<V>::unaligned_load(src + i0 * src_ratio, src_off);
     C s1 = reverse_complex<V>(SrcCfT<V>::load(src + i1 * src_ratio, src_off));
 
-    //printf("%f %f %f %f %f %f\n", w.re, w.im, s0.re, s0.im, s1.re, s1.im);
+    //printf("%f %f %f %f %f %f\n", s0.re, s0.im, s1.re, s1.im, w.re, w.im);
 
     C a, b;
 
@@ -2588,10 +2588,11 @@ void multi_real_pass(
 
   for(Int i = 0; i < n / 4; i++)
   {
-    C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
+    //C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
+    C w = { V::vec(twiddle[i]), V::vec(twiddle[i + n / 2]) };
 
     auto s0 = src + reverse_bits(i + 1, nbits) * m * SrcCfT<V>::idx_ratio; 
-    auto s1 = src + reverse_bits(n / 2 - i - 1, nbits) * m * SrcCfT<V>::idx_ratio; 
+    auto s1 = src + reverse_bits(n / 2 - i - 1, nbits) * m * SrcCfT<V>::idx_ratio;
 
     auto d0 = dst + (i + 1) * m * DstCfT<V>::idx_ratio; 
     auto d1 = dst + (n / 2 - i - 1) * m * DstCfT<V>::idx_ratio; 
@@ -2651,7 +2652,6 @@ void multi_real_pass(
     auto d0 = dst; 
     auto d1 = dst + (n / 2) * m * DstCfT<V>::idx_ratio; 
 
-    printf("m %d\n", m);
     for(auto end = s + m * SrcCfT<V>::idx_ratio; s < end;)
     {
       C r0 = SrcCfT<V>::load(s, src_im_off);
@@ -2768,8 +2768,6 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
 {
   if(s->onedim_transform) return rfft(s->onedim_transform, src, dst);
 
-  array_ipc::send("s", src, s->inner_n * s->outer_n);  
-
   s->first_transform->fun_ptr(
     s->first_transform,
     src,
@@ -2777,16 +2775,12 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
     s->outer_n / 2 * s->inner_n,
     true);
   
-  array_ipc::send("f", s->working0, s->inner_n * s->outer_n);  
-
   s->real_pass(
     s->outer_n, s->inner_n,
     s->working0, s->outer_n / 2 * s->inner_n,
     s->twiddle,
     s->working1, s->im_off);
   
-  array_ipc::send("r", s->working1, s->im_off * 2);  
-
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
     multidim_fft_impl(
@@ -2797,6 +2791,4 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
       s->multidim_transform->working,
       dst + i * s->inner_n * s->dst_idx_ratio,
       false);
-  
-  array_ipc::send("d", dst, s->im_off * 2);  
 }
