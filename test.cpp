@@ -42,10 +42,46 @@ void dump(T_* ptr, Int n, const char* name, ...)
   std::ofstream(buf, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
 }
 
-template<typename T>
-T* alloc_complex_array(Int n)
+#if 0
+char mem[1 << 30];
+char* mem_ptr = mem;
+
+void* alloc(Int n)
 {
-  auto r = (T*) valloc(2 * n * sizeof(T));
+#if 0
+  void* r = valloc(n);
+  //printf("valloc_ allocated range %p %p\n", r, (void*)(Uint(r) + n));
+  return r;
+#else
+  mem_ptr = (char*) align_size(Uint(mem_ptr));
+  auto r = mem_ptr;
+  mem_ptr += n;
+  return r;
+#endif
+}
+
+void dealloc(void* p)
+{
+  //free(p);
+  mem_ptr = mem;
+}
+#else
+void* alloc(Int n)
+{
+  void* r = valloc(n);
+  return r;
+}
+
+void dealloc(void* p)
+{
+  free(p);
+}
+#endif
+
+template<typename T>
+T* alloc_array(Int n)
+{
+  auto r = (T*) alloc(n * sizeof(T));
   //printf("allocated range %p %p\n", r, r + 2 * n * sizeof(T));
   return r;
 }
@@ -240,13 +276,13 @@ struct SplitWrapperBase<T, false, is_inverse_>
   
   SplitWrapperBase(const std::vector<Int> size) :
     size(size),
-    src((T*) valloc(2 * sizeof(T) * product(size))),
-    dst((T*) valloc(2 * sizeof(T) * product(size))) { }
+    src((T*) alloc(2 * sizeof(T) * product(size))),
+    dst((T*) alloc(2 * sizeof(T) * product(size))) { }
 
   ~SplitWrapperBase()
   {
-    free(src);
-    free(dst);
+    dealloc(src);
+    dealloc(dst);
   }
 
   template<typename U>
@@ -278,8 +314,8 @@ struct SplitWrapperBase<T, true, false>
   SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
     im_off(im_off),
     size(size),
-    src(alloc_complex_array<T>(product(size) / 2)),
-    dst(alloc_complex_array<T>(im_off))
+    src(alloc_array<T>(product(size))),
+    dst(alloc_array<T>(2 * im_off))
   {
     symmetric_size = size;
     symmetric_size.front() = symmetric_size.front() / 2 + 1;
@@ -287,8 +323,8 @@ struct SplitWrapperBase<T, true, false>
 
   ~SplitWrapperBase()
   {
-    free(src);
-    free(dst);
+    dealloc(src);
+    dealloc(dst);
   }
 
   template<typename U>
@@ -324,8 +360,8 @@ struct SplitWrapperBase<T, true, true>
   SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
     im_off(im_off),
     size(size),
-    dst(alloc_complex_array<T>(product(size) / 2)),
-    src(alloc_complex_array<T>(im_off))
+    dst(alloc_array<T>(product(size))),
+    src(alloc_array<T>(2 * im_off))
   {
     symmetric_size = size;
     symmetric_size.front() = symmetric_size.front() / 2 + 1;
@@ -333,8 +369,8 @@ struct SplitWrapperBase<T, true, true>
 
   ~SplitWrapperBase()
   {
-    free(src);
-    free(dst);
+    dealloc(src);
+    dealloc(dst);
   }
 
   template<typename U>
@@ -373,13 +409,13 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   
   InterleavedWrapperBase(const std::vector<Int>& size) :
     size(size),
-    src((T*) valloc(2 * sizeof(T) * product(size))),
-    dst((T*) valloc(2 * sizeof(T) * product(size))) { }
+    src((T*) alloc(2 * sizeof(T) * product(size))),
+    dst((T*) alloc(2 * sizeof(T) * product(size))) { }
 
   ~InterleavedWrapperBase()
   {
-    free(src);
-    free(dst);
+    dealloc(src);
+    dealloc(dst);
   };
 
   template<typename U>
@@ -411,14 +447,14 @@ struct InterleavedWrapperBase<T, true, false>
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
-    dst = (T*) valloc(2 * sizeof(T) * product(symmetric_size));
-    src = (T*) valloc(sizeof(T) * product(size));
+    dst = (T*) alloc(2 * sizeof(T) * product(symmetric_size));
+    src = (T*) alloc(sizeof(T) * product(size));
   }
 
   ~InterleavedWrapperBase()
   {
-    free(src);
-    free(dst);
+    dealloc(src);
+    dealloc(dst);
   };
 
   template<typename U>
@@ -457,14 +493,14 @@ struct InterleavedWrapperBase<T, true, true>
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
-    src = (T*) valloc(2 * sizeof(T) * im_offset);
-    dst = (T*) valloc(sizeof(T) * product(size));
+    src = (T*) alloc(2 * sizeof(T) * im_offset);
+    dst = (T*) alloc(sizeof(T) * product(size));
   }
 
   ~InterleavedWrapperBase()
   {
-    free(src);
-    free(dst);
+    dealloc(src);
+    dealloc(dst);
   };
 
   template<typename U>
@@ -505,9 +541,9 @@ struct TestWrapper<V, CfT, false, false>
     state(multidim_fft_state<V, CfT, CfT>(
       size.size(),
       &size[0],
-      valloc(multidim_state_memory_size<V>(size.size(), &size[0])))) {}
+      alloc(multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  ~TestWrapper() { free(state); }
+  ~TestWrapper() { dealloc(state); }
   void transform() { multidim_fft<T>(state, this->src, this->dst); }
 };
 
@@ -525,9 +561,9 @@ struct TestWrapper<V, CfT, false, true>
     state(inverse_multidim_fft_state<V, CfT, CfT>(
       size.size(),
       &size[0],
-      valloc(inverse_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
+      alloc(inverse_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  ~TestWrapper() { free(state); }
+  ~TestWrapper() { dealloc(state); }
   void transform() { inverse_multidim_fft<T>(state, this->src, this->dst); }
 };
 
@@ -550,9 +586,9 @@ struct TestWrapper<V, CfT, true, false>
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, false>(size, im_offset(size)),
     state(real_multidim_fft_state<V, CfT>(size.size(), &size[0], 
-      valloc(real_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
+      alloc(real_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  ~TestWrapper() { free(state); }
+  ~TestWrapper() { dealloc(state); }
 
   void transform()
   {
@@ -579,9 +615,9 @@ struct TestWrapper<V, CfT, true, true>
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, true>(size, im_offset(size)),
     state(inverse_rfft_state<V, CfT>(
-        size[0], valloc(inverse_rfft_state_memory_size<V>(size[0])))) {}
+        size[0], alloc(inverse_rfft_state_memory_size<V>(size[0])))) {}
 
-  ~TestWrapper() { free(state); }
+  ~TestWrapper() { dealloc(state); }
 
   void transform() { inverse_rfft(state, this->src, this->dst); }
 };
@@ -765,8 +801,8 @@ double bench(const std::vector<Int>& size, double requested_operations)
   Int n = product(size);
   typedef typename Fft::value_type T;
   Fft fft(size);
-  T* src = alloc_complex_array<T>(n);
-  T* dst = alloc_complex_array<T>(n);
+  T* src = alloc_array<T>(2 * n);
+  T* dst = alloc_array<T>(2 * n);
   
   for(Int i = 0; i < n * 2; i++) src[i] = 0.0f;
 
@@ -775,7 +811,16 @@ double bench(const std::vector<Int>& size, double requested_operations)
   auto operations = iter * (const_part * n * log2(n));
 
   double t0 = get_time();
-  for(int i = 0; i < iter; i++) fft.transform();
+  for(int64_t i = 0; i < iter; i++)
+  {
+    fft.transform();
+    int64_t j = i / (iter / 10);
+    if(j * (iter / 10) == i)
+    {
+      printf("%d ", j);
+      fflush(stdout);
+    }
+  }
   double t1 = get_time(); 
   
   return operations / (t1 - t0);
@@ -789,9 +834,9 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   Int n = product(size);
   Fft0 fft0(size);
   Fft1 fft1(size);
-  T* src = alloc_complex_array<T>(n);
-  T* dst0 = alloc_complex_array<T>(n);
-  T* dst1 = alloc_complex_array<T>(n);
+  T* src = alloc_array<T>(2 * n);
+  T* dst0 = alloc_array<T>(2 * n);
+  T* dst1 = alloc_array<T>(2 * n);
   
   std::mt19937 mt;
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
@@ -851,9 +896,9 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
     diff_sumsq += sq(dst1[i] - dst0[i]);
   }
 
-  free(src);
-  free(dst0);
-  free(dst1);
+  dealloc(src);
+  dealloc(dst0);
+  dealloc(dst1);
 
   return std::sqrt(diff_sumsq / sum_sumsq);
 }
