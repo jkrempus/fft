@@ -243,6 +243,12 @@ struct SplitWrapperBase<T, false, is_inverse_>
     src((T*) valloc(2 * sizeof(T) * product(size))),
     dst((T*) valloc(2 * sizeof(T) * product(size))) { }
 
+  ~SplitWrapperBase()
+  {
+    free(src);
+    free(dst);
+  }
+
   template<typename U>
   void set_input(U* p)
   {
@@ -277,6 +283,12 @@ struct SplitWrapperBase<T, true, false>
   {
     symmetric_size = size;
     symmetric_size.front() = symmetric_size.front() / 2 + 1;
+  }
+
+  ~SplitWrapperBase()
+  {
+    free(src);
+    free(dst);
   }
 
   template<typename U>
@@ -319,6 +331,12 @@ struct SplitWrapperBase<T, true, true>
     symmetric_size.front() = symmetric_size.front() / 2 + 1;
   }
 
+  ~SplitWrapperBase()
+  {
+    free(src);
+    free(dst);
+  }
+
   template<typename U>
   void set_input(U* p)
   {
@@ -358,6 +376,12 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
     src((T*) valloc(2 * sizeof(T) * product(size))),
     dst((T*) valloc(2 * sizeof(T) * product(size))) { }
 
+  ~InterleavedWrapperBase()
+  {
+    free(src);
+    free(dst);
+  };
+
   template<typename U>
   void set_input(U* p)
   {
@@ -390,6 +414,12 @@ struct InterleavedWrapperBase<T, true, false>
     dst = (T*) valloc(2 * sizeof(T) * product(symmetric_size));
     src = (T*) valloc(sizeof(T) * product(size));
   }
+
+  ~InterleavedWrapperBase()
+  {
+    free(src);
+    free(dst);
+  };
 
   template<typename U>
   void set_input(U* p)
@@ -430,6 +460,12 @@ struct InterleavedWrapperBase<T, true, true>
     src = (T*) valloc(2 * sizeof(T) * im_offset);
     dst = (T*) valloc(sizeof(T) * product(size));
   }
+
+  ~InterleavedWrapperBase()
+  {
+    free(src);
+    free(dst);
+  };
 
   template<typename U>
   void set_input(U* p)
@@ -544,6 +580,8 @@ struct TestWrapper<V, CfT, true, true>
     SplitWrapperBase<T, true, true>(size, im_offset(size)),
     state(inverse_rfft_state<V, CfT>(
         size[0], valloc(inverse_rfft_state_memory_size<V>(size[0])))) {}
+
+  ~TestWrapper() { free(state); }
 
   void transform() { inverse_rfft(state, this->src, this->dst); }
 };
@@ -813,6 +851,10 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
     diff_sumsq += sq(dst1[i] - dst0[i]);
   }
 
+  free(src);
+  free(dst0);
+  free(dst1);
+
   return std::sqrt(diff_sumsq / sum_sumsq);
 }
 
@@ -941,7 +983,11 @@ int main(int argc, char** argv)
   while(true)
   {
     for(auto e : sz) printf("%2d ", e);
-    printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags));
+    fflush(stdout);
+    if(opt.flags.count("-b") > 0)
+      printf("%f GFLOPS\n", test_or_bench0(opt.positional[0], sz, opt.flags) * 1e-9);
+    else
+      printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags));
 
     bool break_outer = true;
     for(Int i = sz.size() - 1; i >= 0; i--)
