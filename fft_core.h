@@ -2037,6 +2037,8 @@ template<typename V>
 Int rfft_state_memory_size(Int n)
 {
   VEC_TYPEDEFS(V);
+  if(V::vec_size != 1 && n <= 2 * V::vec_size)
+    return rfft_state_memory_size<Scalar<T>>(n);
 
   Int sz = 0;
   sz = aligned_increment(sz, sizeof(RealState<T>));
@@ -2049,6 +2051,9 @@ template<typename V, template<typename> class DstCfT>
 RealState<typename V::T>* rfft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
+  if(V::vec_size != 1 && n <= 2 * V::vec_size)
+    return rfft_state<Scalar<T>, DstCfT>(n, ptr);
+
   RealState<T>* r = (RealState<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(RealState<T>));
 
@@ -2097,6 +2102,10 @@ template<typename V, template<typename> class SrcCfT>
 InverseRealState<typename V::T>* inverse_rfft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
+  VEC_TYPEDEFS(V);
+  if(V::vec_size != 1 && n <= 2 * V::vec_size)
+    return inverse_rfft_state<Scalar<T>, SrcCfT>(n, ptr);
+
   auto r = (InverseRealState<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(RealState<T>));
 
