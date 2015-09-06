@@ -1,6 +1,12 @@
+#if defined __arm__
+typedef int Int;
+typedef unsigned Uint;
+#define WORD_SIZE 32
+#else
 typedef long Int;
 typedef unsigned long Uint;
 #define WORD_SIZE 64
+#endif
 
 const Int max_int = Int(Uint(-1) >> 1);
 
@@ -749,17 +755,16 @@ struct AvxFloat
   
   static void transpose4x4_two(Vec& a0, Vec& a1, Vec& a2, Vec& a3)
   {
-    Vec b0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0));
-    Vec b1 = _mm256_shuffle_ps(a2, a3, _MM_SHUFFLE(1, 0, 1, 0));
-    Vec b2 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2));
-    Vec b3 = _mm256_shuffle_ps(a2, a3, _MM_SHUFFLE(3, 2, 3, 2));
-
-    a0 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
-    a1 = _mm256_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
-    a2 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
-    a3 = _mm256_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
+    Vec b0 = _mm256_unpacklo_ps(a0, a2);
+    Vec b1 = _mm256_unpacklo_ps(a1, a3);
+    Vec b2 = _mm256_unpackhi_ps(a0, a2);
+    Vec b3 = _mm256_unpackhi_ps(a1, a3);
+    a0 = _mm256_unpacklo_ps(b0, b1);
+    a1 = _mm256_unpackhi_ps(b0, b1);
+    a2 = _mm256_unpacklo_ps(b2, b3);
+    a3 = _mm256_unpackhi_ps(b2, b3);
   }
-  
+
   static Vec reverse(Vec v)
   {
     v = _mm256_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
@@ -2564,6 +2569,21 @@ Int reverse_bits(Int a_in, Int nbits)
   a = ((a >> 16) & c16) | ((a & c16) << 16);
   a = (a >> 32) | (a << 32);
   return Int(a >> (64 - nbits));
+}
+#else
+Int reverse_bits(Int a_in, Int nbits)
+{
+  Uint a = a_in;
+  Uint c1 =  0x55555555ULL;
+  Uint c2 =  0x33333333ULL;
+  Uint c4 =  0x0f0f0f0fULL;
+  Uint c8 =  0x00ff00ffULL;
+  a = ((a >> 1) & c1) | ((a & c1) << 1);
+  a = ((a >> 2) & c2) | ((a & c2) << 2);
+  a = ((a >> 4) & c4) | ((a & c4) << 4);
+  a = ((a >> 8) & c8) | ((a & c8) << 8);
+  a = (a >> 16) | (a << 16);
+  return Int(a >> (32 - nbits));
 }
 #endif
 

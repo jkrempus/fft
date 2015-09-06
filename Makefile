@@ -40,7 +40,8 @@ scalar: CXXFLAGS += -DNO_SIMD
 scalar: test
 
 .PHONY: neon
-neon: CXXFLAGS += -fPIE -mfpu=neon -mfloat-abi=softfp -mcpu=cortex-a15
+neon: CXXFLAGS += -fPIE -mfpu=neon -mfloat-abi=softfp
+neon: LDFLAGS += -pie
 neon: test
 
 clean:

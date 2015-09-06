@@ -5,7 +5,17 @@ import os
 import sys
 import threading
 
-elemetype_dict = { 0 : float32, 1 : float64 }
+elemetype_dict = {
+    0 : float32,
+    1 : float64,
+    2 : int8,
+    3 : int16,
+    4 : int32,
+    5 : int64,
+    6 : uint8,
+    7 : uint16,
+    8 : uint32,
+    9 : uint64}
 
 class PackageType(object):
     onedim_array = 0;
