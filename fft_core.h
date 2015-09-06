@@ -17,7 +17,7 @@ const Int max_int = Int(Uint(-1) >> 1);
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
-#if 1
+#if 0
 
 #define DEBUG_OUTPUT
 
@@ -1777,17 +1777,10 @@ Int tiny_twiddle_bytes()
   return sizeof(typename V::Vec) * 2 * tiny_log2(V::vec_size);
 }
 
-template<typename V>
-Int state_struct_offset(Int n)
-{
-  VEC_TYPEDEFS(V);
-  return align_size(
-    sizeof(T) * 2 * n +                            //working0
-    sizeof(T) * 2 * n +                            //working1
-    sizeof(T) * 2 * n +                            //twiddle
-    tiny_twiddle_bytes<V>() +                      //tiny_twiddle
-    sizeof(Int) * n / V::vec_size / 2);            //br table
-}
+static Int aligned_increment(Int sz, Int bytes) { return align_size(sz + bytes); }
+
+template<typename T>
+T* aligned_increment(T* ptr, Int bytes) { return (T*) align_size(Uint(ptr) + bytes); }
 
 template<typename V>
 Int fft_state_memory_size(Int n)
@@ -1796,7 +1789,14 @@ Int fft_state_memory_size(Int n)
   if(n <= V::vec_size && V::vec_size != 1)
     return fft_state_memory_size<Scalar<T>>(n);
 
-  return state_struct_offset<V>(n) + sizeof(State<T>);
+  Int sz = 0;
+  sz = aligned_increment(sz, sizeof(State<T>));
+  sz = aligned_increment(sz, sizeof(T) * 2 * n);
+  sz = aligned_increment(sz, sizeof(T) * 2 * n);
+  sz = aligned_increment(sz, sizeof(T) * 2 * n);
+  sz = aligned_increment(sz, tiny_twiddle_bytes<V>() * n);
+  sz = aligned_increment(sz, sizeof(Int) * n / V::vec_size / 2);
+  return sz;
 }
 
 template<
@@ -1809,25 +1809,34 @@ State<typename V::T>* fft_state(Int n, void* ptr)
   if(n <= V::vec_size && V::vec_size != 1)
     return fft_state<Scalar<T>, SrcCfT, DstCfT>(n, ptr);
 
-  auto state = (State<T>*)(Uint(ptr) + Uint(state_struct_offset<V>(n)));
+  auto state = (State<T>*) ptr;
   state->n = n;
   state->im_off = n;
+  ptr = aligned_increment(ptr, sizeof(State<T>));
+
   state->working0 = (T*) ptr;
-  state->working1 = state->working0 + 2 * n;
-  state->twiddle = state->working1 + 2 * n;
-  state->tiny_twiddle = state->twiddle + 2 * n;
-  state->br_table = (Int*)(Uint(state->tiny_twiddle) + tiny_twiddle_bytes<V>());
+  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
+
+  state->working1 = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
+
+  state->twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
+
+  state->tiny_twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, tiny_twiddle_bytes<V>());
+
+  state->br_table = (Int*) ptr;
+
   init_steps<V, SrcCfT<V>, DstCfT<V>>(*state);
 
   init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
     n, state->working0, state->twiddle, state->tiny_twiddle);
 
   init_br_table<V, DstCfT<V>>(*state);
+
   return state;
 }
-
-template<typename T>
-void* fft_state_memory_ptr(State<T>* state) { return state->working0; }
 
 template<typename V>
 Int inverse_fft_state_memory_size(Int n){ return fft_state_memory_size<V>(n); }
@@ -1842,12 +1851,6 @@ State<typename V::T>* inverse_fft_state(Int n, void* ptr)
     V,
     cf::Swapped<SrcCfT>::template Cf,
     cf::Swapped<DstCfT>::template Cf>(n, ptr);
-}
-
-template<typename T>
-void* inverse_fft_state_memory_ptr(State<T>* state)
-{
-  return fft_state_memory_ptr((State<T>*) state);
 }
 
 template<typename T>
@@ -2031,47 +2034,36 @@ struct RealState
 };
 
 template<typename V>
-Int real_state_twiddle_offset(Int n)
-{
-  VEC_TYPEDEFS(V);
-  return align_size(fft_state_memory_size<V>(n / 2));
-}
-
-template<typename V>
-Int real_state_struct_offset(Int n)
-{
-  VEC_TYPEDEFS(V);
-  return align_size(real_state_twiddle_offset<V>(n) + sizeof(T) * n);
-}
-
-template<typename V>
 Int rfft_state_memory_size(Int n)
 {
   VEC_TYPEDEFS(V);
-  return real_state_struct_offset<V>(n) + sizeof(RealState<T>);
+
+  Int sz = 0;
+  sz = aligned_increment(sz, sizeof(RealState<T>));
+  sz = aligned_increment(sz, sizeof(T) * n);
+  sz = aligned_increment(sz, fft_state_memory_size<V>(n));
+  return sz;
 }
 
 template<typename V, template<typename> class DstCfT>
 RealState<typename V::T>* rfft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  RealState<T>* r = (RealState<T>*)(Uint(ptr) + real_state_struct_offset<V>(n));
-  r->state = fft_state<V, cf::Scal, cf::Split>(n / 2, ptr);
+  RealState<T>* r = (RealState<T>*) ptr;
+  ptr = aligned_increment(ptr, sizeof(RealState<T>));
 
-  r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
+  r->twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * n);
+ 
   r->real_pass = &real_pass<V, cf::Split, DstCfT, false>;
   
   Int m =  n / 2;
   compute_twiddle(m, m, r->twiddle, r->twiddle + m);
   copy(r->twiddle + 1, m - 1, r->twiddle);
   copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+  
+  r->state = fft_state<V, cf::Scal, cf::Split>(n / 2, ptr);
   return r;
-}
-
-template<typename T>
-void* rfft_state_memory_ptr(RealState<T>* state)
-{
-  return fft_state_memory_ptr(state->state);
 }
 
 template<typename T>
@@ -2105,23 +2097,21 @@ template<typename V, template<typename> class SrcCfT>
 InverseRealState<typename V::T>* inverse_rfft_state(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  auto r = (InverseRealState<T>*)(Uint(ptr) + real_state_struct_offset<V>(n));
+  auto r = (InverseRealState<T>*) ptr;
+  ptr = aligned_increment(ptr, sizeof(RealState<T>));
 
-  r->twiddle = (T*)(Uint(ptr) + real_state_twiddle_offset<V>(n));
+  r->twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * n);
+
   r->real_pass = &real_pass<V, SrcCfT, cf::Split, true>;
-  r->state = inverse_fft_state<V, cf::Split, cf::Scal>(n / 2, ptr);
 
   Int m =  n / 2;
   compute_twiddle(m, m, r->twiddle, r->twiddle + m);
   copy(r->twiddle + 1, m - 1, r->twiddle);
   copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+  
+  r->state = inverse_fft_state<V, cf::Split, cf::Scal>(n / 2, ptr);
   return r;
-}
-
-template<typename T>
-void* inverse_rfft_state_memory_ptr(InverseRealState<T>* state)
-{
-  return fft_state_memory_ptr(state->state);
 }
 
 template<typename T>

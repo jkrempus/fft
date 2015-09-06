@@ -46,7 +46,7 @@ template<typename T>
 T* alloc_complex_array(Int n)
 {
   auto r = (T*) valloc(2 * n * sizeof(T));
-  printf("allocated range %p %p\n", r, r + 2 * n * sizeof(T));
+  //printf("allocated range %p %p\n", r, r + 2 * n * sizeof(T));
   return r;
 }
 
@@ -300,6 +300,48 @@ struct SplitWrapperBase<T, true, false>
   }
 };
 
+template<typename T>
+struct SplitWrapperBase<T, true, true>
+{
+  Int im_off;
+  std::vector<Int> size;
+  std::vector<Int> symmetric_size;
+  T* src;
+  T* dst;
+
+  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
+    im_off(im_off),
+    size(size),
+    dst(alloc_complex_array<T>(product(size) / 2)),
+    src(alloc_complex_array<T>(im_off))
+  {
+    symmetric_size = size;
+    symmetric_size.front() = symmetric_size.front() / 2 + 1;
+  }
+
+  template<typename U>
+  void set_input(U* p)
+  {
+    copy_view(
+      create_view(p, symmetric_size, 0),
+      create_view(src, symmetric_size, 0));
+
+    copy_view(
+      create_view(p + product(size), symmetric_size, 0),
+      create_view(src + im_off, symmetric_size, 0));
+  }
+
+  template<typename U>
+  void get_output(U* p)
+  {
+    copy_view(
+      create_view(dst, size, 0),
+      create_view(p, size, 0));
+
+    fill_view(U(0), create_view(p + product(size), size, 0));
+  }
+};
+
 
 template<typename T, bool is_real, bool is_inverse>
 struct InterleavedWrapperBase { };
@@ -429,7 +471,7 @@ struct TestWrapper<V, CfT, false, false>
       &size[0],
       valloc(multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  //~TestWrapper() { free(fft_state_memory_ptr(state)); }
+  ~TestWrapper() { free(state); }
   void transform() { multidim_fft<T>(state, this->src, this->dst); }
 };
 
@@ -449,7 +491,7 @@ struct TestWrapper<V, CfT, false, true>
       &size[0],
       valloc(inverse_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  //~TestWrapper() { free(fft_state_memory_ptr(state)); }
+  ~TestWrapper() { free(state); }
   void transform() { inverse_multidim_fft<T>(state, this->src, this->dst); }
 };
 
@@ -474,7 +516,7 @@ struct TestWrapper<V, CfT, true, false>
     state(real_multidim_fft_state<V, CfT>(size.size(), &size[0], 
       valloc(real_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
 
-  //~TestWrapper() { free(rfft_state_memory_ptr(state)); }
+  ~TestWrapper() { free(state); }
 
   void transform()
   {
@@ -484,44 +526,26 @@ struct TestWrapper<V, CfT, true, false>
 
 template<typename V, template<typename> class CfT>
 struct TestWrapper<V, CfT, true, true>
+: public SplitWrapperBase<typename V::T, true, true>
 {
   static const bool is_real = true;
   static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
   typedef T value_type;
   InverseRealState<T>* state;
-  Int n;
-  Int im_offset;
-  T* src;
-  T* dst;
+  
+  static Int im_offset(const std::vector<Int>& size)
+  {
+    Int inner = product(ptr_range(&size[1], size.size() - 1));
+    return align_size<T>((size[0] / 2 + 1) * inner);
+  }
+
   TestWrapper(const std::vector<Int>& size) :
-    im_offset(align_size<T>(size[0] / 2 + 1)),
-    n(size[0]),
+    SplitWrapperBase<T, true, true>(size, im_offset(size)),
     state(inverse_rfft_state<V, CfT>(
-        size[0], valloc(inverse_rfft_state_memory_size<V>(size[0]))))
-  {
-    src = (T*) valloc(2 * im_offset * sizeof(T));
-    dst = (T*) valloc(n * sizeof(T));
-  }
+        size[0], valloc(inverse_rfft_state_memory_size<V>(size[0])))) {}
 
-  ~TestWrapper()
-  {
-    free(inverse_rfft_state_memory_ptr(state));
-    free(src);
-    free(dst);
-  }
-
-  void transform() { inverse_rfft(state, src, dst); }
-
-  template<typename U>
-  void set_input(U* p)
-  {
-  }
-
-  template<typename U>
-  void get_output(U* p)
-  {
-  }
+  void transform() { inverse_rfft(state, this->src, this->dst); }
 };
 
 #ifdef HAVE_FFTW
