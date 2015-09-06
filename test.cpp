@@ -722,7 +722,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 };
 
 template<typename Fft>
-void bench(const std::vector<Int>& size, double requested_operations)
+double bench(const std::vector<Int>& size, double requested_operations)
 {
   Int n = product(size);
   typedef typename Fft::value_type T;
@@ -739,8 +739,8 @@ void bench(const std::vector<Int>& size, double requested_operations)
   double t0 = get_time();
   for(int i = 0; i < iter; i++) fft.transform();
   double t1 = get_time(); 
-
-  printf("%f gflops\n", operations * 1e-9 / (t1 - t0));
+  
+  return operations / (t1 - t0);
 }
 
 template<typename Fft0, typename Fft1>
@@ -833,14 +833,6 @@ typedef Scalar<float> V;
 template<typename T>
 using CfT = complex_format::Split<T>;
 
-template<typename Fft>
-void test(const std::vector<Int>& size)
-{
-  //TODO: Use long double for ReferenceFft
-  printf("difference %e\n",
-		 compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size));
-}
-
 struct Options
 {
   std::unordered_set<std::string> flags;
@@ -859,57 +851,111 @@ Options parse_options(int argc, char** argv)
   return r;
 }
 
-template<typename Fft>
-void test_or_bench3(const Options& opt)
+std::pair<std::vector<Int>, std::vector<Int>>
+parse_sizes(const std::vector<std::string>& positional)
 {
-  std::vector<Int> size;
-  for(Int i = 1; i < opt.positional.size(); i++)
-  {    
-    Int log2n;
-    std::stringstream(opt.positional[i]) >> log2n;
-    size.push_back(1 << log2n);
+  std::pair<std::vector<Int>, std::vector<Int>> r;
+  for(Int i = 1; i < positional.size(); i++)
+  {
+    auto dot_pos = positional[i].find("-");
+    if(dot_pos == std::string::npos)
+    {
+      Int sz = std::stoi(positional[i]);
+      r.first.push_back(sz);
+      r.second.push_back(sz + 1);
+    }
+    else
+    {
+      r.first.push_back(std::stoi(positional[i].substr(0, dot_pos)));
+      r.second.push_back(std::stoi(positional[i].substr(dot_pos + 1)));
+    }
   }
 
-  if(opt.flags.count("-b"))
-    bench<Fft>(size, 1e11);
+  return r;
+}
+
+template<typename Fft>
+double test_or_bench3(
+  const std::string& impl,
+  const std::vector<Int>& lsz,
+  const std::unordered_set<std::string>& flags)
+{
+  std::vector<Int> size;
+  for(auto e : lsz) size.push_back(1 << e);
+
+  if(flags.count("-b"))
+    return bench<Fft>(size, 1e11);
   else
-    test<Fft>(size);
+    //TODO: Use long double for ReferenceFft
+    return compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size);
 }
 
 template<bool is_real, bool is_inverse>
-void test_or_bench2(const Options& opt)
+double test_or_bench2(
+  const std::string& impl,
+  const std::vector<Int>& lsz,
+  const std::unordered_set<std::string>& flags)
 {
-  if(opt.positional[0] == "fft")
-    test_or_bench3<TestWrapper<V, CfT, is_real, is_inverse>>(opt);
+  if(impl == "fft")
+    return test_or_bench3<TestWrapper<V, CfT, is_real, is_inverse>>(impl, lsz, flags);
 #ifdef HAVE_FFTW
-  else if(opt.positional[0] == "fftw")
-    test_or_bench3<FftwTestWrapper<float, is_real, is_inverse>>(opt);
+  else if(impl == "fftw")
+    return
+      test_or_bench3<FftwTestWrapper<float, is_real, is_inverse>>(impl, lsz, flags);
 #endif
   else
     abort();
 }
 
 template<bool is_real>
-void test_or_bench1(const Options& opt)
+double test_or_bench1(
+  const std::string& impl,
+  const std::vector<Int>& lsz,
+  const std::unordered_set<std::string>& flags)
 {
-  if(opt.flags.count("-i"))
-    test_or_bench2<is_real, true>(opt);
+  if(flags.count("-i"))
+    return test_or_bench2<is_real, true>(impl, lsz, flags);
   else
-    test_or_bench2<is_real, false>(opt);
+    return test_or_bench2<is_real, false>(impl, lsz, flags);
 }
 
-void test_or_bench0(const Options& opt)
+double test_or_bench0(
+  const std::string& impl,
+  const std::vector<Int>& lsz,
+  const std::unordered_set<std::string>& flags)
 {
-  if(opt.flags.count("-r"))
-    test_or_bench1<true>(opt);
+  if(flags.count("-r"))
+    return test_or_bench1<true>(impl, lsz, flags);
   else
-    test_or_bench1<false>(opt);
+    return test_or_bench1<false>(impl, lsz, flags);
 }
 
 int main(int argc, char** argv)
 {
   Options opt = parse_options(argc, argv);
   if(opt.positional.size() < 2) abort();
-  test_or_bench0(opt);
+
+  auto size_range = parse_sizes(opt.positional);
+
+  auto sz = size_range.first;
+  while(true)
+  {
+    for(auto e : sz) printf("%2d ", e);
+    printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags));
+
+    bool break_outer = true;
+    for(Int i = sz.size() - 1; i >= 0; i--)
+      if(sz[i] + 1 < size_range.second[i])
+      {
+        break_outer = false;
+        sz[i] = sz[i] + 1;
+        break;
+      }
+      else
+        sz[i] = size_range.first[i];
+
+    if(break_outer) break;
+  }
+
   return 0;
 }
