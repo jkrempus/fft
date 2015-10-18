@@ -801,10 +801,10 @@ double bench(const std::vector<Int>& size, double requested_operations)
   Int n = product(size);
   typedef typename Fft::value_type T;
   Fft fft(size);
+
   T* src = alloc_array<T>(2 * n);
-  T* dst = alloc_array<T>(2 * n);
-  
   for(Int i = 0; i < n * 2; i++) src[i] = 0.0f;
+  fft.set_input(src);
 
   double const_part = Fft::is_real ? 2.5 : 5.0;
   auto iter = max<uint64_t>(requested_operations / (const_part * n * log2(n)), 1);
