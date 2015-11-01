@@ -2586,9 +2586,9 @@ Int reverse_bits(Int a_in, Int nbits)
 }
 #endif
 
-//src is bit reversed
-//src and dst must not be the same
-//does not work for inverse yet
+// src is bit reversed
+// src and dst must not be the same
+// does not work for inverse yet
 template<
   typename V,
   template<typename> class SrcCfT,
@@ -2605,16 +2605,16 @@ void multi_real_pass(
   Vec half = V::vec(0.5);
   Int nbits = log2(n / 2);
 
-  for(Int i = 0; i < n / 4; i++)
+  for(Int i = 1; i <= n / 4; i++)
   {
     //C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
     C w = { V::vec(twiddle[i]), V::vec(twiddle[i + n / 2]) };
 
-    auto s0 = src + reverse_bits(i + 1, nbits) * m * SrcCfT<V>::idx_ratio; 
-    auto s1 = src + reverse_bits(n / 2 - i - 1, nbits) * m * SrcCfT<V>::idx_ratio;
+    auto s0 = src + reverse_bits(i, nbits) * m * SrcCfT<V>::idx_ratio; 
+    auto s1 = src + reverse_bits(n / 2 - i, nbits) * m * SrcCfT<V>::idx_ratio;
 
-    auto d0 = dst + (i + 1) * m * DstCfT<V>::idx_ratio; 
-    auto d1 = dst + (n / 2 - i - 1) * m * DstCfT<V>::idx_ratio; 
+    auto d0 = dst + i * m * DstCfT<V>::idx_ratio; 
+    auto d1 = dst + (n / 2 - i) * m * DstCfT<V>::idx_ratio; 
 
     for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
     {
@@ -2775,8 +2775,6 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   
     Int m =  r->outer_n / 2;
     compute_twiddle(m, m, r->twiddle, r->twiddle + m);
-    copy(r->twiddle + 1, m - 1, r->twiddle);
-    copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
   }
   
   return r; 
