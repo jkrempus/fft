@@ -2591,12 +2591,10 @@ Int reverse_bits(Int a_in, Int nbits)
 // does not work for inverse yet
 template<
   typename V,
-  template<typename> class SrcCfT,
   template<typename> class DstCfT,
   bool inverse>
 void multi_real_pass(
   Int n, Int m,
-  typename V::T* src, Int src_im_off,
   typename V::T* twiddle,
   typename V::T* dst, Int dst_im_off)
 {
@@ -2610,16 +2608,13 @@ void multi_real_pass(
     //C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
     C w = { V::vec(twiddle[i]), V::vec(twiddle[i + n / 2]) };
 
-    auto s0 = src + reverse_bits(i, nbits) * m * SrcCfT<V>::idx_ratio; 
-    auto s1 = src + reverse_bits(n / 2 - i, nbits) * m * SrcCfT<V>::idx_ratio;
+    auto d0 = dst + reverse_bits(i, nbits) * m * DstCfT<V>::idx_ratio; 
+    auto d1 = dst + reverse_bits(n / 2 - i, nbits) * m * DstCfT<V>::idx_ratio; 
 
-    auto d0 = dst + i * m * DstCfT<V>::idx_ratio; 
-    auto d1 = dst + (n / 2 - i) * m * DstCfT<V>::idx_ratio; 
-
-    for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
+    for(auto end = d0 + m * DstCfT<V>::idx_ratio; d0 < end;)
     {
-      C sval0 = SrcCfT<V>::load(s0, src_im_off);
-      C sval1 = SrcCfT<V>::load(s1, src_im_off);
+      C sval0 = DstCfT<V>::load(d0, dst_im_off);
+      C sval1 = DstCfT<V>::load(d1, dst_im_off);
 
       C a, b;
 
@@ -2640,9 +2635,6 @@ void multi_real_pass(
       DstCfT<V>::store(dval0, d0, dst_im_off);
       DstCfT<V>::store(dval1, d1, dst_im_off);
 
-      s0 += SrcCfT<V>::stride;
-      s1 += SrcCfT<V>::stride;
-
       d0 += DstCfT<V>::stride;
       d1 += DstCfT<V>::stride;
     }
@@ -2650,34 +2642,34 @@ void multi_real_pass(
 
   if(inverse)
   {
-    auto s0 = src; 
-    auto s1 = src + n / 2 * m * SrcCfT<V>::idx_ratio; 
+    auto s0 = dst; 
+    auto s1 = dst + n / 2 * m * DstCfT<V>::idx_ratio; 
     auto d = dst; 
 
-    for(auto end = s0 + m * SrcCfT<V>::idx_ratio; s0 < end;)
+    for(auto end = s0 + m * DstCfT<V>::idx_ratio; s0 < end;)
     {
-      Vec r0 = SrcCfT<V>::load(s0, src_im_off).re;
-      Vec r1 = SrcCfT<V>::load(s1, src_im_off).re;
+      Vec r0 = DstCfT<V>::load(s0, dst_im_off).re;
+      Vec r1 = DstCfT<V>::load(s1, dst_im_off).re;
       DstCfT<V>::store({r0 + r1, r0 - r1}, d, dst_im_off);
 
-      s0 += SrcCfT<V>::stride;
-      s1 += SrcCfT<V>::stride;
+      s0 += DstCfT<V>::stride;
+      s1 += DstCfT<V>::stride;
       d += DstCfT<V>::stride;
     }
   }
   else
   {
-    auto s = src; 
+    auto s = dst; 
     auto d0 = dst; 
     auto d1 = dst + (n / 2) * m * DstCfT<V>::idx_ratio; 
 
-    for(auto end = s + m * SrcCfT<V>::idx_ratio; s < end;)
+    for(auto end = s + m * DstCfT<V>::idx_ratio; s < end;)
     {
-      C r0 = SrcCfT<V>::load(s, src_im_off);
+      C r0 = DstCfT<V>::load(s, dst_im_off);
       DstCfT<V>::store({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
       DstCfT<V>::store({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
       
-      s += SrcCfT<V>::stride;
+      s += DstCfT<V>::stride;
       d0 += DstCfT<V>::stride;
       d1 += DstCfT<V>::stride;
     }
@@ -2689,7 +2681,6 @@ struct RealMultidimState
 {
   T* twiddle;
   T* working0;
-  T* working1;
   Int outer_n;
   Int inner_n;
   Int im_off;
@@ -2699,7 +2690,6 @@ struct RealMultidimState
   MultiState<T>* first_transform;
   void (*real_pass)(
     Int n, Int m,
-    T* src, Int src_im_off,
     T* twiddle,
     T* dst, Int dst_im_off);
 };
@@ -2724,7 +2714,6 @@ Int real_multidim_state_memory_size(Int ndim, const Int* dim)
   {
     r = align_size(r + sizeof(T) * dim[0]);
     r = align_size(r + sizeof(T) * 2 * real_multidim_im_off<T>(ndim, dim));
-    r = align_size(r + sizeof(T) * 2 * real_multidim_im_off<T>(ndim, dim));
     r = align_size(r + multi_state_memory_size<V>(dim[0] / 2));
     r = align_size(r + multidim_state_memory_size<V>(ndim - 1, dim + 1));
   }
@@ -2744,7 +2733,6 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
      r->onedim_transform = rfft_state<V, DstCfT>(dim[0], mem);
      r->dst_idx_ratio = 0;
      r->working0 = nullptr;
-     r->working1 = nullptr;
      r->twiddle = nullptr;
      r->outer_n = 0;
      r->inner_n = 0;
@@ -2764,14 +2752,12 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
     mem = (void*) align_size(Uint(mem) + sizeof(T) * dim[0]);
     r->working0 = (T*) mem;
     mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
-    r->working1 = (T*) mem;
-    mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
     r->first_transform = multi_fft_state<V, cf::Split, cf::Vec>(
       r->outer_n / 2, r->inner_n, mem);
 
     mem = (void*) align_size(Uint(mem) + multi_state_memory_size<V>(dim[0] / 2));
     r->multidim_transform = multidim_fft_state<V, cf::Vec, DstCfT>(ndim - 1, dim + 1, mem);
-    r->real_pass = &multi_real_pass<V, cf::Vec, cf::Vec, false>;
+    r->real_pass = &multi_real_pass<V, cf::Vec, false>;
   
     Int m =  r->outer_n / 2;
     compute_twiddle(m, m, r->twiddle, r->twiddle + m);
@@ -2794,18 +2780,43 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
   
   s->real_pass(
     s->outer_n, s->inner_n,
-    s->working0, s->outer_n / 2 * s->inner_n,
     s->twiddle,
-    s->working1, s->im_off);
-  
+    s->working0, s->im_off);
+
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
+  const Int nbits = log2(s->outer_n / 2);
   for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
+  {
+    Int br = i == s->outer_n / 2 ? i : reverse_bits(i, nbits);
     multidim_fft_impl(
       0,
       s->multidim_transform,
       s->im_off,
-      s->working1 + i * s->inner_n * working_idx_ratio,
+      s->working0 + br * s->inner_n * working_idx_ratio,
       s->multidim_transform->working,
       dst + i * s->inner_n * s->dst_idx_ratio,
       false);
+  }
 }
+
+template<typename T>
+struct InverseRealMultidimState
+{
+  T* twiddle;
+  T* working0;
+  T* working1;
+  Int outer_n;
+  Int inner_n;
+  Int im_off;
+  Int dst_idx_ratio;
+  RealState<T>* onedim_transform;
+  MultidimState<T>* multidim_transform;
+  MultiState<T>* first_transform;
+  void (*real_pass)(
+    Int n, Int m,
+    T* src, Int src_im_off,
+    T* twiddle,
+    T* dst, Int dst_im_off);
+};
+
+
