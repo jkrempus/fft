@@ -2174,61 +2174,55 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
-template<typename V, typename SrcCf, typename DstRows>
+template<typename V, typename SrcRows, typename DstRows>
 void multi_first_pass(
-  Int n, Int m,
-  typename V::T* src, Int src_im_off, Int src_stride,
-  const DstRows& dst)
+  Int n, const SrcRows& src, const DstRows& dst)
 {
   VEC_TYPEDEFS(V);
 
-  auto soff1 = SrcCf::idx_ratio * n * src_stride / 2;
-
   for(auto i = 0; i < n / 2; i++)
   {
-    auto s = src + i * src_stride * SrcCf::idx_ratio;
+    auto s0 = src.row(i);
+    auto s1 = src.row(i + n / 2);
     auto d0 = dst.row(i);
     auto d1 = dst.row(i + n / 2);
-    for(auto end = s + m * SrcCf::idx_ratio; s < end;)
+    for(auto end = s0 + dst.m * SrcRows::Cf::idx_ratio; s0 < end;)
     {
-      C a0 = SrcCf::load(s, src_im_off);
-      C a1 = SrcCf::load(s + soff1, src_im_off);
+      C a0 = SrcRows::Cf::load(s0, src.im_off);
+      C a1 = SrcRows::Cf::load(s1, src.im_off);
       DstRows::Cf::store(a0 + a1, d0, dst.im_off);
       DstRows::Cf::store(a0 - a1, d1, dst.im_off);
-      s += SrcCf::stride;
+      s0 += SrcRows::Cf::stride;
+      s1 += SrcRows::Cf::stride;
       d0 += DstRows::Cf::stride;
       d1 += DstRows::Cf::stride;
     }
   }
 }
 
-template<typename V, typename SrcCf, typename DstRows>
+template<typename V, typename SrcRows, typename DstRows>
 void multi_first_two_passes(
-  Int n, Int m,
-  typename V::T* src, Int src_im_off, Int src_stride,
-  const DstRows& dst)
+  Int n, const SrcRows& src , const DstRows& dst)
 {
   VEC_TYPEDEFS(V);
 
-  auto soff1 = SrcCf::idx_ratio * n * src_stride / 4;
-  auto soff2 = 2 * soff1;
-  auto soff3 = 3 * soff1;
-
   for(auto i = 0; i < n / 4; i++)
   {
-    auto s = src + i * src_stride * SrcCf::idx_ratio;
-
+    auto s0 = src.row(i);
+    auto s1 = src.row(i + n / 4);
+    auto s2 = src.row(i + 2 * n / 4);
+    auto s3 = src.row(i + 3 * n / 4);
     auto d0 = dst.row(i);
     auto d1 = dst.row(i + n / 4);
     auto d2 = dst.row(i + 2 * n / 4);
     auto d3 = dst.row(i + 3 * n / 4);
 
-    for(auto end = s + m * SrcCf::idx_ratio; s < end;)
+    for(auto end = s0 + dst.m * SrcRows::Cf::idx_ratio; s0 < end;)
     {
-      C a0 = SrcCf::load(s, src_im_off);
-      C a1 = SrcCf::load(s + soff1, src_im_off);
-      C a2 = SrcCf::load(s + soff2, src_im_off);
-      C a3 = SrcCf::load(s + soff3, src_im_off);
+      C a0 = SrcRows::Cf::load(s0, src.im_off);
+      C a1 = SrcRows::Cf::load(s1, src.im_off);
+      C a2 = SrcRows::Cf::load(s2, src.im_off);
+      C a3 = SrcRows::Cf::load(s3, src.im_off);
 
       C b0 = a0 + a2;
       C b2 = a0 - a2;
@@ -2245,7 +2239,10 @@ void multi_first_two_passes(
       DstRows::Cf::store(c2, d2, dst.im_off);
       DstRows::Cf::store(c3, d3, dst.im_off);
 
-      s += SrcCf::stride;
+      s0 += SrcRows::Cf::stride;
+      s1 += SrcRows::Cf::stride;
+      s2 += SrcRows::Cf::stride;
+      s3 += SrcRows::Cf::stride;
       d0 += DstRows::Cf::stride;
       d1 += DstRows::Cf::stride;
       d2 += DstRows::Cf::stride;
@@ -2284,7 +2281,6 @@ NOINLINE void multi_two_passes_inner(
 template<typename V, typename Rows>
 void multi_two_passes(
   Int n,
-  Int m,
   Int dft_size,
   Int start,
   Int end,
@@ -2307,17 +2303,12 @@ void multi_two_passes(
       data.row(j + 1 * stride / 4),
       data.row(j + 2 * stride / 4),
       data.row(j + 3 * stride / 4),
-      tw0, tw1, tw2, m, data.im_off);
+      tw0, tw1, tw2, data.m, data.im_off);
 }
 
 template<typename V, typename Rows>
 void multi_last_pass(
-  Int n,
-  Int m,
-  Int start,
-  Int end,
-  typename V::T* twiddle,
-  const Rows& rows)
+  Int n, Int start, Int end, typename V::T* twiddle, const Rows& rows)
 {
   VEC_TYPEDEFS(V);
   ASSERT(end - start == 2);
@@ -2325,7 +2316,7 @@ void multi_last_pass(
   C tw = {V::vec(twiddle[start]), V::vec(twiddle[start + 1])}; 
   auto p0 = rows.row(start);
   auto p1 = rows.row(start + 1);
-  for(Int i = 0; i < m * Rows::Cf::idx_ratio; i += Rows::Cf::stride)
+  for(Int i = 0; i < rows.m * Rows::Cf::idx_ratio; i += Rows::Cf::stride)
   {
     C b0 = Rows::Cf::load(p0 + i, rows.im_off);
     C mul = Rows::Cf::load(p1 + i, rows.im_off) * tw;
@@ -2355,32 +2346,33 @@ struct Rows
   typedef Cf_ Cf;
   typename Cf::T* ptr_;
   Int m;
+  Int row_stride;
   Int im_off;
-  typename Cf::T* row(Int i) const { return ptr_ + i * m * Cf::idx_ratio; }
+  typename Cf::T* row(Int i) const
+  {
+    return ptr_ + i * row_stride * Cf::idx_ratio;
+  }
 };
 
-template<typename V, typename Cf>
+template<typename V, typename Rows>
 void multi_fft_recurse(
   const MultiState<typename V::T>* s,
   Int start,
   Int end,
   Int dft_size,
-  typename V::T* data,
-  Int im_off)
+  const Rows& rows)
 {
   if(4 * dft_size <= s->n)
   {
-    multi_two_passes<V, Rows<Cf>>(
-      s->n, s->m, dft_size, start, end, s->twiddle, {data, s->m, im_off});
+    multi_two_passes<V>(s->n, dft_size, start, end, s->twiddle, rows);
 
     Int l = (end - start) / 4;
     if(4 * dft_size < s->n)
       for(Int i = start; i < end; i += l)
-        multi_fft_recurse<V, Cf>(s, i, i + l, dft_size * 4, data, im_off);
+        multi_fft_recurse<V>(s, i, i + l, dft_size * 4, rows);
   }
   else
-    multi_last_pass<V, Rows<Cf>>(
-      s->n, s->m, start, end, s->twiddle, {data, s->m, im_off});
+    multi_last_pass<V>(s->n, start, end, s->twiddle, rows);
 }
 
 // The result is bit reversed
@@ -2394,27 +2386,21 @@ void multi_fft(
 {
   if(s->n == 1)
     complex_copy<V, SrcCf, DstCf>(src, im_off, s->m, dst, im_off);
-  else if(s->n == 2)
-  {
-    if(interleaved_src_rows)
-      multi_first_pass<V, SrcCf, Rows<DstCf>>(
-        s->n, s->m, src, s->m, 2 * s->m, {dst, s->m, im_off});
-    else
-      multi_first_pass<V, SrcCf, Rows<DstCf>>(
-        s->n, s->m, src, im_off, s->m, {dst, s->m, im_off});
-  }
   else
   {
-    if(interleaved_src_rows)
-      multi_first_two_passes<V, SrcCf, Rows<DstCf>>(
-        s->n, s->m, src, s->m, 2 * s->m, {dst, s->m, im_off});
-    else
-      multi_first_two_passes<V, SrcCf, Rows<DstCf>>(
-        s->n, s->m, src, im_off, s->m, {dst, s->m, im_off});
+    auto dst_rows = Rows<DstCf>({dst, s->m, s->m, im_off});
+    auto src_rows = interleaved_src_rows
+      ? Rows<SrcCf>({src, s->m, 2 * s->m, s->m})
+      : Rows<SrcCf>({src, s->m, s->m, im_off});
 
+    if(s->n == 2)
+      multi_first_pass<V>(s->n, src_rows, dst_rows);
+    else
+      multi_first_two_passes<V>(s->n, src_rows, dst_rows);
+    
     if(s->n > 4) 
       for(Int i = 0; i < s->n; i += s->n / 4)
-        multi_fft_recurse<V, DstCf>(s, i, i + s->n / 4, 4, dst, im_off);
+        multi_fft_recurse<V>(s, i, i + s->n / 4, 4, dst_rows);
   }
 }
 
