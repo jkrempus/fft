@@ -179,10 +179,10 @@ FORCEINLINE void copy(const T* src, Int n, T* dst)
 #endif
 }
 
-template<typename V, typename SrcCf, typename DstCf>
+template<typename SrcCf, typename DstCf>
 FORCEINLINE void complex_copy(
-  typename V::T* src, Int src_off, Int n,
-  typename V::T* dst, Int dst_off)
+  typename SrcCf::V::T* src, Int src_off, Int n,
+  typename DstCf::V::T* dst, Int dst_off)
 {
   for(Int i = 0; i < n; i++)
   {
@@ -223,9 +223,10 @@ struct Complex
 
 namespace complex_format
 {
-  template<typename V>
+  template<typename V_>
   struct Split
   {
+    typedef V_ V;
     typedef typename V::T T;
     typedef typename V::Vec Vec;
     typedef Complex<typename V::Vec> C;
@@ -255,9 +256,10 @@ namespace complex_format
     }
   };
 
-  template<typename V>
+  template<typename V_>
   struct Vec
   {
+    typedef V_ V;
     typedef typename V::T T;
     typedef typename V::Vec Vec_;
     typedef Complex<typename V::Vec> C;
@@ -287,9 +289,10 @@ namespace complex_format
     }
   };
 
-  template<typename V>
+  template<typename V_>
   struct Scal
   {
+    typedef V_ V;
     typedef typename V::T T;
     typedef typename V::Vec Vec;
     typedef Complex<typename V::Vec> C;
@@ -334,9 +337,10 @@ namespace complex_format
   template<template<typename> class InputCf>
   struct Swapped
   {
-    template<typename V>
+    template<typename V_>
     struct Cf
     {
+      typedef V_ V;
       typedef typename InputCf<V>::T T;
       typedef typename InputCf<V>::Vec Vec;
       typedef Complex<Vec> C;
@@ -2174,11 +2178,10 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
   inverse_fft(state->state, state->state->working1, dst);
 }
 
-template<typename V, typename SrcRows, typename DstRows>
-void multi_first_pass(
-  Int n, const SrcRows& src, const DstRows& dst)
+template<typename SrcRows, typename DstRows>
+void multi_first_pass(Int n, const SrcRows& src, const DstRows& dst)
 {
-  VEC_TYPEDEFS(V);
+  typedef typename SrcRows::Cf::V V; VEC_TYPEDEFS(V);
 
   for(auto i = 0; i < n / 2; i++)
   {
@@ -2200,11 +2203,11 @@ void multi_first_pass(
   }
 }
 
-template<typename V, typename SrcRows, typename DstRows>
+template<typename SrcRows, typename DstRows>
 void multi_first_two_passes(
   Int n, const SrcRows& src , const DstRows& dst)
 {
-  VEC_TYPEDEFS(V);
+  typedef typename SrcRows::Cf::V V; VEC_TYPEDEFS(V);
 
   for(auto i = 0; i < n / 4; i++)
   {
@@ -2251,19 +2254,19 @@ void multi_first_two_passes(
   }
 }
 
-template<typename V, typename Cf>
+template<typename Cf>
 NOINLINE void multi_two_passes_inner(
-  typename V::T* a0,
-  typename V::T* a1,
-  typename V::T* a2,
-  typename V::T* a3,
-  Complex<typename V::Vec> t0,
-  Complex<typename V::Vec> t1,
-  Complex<typename V::Vec> t2,
+  typename Cf::V::T* a0,
+  typename Cf::V::T* a1,
+  typename Cf::V::T* a2,
+  typename Cf::V::T* a3,
+  Complex<typename Cf::V::Vec> t0,
+  Complex<typename Cf::V::Vec> t1,
+  Complex<typename Cf::V::Vec> t2,
   Int m,
   Int im_off)
 {
-  VEC_TYPEDEFS(V);
+  typedef typename Cf::V V; VEC_TYPEDEFS(V);
   for(Int i = 0; i < m * Cf::idx_ratio; i += Cf::stride)
   {
     C b0 = Cf::load(a0 + i, im_off);
@@ -2278,16 +2281,16 @@ NOINLINE void multi_two_passes_inner(
   }
 }
 
-template<typename V, typename Rows>
+template<typename Rows>
 void multi_two_passes(
   Int n,
   Int dft_size,
   Int start,
   Int end,
-  typename V::T* twiddle,
+  typename Rows::Cf::V::T* twiddle,
   const Rows& data)
 {
-  VEC_TYPEDEFS(V);
+  typedef typename Rows::Cf::V V; VEC_TYPEDEFS(V);
 
   Int stride = end - start;
   ASSERT(stride * dft_size == n);
@@ -2298,7 +2301,7 @@ void multi_two_passes(
   C tw2 = {V::vec(tw[4]), V::vec(tw[5])}; 
 
   for(Int j = start; j < start + stride / 4; j++)
-    multi_two_passes_inner<V, typename Rows::Cf>(
+    multi_two_passes_inner<typename Rows::Cf>(
       data.row(j + 0 * stride / 4),
       data.row(j + 1 * stride / 4),
       data.row(j + 2 * stride / 4),
@@ -2306,11 +2309,12 @@ void multi_two_passes(
       tw0, tw1, tw2, data.m, data.im_off);
 }
 
-template<typename V, typename Rows>
+template<typename Rows>
 void multi_last_pass(
-  Int n, Int start, Int end, typename V::T* twiddle, const Rows& rows)
+  Int n, Int start, Int end,
+  typename Rows::Cf::V::T* twiddle, const Rows& rows)
 {
-  VEC_TYPEDEFS(V);
+  typedef typename Rows::Cf::V V; VEC_TYPEDEFS(V);
   ASSERT(end - start == 2);
 
   C tw = {V::vec(twiddle[start]), V::vec(twiddle[start + 1])}; 
@@ -2373,57 +2377,57 @@ struct BrRows
   }
 };
 
-template<typename V, typename Rows>
+template<typename Rows>
 void multi_fft_recurse(
   Int n,
   Int start,
   Int end,
   Int dft_size,
-  typename V::T* twiddle,
+  typename Rows::Cf::V::T* twiddle,
   const Rows& rows)
 {
   if(4 * dft_size <= n)
   {
-    multi_two_passes<V>(n, dft_size, start, end, twiddle, rows);
+    multi_two_passes(n, dft_size, start, end, twiddle, rows);
 
     Int l = (end - start) / 4;
     if(4 * dft_size < n)
       for(Int i = start; i < end; i += l)
-        multi_fft_recurse<V>(n, i, i + l, dft_size * 4, twiddle, rows);
+        multi_fft_recurse(n, i, i + l, dft_size * 4, twiddle, rows);
   }
   else
-    multi_last_pass<V>(n, start, end, twiddle, rows);
+    multi_last_pass(n, start, end, twiddle, rows);
 }
 
 // The result is bit reversed
-template<typename V, typename SrcRows, typename DstRows>
+template<typename SrcRows, typename DstRows>
 void multi_fft_impl(
   Int n,
-  typename V::T* twiddle,
+  typename SrcRows::Cf::V::T* twiddle,
   const SrcRows& src,
   const DstRows& dst)
 {
   if(n == 1)
-    complex_copy<V, typename SrcRows::Cf, typename DstRows::Cf>(
+    complex_copy<typename SrcRows::Cf, typename DstRows::Cf>(
       src.row(0), src.im_off, src.m, dst.row(0), dst.im_off);
   else
   {
     if(n == 2)
-      multi_first_pass<V>(n, src, dst);
+      multi_first_pass(n, src, dst);
     else
-      multi_first_two_passes<V>(n, src, dst);
+      multi_first_two_passes(n, src, dst);
     
     if(n > 4) 
       for(Int i = 0; i < n; i += n / 4)
-        multi_fft_recurse<V>(n, i, i + n / 4, 4, twiddle, dst);
+        multi_fft_recurse(n, i, i + n / 4, 4, twiddle, dst);
   }
 }
 
-template<typename V, typename SrcCf, typename DstCf, bool br_dst_rows>
+template<typename SrcCf, typename DstCf, bool br_dst_rows>
 void multi_fft(
-  const MultiState<typename V::T>* s,
-  typename V::T* src,
-  typename V::T* dst,
+  const MultiState<typename SrcCf::V::T>* s,
+  typename SrcCf::V::T* src,
+  typename SrcCf::V::T* dst,
   Int im_off,
   bool interleaved_src_rows)
 {
@@ -2432,10 +2436,10 @@ void multi_fft(
     : Rows<SrcCf>({src, s->m, s->m, im_off});
 
   if(br_dst_rows)
-    multi_fft_impl<V>(
+    multi_fft_impl(
       s->n, s->twiddle, src_rows, Rows<DstCf>({dst, s->m, s->m, im_off}));
   else
-    multi_fft_impl<V>(
+    multi_fft_impl(
       s->n, s->twiddle, src_rows, 
       BrRows<DstCf>({s->n, dst, s->m, s->m, im_off}));
 }
@@ -2474,7 +2478,7 @@ MultiState<typename V::T>* multi_fft_state(Int n, Int m, void* ptr)
     [n](Int s, Int dft_size){ return 4 * dft_size <= n ? 2 : 1; },
     n, r->working, r->twiddle, nullptr);
 
-  r->fun_ptr = &multi_fft<V, SrcCfT<V>, DstCfT<V>, br_dst_rows>;
+  r->fun_ptr = &multi_fft<SrcCfT<V>, DstCfT<V>, br_dst_rows>;
   return r;
 }
 
@@ -2523,7 +2527,8 @@ template<
   typename V,
   template<typename> class SrcCfT,
   template<typename> class DstCfT>
-MultidimState<typename V::T>* multidim_fft_state(Int ndim, const Int* dim, void* mem)
+MultidimState<typename V::T>* multidim_fft_state(
+  Int ndim, const Int* dim, void* mem)
 {
   VEC_TYPEDEFS(V);
   if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
@@ -2646,7 +2651,6 @@ void multi_real_pass(
 
   for(Int i = 1; i <= n / 4; i++)
   {
-    //C w = { V::vec(twiddle[2 * i]), V::vec(twiddle[2 * i + 1]) };
     C w = { V::vec(twiddle[i]), V::vec(twiddle[i + n / 2]) };
 
     auto d0 = dst + i * m * DstCfT<V>::idx_ratio; 
