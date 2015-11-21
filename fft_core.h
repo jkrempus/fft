@@ -261,7 +261,6 @@ namespace complex_format
   {
     typedef V_ V;
     typedef typename V::T T;
-    typedef typename V::Vec Vec_;
     typedef Complex<typename V::Vec> C;
     static const Int stride = 2 * V::vec_size;
     static const Int idx_ratio = 2;
@@ -342,8 +341,7 @@ namespace complex_format
     {
       typedef V_ V;
       typedef typename InputCf<V>::T T;
-      typedef typename InputCf<V>::Vec Vec;
-      typedef Complex<Vec> C;
+      typedef Complex<typename V::Vec> C;
       static const Int stride = InputCf<V>::stride;
       static const Int idx_ratio = InputCf<V>::idx_ratio;
 
@@ -2341,7 +2339,8 @@ struct MultiState
     T* src,
     T* dst,
     Int im_off,
-    bool interleaved_src_rows);
+    bool interleaved_src_rows,
+    bool interleaved_dst_rows);
 };
 
 template<typename Cf_>
@@ -2429,19 +2428,24 @@ void multi_fft(
   typename SrcCf::V::T* src,
   typename SrcCf::V::T* dst,
   Int im_off,
-  bool interleaved_src_rows)
+  bool interleaved_src_rows,
+  bool interleaved_dst_rows)
 {
   auto src_rows = interleaved_src_rows
     ? Rows<SrcCf>({src, s->m, 2 * s->m, s->m})
     : Rows<SrcCf>({src, s->m, s->m, im_off});
 
+  Int dst_off = interleaved_dst_rows ? s->m : im_off;
+  Int dst_stride = interleaved_dst_rows ? 2 * s->m : s->m;
+
   if(br_dst_rows)
     multi_fft_impl(
-      s->n, s->twiddle, src_rows, Rows<DstCf>({dst, s->m, s->m, im_off}));
+      s->n, s->twiddle, src_rows,
+      Rows<DstCf>({dst, s->m, dst_stride, dst_off}));
   else
     multi_fft_impl(
       s->n, s->twiddle, src_rows, 
-      BrRows<DstCf>({s->n, dst, s->m, s->m, im_off}));
+      BrRows<DstCf>({s->n, dst, s->m, dst_stride, dst_off}));
 }
 
 
@@ -2579,7 +2583,7 @@ void multidim_fft_impl(
   else
   {
     s->transforms[idim]->fun_ptr(
-      s->transforms[idim], src, working, im_off, interleaved_src_rows);
+      s->transforms[idim], src, working, im_off, interleaved_src_rows, false);
 
     Int m = s->transforms[idim]->m;
     Int n = s->transforms[idim]->n;
@@ -2805,7 +2809,7 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
     compute_twiddle(m, m, r->twiddle, r->twiddle + m);
   }
   
-  return r; 
+  return r;
 }
 
 template<typename T>
@@ -2817,9 +2821,10 @@ void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
     s->first_transform,
     src,
     s->working0, s->outer_n / 2 * s->inner_n,
-    true);
+    true,
+    false);
 
-  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, s->im_off);
+  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, 0);
 
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   const Int nbits = log2(s->outer_n / 2);
@@ -2843,14 +2848,19 @@ struct InverseRealMultidimState
   Int outer_n;
   Int inner_n;
   Int im_off;
-  Int dst_idx_ratio;
+  Int src_idx_ratio;
   RealState<T>* onedim_transform;
   MultidimState<T>* multidim_transform;
   MultiState<T>* last_transform;
   void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
 };
 
-#if 0
+template<typename V>
+Int inverse_real_multidim_state_memory_size(Int ndim, const Int* dim)
+{
+  return real_multidim_state_memory_size<V>(ndim, dim);
+}
+
 template<typename V, template<typename> class SrcCfT>
 InverseRealMultidimState<typename V::T>*
 inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
@@ -2862,7 +2872,7 @@ inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   if(ndim == 1)
   {
      r->onedim_transform = rfft_state<V, SrcCfT>(dim[0], mem);
-     r->dst_idx_ratio = 0;
+     r->src_idx_ratio = 0;
      r->working0 = nullptr;
      r->twiddle = nullptr;
      r->outer_n = 0;
@@ -2884,14 +2894,16 @@ inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
     r->working0 = (T*) mem;
     mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
 
-    r->last_transform = multi_fft_state<V, cf::SwappedVec, cf::SwappedSplit, true>(
-      r->outer_n / 2, r->inner_n, mem);
+    r->last_transform = multi_fft_state<
+      V, cf::SwappedVec, cf::SwappedSplit, false>(
+        r->outer_n / 2, r->inner_n, mem);
 
     mem = (void*) align_size(Uint(mem) + multi_state_memory_size<V>(dim[0] / 2));
     r->multidim_transform = multidim_fft_state<
-      V, cf::Swapped<SrcCfT>:: template Cf, cf::SwappedVec>(ndim - 1, dim + 1, mem);
+      V, cf::Swapped<SrcCfT>:: template Cf, cf::SwappedVec>(
+        ndim - 1, dim + 1, mem);
 
-    r->real_pass = &multi_real_pass<V, cf::SwappedVec, true, false>;
+    r->real_pass = &multi_real_pass<V, cf::Vec, true>;
   
     Int m =  r->outer_n / 2;
     compute_twiddle(m, m, r->twiddle, r->twiddle + m);
@@ -2901,28 +2913,25 @@ inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
 }
 
 template<typename T>
-void real_multidim_fft(InverseRealMultidimState<T>* s, T* src, T* dst)
+void inverse_real_multidim_fft(InverseRealMultidimState<T>* s, T* src, T* dst)
 {
   if(s->onedim_transform) return rfft(s->onedim_transform, src, dst);
-
+  
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
+  const Int nbits = log2(s->outer_n / 2);
   for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
     multidim_fft_impl(
       0,
       s->multidim_transform,
       s->im_off,
-      s->working0 + i * s->inner_n * working_idx_ratio,
+      src + i * s->inner_n * s->src_idx_ratio,
       s->multidim_transform->working,
-      dst + i * s->inner_n * s->dst_idx_ratio,
+      s->working0 + i * s->inner_n * working_idx_ratio,
       false);
 
-  s->first_transform->fun_ptr(
-    s->first_transform,
-    src,
-    s->working0, s->outer_n / 2 * s->inner_n,
-    true);
-  
-  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, s->im_off);
+  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, 0);
 
+  s->last_transform->fun_ptr(
+    s->last_transform, s->working0, dst, s->outer_n / 2 * s->inner_n,
+    false, true);
 }
-#endif

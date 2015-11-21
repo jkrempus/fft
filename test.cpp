@@ -603,9 +603,9 @@ struct TestWrapper<V, CfT, true, true>
   static const bool is_real = true;
   static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
-  typedef T value_type;
-  InverseRealState<T>* state;
-  
+  typedef typename V::T value_type;
+  InverseRealMultidimState<T>* state;
+
   static Int im_offset(const std::vector<Int>& size)
   {
     Int inner = product(ptr_range(&size[1], size.size() - 1));
@@ -614,12 +614,16 @@ struct TestWrapper<V, CfT, true, true>
 
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, true>(size, im_offset(size)),
-    state(inverse_rfft_state<V, CfT>(
-        size[0], alloc(inverse_rfft_state_memory_size<V>(size[0])))) {}
+    state(inverse_real_multidim_fft_state<V, CfT>(size.size(), &size[0], 
+      alloc(inverse_real_multidim_state_memory_size<V>(
+          size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
-  void transform() { inverse_rfft(state, this->src, this->dst); }
+  void transform()
+  {
+    inverse_real_multidim_fft(state, this->src, this->dst);
+  }
 };
 
 #ifdef HAVE_FFTW
@@ -873,7 +877,7 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
       for(Int i = n; i < n * 2; i++) src[i] = T(0);
   }
   
-  //array_ipc::send("s", src, 2 * n);
+  array_ipc::send("s", src, 2 * n);
 
   fft0.set_input(src);
   fft1.set_input(src);
