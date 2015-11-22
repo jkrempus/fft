@@ -311,7 +311,6 @@ struct SplitWrapperBase<T, true, false>
 {
   Int im_off;
   std::vector<Int> size;
-  std::vector<Int> symmetric_size;
   T* src;
   T* dst;
   
@@ -321,8 +320,6 @@ struct SplitWrapperBase<T, true, false>
     src(alloc_array<T>(product(size))),
     dst(alloc_array<T>(2 * im_off))
   {
-    symmetric_size = size;
-    symmetric_size.front() = symmetric_size.front() / 2 + 1;
   }
 
   ~SplitWrapperBase()
@@ -342,13 +339,20 @@ struct SplitWrapperBase<T, true, false>
   {
     Int n = product(size);
 
+    auto it = std::find_if(size.begin(), size.end(),
+      [](Int e){ return e > 1; });
+
+    auto size_ = std::vector<Int>(it, size.end());
+    auto symmetric_size = size_;
+    symmetric_size.front() = size_.front() / 2 + 1;
+
     copy_symmetric_view<false>(
       create_view(dst, symmetric_size, 0),
-      create_view(p, size, 0));
+      create_view(p, size_, 0));
   
     copy_symmetric_view<true>(
       create_view(dst + im_off, symmetric_size, 0),
-      create_view(p + n, size, 0));
+      create_view(p + n, size_, 0));
   }
 };
 

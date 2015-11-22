@@ -68,6 +68,18 @@ Int log2(Int a)
   return r;
 }
 
+void remove_ones(
+  const Int* src, Int src_n, Int* dst, Int& dst_n)
+{
+  dst_n = 0;
+  for(Int i = 0; i < src_n; i++)
+    if(src[i] != 1)
+    {
+      dst[dst_n] = src[i];
+      dst_n++;
+    }
+}
+
 #if WORD_SIZE == 64
 Int reverse_bits(Int a_in, Int nbits)
 {
@@ -2472,8 +2484,12 @@ Int fft_memsize(Int ndim, const Int* dim)
 }
 
 template<typename V, typename SrcCf, typename DstCf>
-Fft<typename V::T>* fft_create(Int ndim, const Int* dim, void* mem)
+Fft<typename V::T>* fft_create(Int ndim_in, const Int* dim_in, void* mem)
 {
+  Int dim[maxdim];
+  Int ndim;
+  remove_ones(dim_in, ndim_in, dim, ndim);
+
   VEC_TYPEDEFS(V);
   if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
     return fft_create<Scalar<T>, SrcCf, DstCf>(ndim, dim, mem);
@@ -2696,8 +2712,12 @@ Int rfft_memsize(Int ndim, const Int* dim)
 }
 
 template<typename V, typename DstCf>
-Rfft<typename V::T>* rfft_create(Int ndim, const Int* dim, void* mem)
+Rfft<typename V::T>* rfft_create(Int ndim_in, const Int* dim_in, void* mem)
 {
+  Int dim[maxdim];
+  Int ndim;
+  remove_ones(dim_in, ndim_in, dim, ndim);
+
   VEC_TYPEDEFS(V)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
     return rfft_create<Scalar<T>, DstCf>(ndim, dim, mem);
@@ -2792,12 +2812,17 @@ Int irfft_memsize(Int ndim, const Int* dim)
 }
 
 template<typename V, typename SrcCf>
-Irfft<typename V::T>* irfft_create(Int ndim, const Int* dim, void* mem)
+Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
 {
+  Int dim[maxdim];
+  Int ndim;
+  remove_ones(dim_in, ndim_in, dim, ndim);
+
   VEC_TYPEDEFS(V)
   auto r = (Irfft<T>*) mem;
   mem = (void*) align_size(Uint(mem) + sizeof(Irfft<T>));
   
+  ASSERT(ndim > 0); 
   if(ndim == 1)
   {
      r->onedim_transform = onedim::rfft_create<V, SrcCf>(dim[0], mem);
