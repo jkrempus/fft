@@ -56,13 +56,6 @@ Int tiny_log2(Int a)
     a == 16 ? 4 : -1;
 }
 
-FORCEINLINE Int power2_div(Int a, Int b)
-{
-  Int r = 1;
-  for(; b < a; b += b) r += r;
-  return r;
-}
-
 Int log2(Int a)
 {
   Int r = 0;
@@ -126,48 +119,6 @@ struct BitReversed
     i++;
   }
 };
-
-struct IterateMultidim
-{
-  Int ndim;
-  const Int* size;  
-  Int idx[sizeof(Int) * 8];
-
-  IterateMultidim(Int ndim, const Int* size) : ndim(ndim), size(size)
-  {
-    ASSERT(ndim < sizeof(idx) / sizeof(idx[0]));
-    for(Int i = 0; i < ndim; i++) idx[i] = 0;
-  }
-
-  bool empty() { return idx[0] == size[0]; }
-
-  void advance()
-  {
-    for(Int i = ndim - 1; i >= 0; i--)
-    {
-      idx[i]++;
-      if(idx[i] < size[i]) return;
-      idx[i] = 0;
-    }
-
-    idx[0] = size[0];
-  }
-};
-
-template<typename T>
-struct PtrRange
-{
-  T* begin_;
-  T* end_;
-  T* begin(){ return begin_; }
-  T* end(){ return end_; }
-  
-  const T* begin() const { return begin_; }
-  const T* end() const { return end_; }
-};
-
-template<typename T> PtrRange<T> ptr_range(T* p, Int size) { return {p, p + size}; }
-template<typename T> PtrRange<T> ptr_range(T* b, T* e) { return {b, e}; }
 
 template<typename T>
 FORCEINLINE void copy(const T* src, Int n, T* dst)
@@ -817,14 +768,6 @@ struct AvxFloat
 };
 #endif
 
-Int twiddle_elements(Int npasses)
-{
-  return
-    npasses == 1 ? 1 :
-    npasses == 2 ? 3 :
-    npasses == 3 ? 5 : max_int;
-}
-
 template<typename V>
 void store_two_pass_twiddle(
   Complex<typename V::Vec> first,
@@ -1006,11 +949,6 @@ void init_br_table(State<typename V::T>& state)
   for(BitReversed br(len); br.i < len; br.advance())
     state.br_table[br.i] = br.br * DstCf::stride;
 }
-
-template<typename T> T min(T a, T b){ return a < b ? a : b; }
-template<typename T> T max(T a, T b){ return a > b ? a : b; }
-
-template<typename T> T sq(T a){ return a * a; }
 
 template<typename V, Int dft_size, typename SrcCf>
 void ct_dft_size_pass(const Arg<typename V::T>& arg)
@@ -1643,8 +1581,6 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
     twiddle += 5 * VecCf::stride;
   }
 }
-
-template<typename V> void null_pass(const Arg<typename V::T>& arg) { }
 
 template<typename V, typename SrcCf, typename DstCf, Int n>
 void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
@@ -2500,12 +2436,14 @@ struct MultidimState
   MultiState<T>* transforms[maxdim];
 };
 
-Int product(PtrRange<const Int> pr)
+Int product(const Int* b, const Int* e)
 {
   Int r = 1;
-  for(auto e : pr) r *= e;
+  for(; b < e; b++) r *= *b;
   return r;
 }
+
+Int product(const Int* p, Int n) { return product(p, p + n); }
 
 template<typename V>
 Int multidim_state_memory_size(Int ndim, const Int* dim)
@@ -2516,7 +2454,7 @@ Int multidim_state_memory_size(Int ndim, const Int* dim)
 
   Int r = align_size(sizeof(MultidimState<T>));
 
-  Int working_size = 2 * sizeof(T) * product(ptr_range(dim, ndim));
+  Int working_size = 2 * sizeof(T) * product(dim, ndim);
   r = align_size(r + working_size);
 
   for(Int i = 0; i < ndim - 1; i++)
@@ -2545,7 +2483,7 @@ MultidimState<typename V::T>* multidim_fft_state(
   mem = (void*) align_size(Uint(mem) + sizeof(MultidimState<T>));
   s->working = (T*) mem;
  
-  s->num_elements = product(ptr_range(dim, ndim));
+  s->num_elements = product(dim, ndim);
   Int working_size = 2 * sizeof(T) * s->num_elements;
   mem = (void*) align_size(Uint(mem) + working_size);
 
@@ -2555,7 +2493,7 @@ MultidimState<typename V::T>* multidim_fft_state(
   {
     for(Int i = 0; i < ndim - 1; i++)
     {
-      Int m = product(ptr_range(dim + i + 1, dim + ndim));
+      Int m = product(dim + i + 1, dim + ndim);
 
       if(i == 0)
         s->transforms[i] = multi_fft_state<V, SrcCfT, cf::Vec, true>(
@@ -2743,8 +2681,7 @@ struct RealMultidimState
 template<typename T>
 Int real_multidim_im_off(Int ndim, const Int* dim)
 {
-  return align_size<T>(
-    product(ptr_range(dim + 1, dim + ndim)) * (dim[0] / 2 + 1));
+  return align_size<T>(product(dim + 1, dim + ndim) * (dim[0] / 2 + 1));
 }
 
 template<typename V>
@@ -2791,7 +2728,7 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   {
     r->dst_idx_ratio = DstCfT<V>::idx_ratio;
     r->outer_n = dim[0];
-    r->inner_n = product(ptr_range(dim + 1, dim + ndim));
+    r->inner_n = product(dim + 1, dim + ndim);
     r->onedim_transform = nullptr;
     r->im_off = real_multidim_im_off<T>(ndim, dim);
     r->twiddle = (T*) mem;
@@ -2886,7 +2823,7 @@ inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   {
     r->src_idx_ratio = SrcCfT<V>::idx_ratio;
     r->outer_n = dim[0];
-    r->inner_n = product(ptr_range(dim + 1, dim + ndim));
+    r->inner_n = product(dim + 1, dim + ndim);
     r->onedim_transform = nullptr;
     r->im_off = real_multidim_im_off<T>(ndim, dim);
     r->twiddle = (T*) mem;

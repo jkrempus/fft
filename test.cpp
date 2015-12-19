@@ -20,6 +20,35 @@
 #include "fftw3.h"
 #endif
 
+template<typename T> T sq(T a){ return a * a; }
+
+struct IterateMultidim
+{
+  Int ndim;
+  const Int* size;  
+  Int idx[sizeof(Int) * 8];
+
+  IterateMultidim(Int ndim, const Int* size) : ndim(ndim), size(size)
+  {
+    ASSERT(ndim < sizeof(idx) / sizeof(idx[0]));
+    for(Int i = 0; i < ndim; i++) idx[i] = 0;
+  }
+
+  bool empty() { return idx[0] == size[0]; }
+
+  void advance()
+  {
+    for(Int i = ndim - 1; i >= 0; i--)
+    {
+      idx[i]++;
+      if(idx[i] < size[i]) return;
+      idx[i] = 0;
+    }
+
+    idx[0] = size[0];
+  }
+};
+
 extern "C" void* valloc(size_t);
 
 double get_time()
@@ -579,7 +608,7 @@ struct TestWrapper<V, CfT, true, false>
 
   static Int im_offset(const std::vector<Int>& size)
   {
-    Int inner = product(ptr_range(&size[1], size.size() - 1));
+    Int inner = product(&size[1], size.size() - 1);
     return align_size<T>((size[0] / 2 + 1) * inner);
   }
 
@@ -608,7 +637,7 @@ struct TestWrapper<V, CfT, true, true>
 
   static Int im_offset(const std::vector<Int>& size)
   {
-    Int inner = product(ptr_range(&size[1], size.size() - 1));
+    Int inner = product(&size[1], size.size() - 1);
     return align_size<T>((size[0] / 2 + 1) * inner);
   }
 
@@ -811,7 +840,7 @@ double bench(const std::vector<Int>& size, double requested_operations)
   fft.set_input(src);
 
   double const_part = Fft::is_real ? 2.5 : 5.0;
-  auto iter = max<uint64_t>(requested_operations / (const_part * n * log2(n)), 1);
+  auto iter = std::max<uint64_t>(requested_operations / (const_part * n * log2(n)), 1);
   auto operations = iter * (const_part * n * log2(n));
 
   double t0 = get_time();
