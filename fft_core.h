@@ -142,6 +142,24 @@ FORCEINLINE void complex_copy(
   }
 }
 
+template<typename T = char>
+Int align_size(Int size)
+{
+  static_assert(align_bytes % sizeof(T) == 0, "");
+  return (size + align_bytes / sizeof(T) - 1) & ~(align_bytes / sizeof(T) - 1);
+};
+
+template<typename V>
+Int tiny_twiddle_bytes()
+{
+  return sizeof(typename V::Vec) * 2 * tiny_log2(V::vec_size);
+}
+
+static Int aligned_increment(Int sz, Int bytes) { return align_size(sz + bytes); }
+
+template<typename T>
+T* aligned_increment(T* ptr, Int bytes) { return (T*) align_size(Uint(ptr) + bytes); }
+
 template<typename T>
 struct Complex
 {
@@ -361,23 +379,6 @@ struct Step
   bool is_out_of_place;
   bool is_recursive;
   pass_fun fun_ptr;
-};
-
-template<typename T>
-struct State
-{
-  Int n;
-  Int im_off;
-  T* working0;
-  T* working1;
-  T* twiddle;
-  Int* br_table;
-  T* tiny_twiddle;
-  Step<T> steps[8 * sizeof(Int)];
-  Int nsteps;
-  Int ncopies;
-  typedef void (*tiny_transform_fun_type)(T* src, T* dst, Int im_off);
-  tiny_transform_fun_type tiny_transform_fun;
 };
 
 template<typename T>
@@ -941,8 +942,29 @@ void init_twiddle(
   }
 }
 
+namespace onedim
+{
+template<typename T>
+struct Fft
+{
+  Int n;
+  Int im_off;
+  T* working0;
+  T* working1;
+  T* twiddle;
+  Int* br_table;
+  T* tiny_twiddle;
+  Step<T> steps[8 * sizeof(Int)];
+  Int nsteps;
+  Int ncopies;
+  typedef void (*tiny_transform_fun_type)(T* src, T* dst, Int im_off);
+  tiny_transform_fun_type tiny_transform_fun;
+};
+
+template<typename T> struct Ifft;
+
 template<typename V, typename DstCf>
-void init_br_table(State<typename V::T>& state)
+void init_br_table(Fft<typename V::T>& state)
 {
   if(state.steps[state.nsteps - 1].npasses == 0) return;
   auto len = (state.n / V::vec_size) >> state.steps[state.nsteps - 1].npasses;
@@ -1600,7 +1622,7 @@ void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
 }
 
 template<typename V, typename SrcCf, typename DstCf>
-void init_steps(State<typename V::T>& state)
+void init_steps(Fft<typename V::T>& state)
 {
   VEC_TYPEDEFS(V);
   Int step_index = 0;
@@ -1739,33 +1761,15 @@ void init_steps(State<typename V::T>& state)
 #endif
 }
 
-template<typename T = char>
-Int align_size(Int size)
-{
-  static_assert(align_bytes % sizeof(T) == 0, "");
-  return (size + align_bytes / sizeof(T) - 1) & ~(align_bytes / sizeof(T) - 1);
-};
-
 template<typename V>
-Int tiny_twiddle_bytes()
-{
-  return sizeof(typename V::Vec) * 2 * tiny_log2(V::vec_size);
-}
-
-static Int aligned_increment(Int sz, Int bytes) { return align_size(sz + bytes); }
-
-template<typename T>
-T* aligned_increment(T* ptr, Int bytes) { return (T*) align_size(Uint(ptr) + bytes); }
-
-template<typename V>
-Int fft_state_memory_size(Int n)
+Int fft_memsize(Int n)
 {
   VEC_TYPEDEFS(V);
   if(n <= V::vec_size && V::vec_size != 1)
-    return fft_state_memory_size<Scalar<T>>(n);
+    return fft_memsize<Scalar<T>>(n);
 
   Int sz = 0;
-  sz = aligned_increment(sz, sizeof(State<T>));
+  sz = aligned_increment(sz, sizeof(Fft<T>));
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
@@ -1778,16 +1782,16 @@ template<
   typename V,
   template<typename> class SrcCfT,
   template<typename> class DstCfT>
-State<typename V::T>* fft_state(Int n, void* ptr)
+Fft<typename V::T>* fft_create(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
   if(n <= V::vec_size && V::vec_size != 1)
-    return fft_state<Scalar<T>, SrcCfT, DstCfT>(n, ptr);
+    return fft_create<Scalar<T>, SrcCfT, DstCfT>(n, ptr);
 
-  auto state = (State<T>*) ptr;
+  auto state = (Fft<T>*) ptr;
   state->n = n;
   state->im_off = n;
-  ptr = aligned_increment(ptr, sizeof(State<T>));
+  ptr = aligned_increment(ptr, sizeof(Fft<T>));
 
   state->working0 = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
@@ -1814,15 +1818,15 @@ State<typename V::T>* fft_state(Int n, void* ptr)
 }
 
 template<typename V>
-Int inverse_fft_state_memory_size(Int n){ return fft_state_memory_size<V>(n); }
+Int ifft_memsize(Int n){ return fft_memsize<V>(n); }
 
 template<
   typename V,
   template<typename> class SrcCfT,
   template<typename> class DstCfT>
-State<typename V::T>* inverse_fft_state(Int n, void* ptr)
+Ifft<typename V::T>* ifft_create(Int n, void* ptr)
 {
-  return fft_state<
+  return (Ifft<typename V::T>*) fft_create<
     V,
     cf::Swapped<SrcCfT>::template Cf,
     cf::Swapped<DstCfT>::template Cf>(n, ptr);
@@ -1830,7 +1834,7 @@ State<typename V::T>* inverse_fft_state(Int n, void* ptr)
 
 template<typename T>
 NOINLINE void recursive_passes(
-  const State<T>* state, Int step, T* p, Int start, Int end)
+  const Fft<T>* state, Int step, T* p, Int start, Int end)
 {
   Int dft_size = 1;
   for(Int i = 0; i < step; i++) dft_size <<= state->steps[i].npasses;
@@ -1863,7 +1867,7 @@ NOINLINE void recursive_passes(
 }
 
 template<typename T>
-FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
+FORCEINLINE void fft_impl(const Fft<T>* state, Int im_off, T* src, T* dst)
 {
   if(state->tiny_transform_fun)
   {
@@ -1917,15 +1921,15 @@ FORCEINLINE void fft_impl(const State<T>* state, Int im_off, T* src, T* dst)
 }
 
 template<typename T>
-void fft(const State<T>* state, T* src, T* dst)
+void fft(const Fft<T>* state, T* src, T* dst)
 {
   fft_impl(state, state->n, src, dst);
 }
 
 template<typename T>
-void inverse_fft(const State<T>* state, T* src, T* dst)
+void ifft(const Ifft<T>* state, T* src, T* dst)
 {
-  fft_impl(state, state->n, src, dst);
+  fft_impl((Fft<T>*) state, ((Fft<T>*) state)->n, src, dst);
 }
 
 template<
@@ -2001,36 +2005,36 @@ void real_pass(
 }
 
 template<typename T>
-struct RealState
+struct Rfft
 {
-  State<T>* state;
+  Fft<T>* state;
   T* twiddle;
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
 template<typename V>
-Int rfft_state_memory_size(Int n)
+Int rfft_memsize(Int n)
 {
   VEC_TYPEDEFS(V);
   if(V::vec_size != 1 && n <= 2 * V::vec_size)
-    return rfft_state_memory_size<Scalar<T>>(n);
+    return rfft_memsize<Scalar<T>>(n);
 
   Int sz = 0;
-  sz = aligned_increment(sz, sizeof(RealState<T>));
+  sz = aligned_increment(sz, sizeof(Rfft<T>));
   sz = aligned_increment(sz, sizeof(T) * n);
-  sz = aligned_increment(sz, fft_state_memory_size<V>(n));
+  sz = aligned_increment(sz, fft_memsize<V>(n));
   return sz;
 }
 
 template<typename V, template<typename> class DstCfT>
-RealState<typename V::T>* rfft_state(Int n, void* ptr)
+Rfft<typename V::T>* rfft_create(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
   if(V::vec_size != 1 && n <= 2 * V::vec_size)
-    return rfft_state<Scalar<T>, DstCfT>(n, ptr);
+    return rfft_create<Scalar<T>, DstCfT>(n, ptr);
 
-  RealState<T>* r = (RealState<T>*) ptr;
-  ptr = aligned_increment(ptr, sizeof(RealState<T>));
+  Rfft<T>* r = (Rfft<T>*) ptr;
+  ptr = aligned_increment(ptr, sizeof(Rfft<T>));
 
   r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
@@ -2042,12 +2046,12 @@ RealState<typename V::T>* rfft_state(Int n, void* ptr)
   copy(r->twiddle + 1, m - 1, r->twiddle);
   copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
   
-  r->state = fft_state<V, cf::Scal, cf::Split>(n / 2, ptr);
+  r->state = fft_create<V, cf::Scal, cf::Split>(n / 2, ptr);
   return r;
 }
 
 template<typename T>
-void rfft(const RealState<T>* state, T* src, T* dst)
+void rfft(const Rfft<T>* state, T* src, T* dst)
 {
   fft(state->state, src, state->state->working1);
   state->real_pass(
@@ -2060,29 +2064,25 @@ void rfft(const RealState<T>* state, T* src, T* dst)
 }
 
 template<typename T>
-struct InverseRealState
+struct Irfft
 {
-  State<T>* state;
+  Ifft<T>* state;
   T* twiddle;
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
-template<typename V>
-Int inverse_rfft_state_memory_size(Int n)
-{
-  return rfft_state_memory_size<V>(n);
-}
+template<typename V> Int irfft_memsize(Int n) { return rfft_memsize<V>(n); }
 
 template<typename V, template<typename> class SrcCfT>
-InverseRealState<typename V::T>* inverse_rfft_state(Int n, void* ptr)
+Irfft<typename V::T>* irfft_create(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
   VEC_TYPEDEFS(V);
   if(V::vec_size != 1 && n <= 2 * V::vec_size)
-    return inverse_rfft_state<Scalar<T>, SrcCfT>(n, ptr);
+    return irfft_create<Scalar<T>, SrcCfT>(n, ptr);
 
-  auto r = (InverseRealState<T>*) ptr;
-  ptr = aligned_increment(ptr, sizeof(RealState<T>));
+  auto r = (Irfft<T>*) ptr;
+  ptr = aligned_increment(ptr, sizeof(Irfft<T>));
 
   r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
@@ -2094,12 +2094,12 @@ InverseRealState<typename V::T>* inverse_rfft_state(Int n, void* ptr)
   copy(r->twiddle + 1, m - 1, r->twiddle);
   copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
   
-  r->state = inverse_fft_state<V, cf::Split, cf::Scal>(n / 2, ptr);
+  r->state = ifft_create<V, cf::Split, cf::Scal>(n / 2, ptr);
   return r;
 }
 
 template<typename T>
-void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
+void irfft(const Irfft<T>* state, T* src, T* dst)
 {
   state->real_pass(
     state->state->n * 2,
@@ -2109,7 +2109,8 @@ void inverse_rfft(const InverseRealState<T>* state, T* src, T* dst)
     state->state->working1,
     state->state->n);
 
-  inverse_fft(state->state, state->state->working1, dst);
+  ifft(state->state, state->state->working1, dst);
+}
 }
 
 template<typename SrcRows, typename DstRows>
@@ -2207,7 +2208,7 @@ NOINLINE void multi_two_passes_inner(
     C b1 = Cf::load(a1 + i, im_off);
     C b2 = Cf::load(a2 + i, im_off);
     C b3 = Cf::load(a3 + i, im_off);
-    two_passes_inner(b0, b1, b2, b3, b0, b1, b2, b3, t0, t1, t2);
+    onedim::two_passes_inner(b0, b1, b2, b3, b0, b1, b2, b3, t0, t1, t2);
     Cf::store(b0, a0 + i, im_off);
     Cf::store(b2, a1 + i, im_off);
     Cf::store(b1, a2 + i, im_off);
@@ -2432,7 +2433,7 @@ struct MultidimState
   Int working_idx_ratio;
   Int dst_idx_ratio;
   T* working;
-  State<T>* last_transform;
+  onedim::Fft<T>* last_transform;
   MultiState<T>* transforms[maxdim];
 };
 
@@ -2460,7 +2461,7 @@ Int multidim_state_memory_size(Int ndim, const Int* dim)
   for(Int i = 0; i < ndim - 1; i++)
     r = align_size(r + multi_state_memory_size<V>(dim[i]));
 
-  r = align_size(r + fft_state_memory_size<V>(dim[ndim - 1]));
+  r = align_size(r + onedim::fft_memsize<V>(dim[ndim - 1]));
 
   return r;
 }
@@ -2488,7 +2489,7 @@ MultidimState<typename V::T>* multidim_fft_state(
   mem = (void*) align_size(Uint(mem) + working_size);
 
   if(ndim == 1)
-    s->last_transform = fft_state<V, SrcCfT, DstCfT>(dim[ndim - 1], mem);
+    s->last_transform = onedim::fft_create<V, SrcCfT, DstCfT>(dim[ndim - 1], mem);
   else
   {
     for(Int i = 0; i < ndim - 1; i++)
@@ -2505,7 +2506,7 @@ MultidimState<typename V::T>* multidim_fft_state(
       mem = (void*) align_size(Uint(mem) + multi_state_memory_size<V>(dim[i]));
     }
 
-    s->last_transform = fft_state<V, cf::Vec, DstCfT>(dim[ndim - 1], mem);
+    s->last_transform = onedim::fft_create<V, cf::Vec, DstCfT>(dim[ndim - 1], mem);
   }
 
   return s;
@@ -2672,7 +2673,7 @@ struct RealMultidimState
   Int inner_n;
   Int im_off;
   Int dst_idx_ratio;
-  RealState<T>* onedim_transform;
+  onedim::Rfft<T>* onedim_transform;
   MultidimState<T>* multidim_transform;
   MultiState<T>* first_transform;
   void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
@@ -2692,7 +2693,7 @@ Int real_multidim_state_memory_size(Int ndim, const Int* dim)
   Int r = 0;
   r = align_size(r + sizeof(RealMultidimState<T>));
   if(ndim == 1)
-    r = align_size(r + rfft_state_memory_size<V>(dim[0]));
+    r = align_size(r + onedim::rfft_memsize<V>(dim[0]));
   else
   {
     r = align_size(r + sizeof(T) * dim[0]);
@@ -2713,7 +2714,7 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   
   if(ndim == 1)
   {
-     r->onedim_transform = rfft_state<V, DstCfT>(dim[0], mem);
+     r->onedim_transform = onedim::rfft_create<V, DstCfT>(dim[0], mem);
      r->dst_idx_ratio = 0;
      r->working0 = nullptr;
      r->twiddle = nullptr;
@@ -2752,7 +2753,7 @@ real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
 template<typename T>
 void real_multidim_fft(RealMultidimState<T>* s, T* src, T* dst)
 {
-  if(s->onedim_transform) return rfft(s->onedim_transform, src, dst);
+  if(s->onedim_transform) return onedim::rfft(s->onedim_transform, src, dst);
 
   s->first_transform->fun_ptr(
     s->first_transform,
@@ -2786,7 +2787,7 @@ struct InverseRealMultidimState
   Int inner_n;
   Int im_off;
   Int src_idx_ratio;
-  RealState<T>* onedim_transform;
+  onedim::Rfft<T>* onedim_transform;
   MultidimState<T>* multidim_transform;
   MultiState<T>* last_transform;
   void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
@@ -2808,7 +2809,7 @@ inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
   
   if(ndim == 1)
   {
-     r->onedim_transform = rfft_state<V, SrcCfT>(dim[0], mem);
+     r->onedim_transform = onedim::rfft_create<V, SrcCfT>(dim[0], mem);
      r->src_idx_ratio = 0;
      r->working0 = nullptr;
      r->twiddle = nullptr;
@@ -2852,7 +2853,7 @@ inverse_real_multidim_fft_state(Int ndim, const Int* dim, void* mem)
 template<typename T>
 void inverse_real_multidim_fft(InverseRealMultidimState<T>* s, T* src, T* dst)
 {
-  if(s->onedim_transform) return rfft(s->onedim_transform, src, dst);
+  if(s->onedim_transform) return onedim::rfft(s->onedim_transform, src, dst);
   
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   const Int nbits = log2(s->outer_n / 2);
