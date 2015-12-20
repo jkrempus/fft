@@ -221,8 +221,8 @@ template<typename V, typename Cf>
 constexpr Int chunk_size()
 {
   return
-    SameType<cf::Scal<V>, Cf>::value ? 1 :
-    SameType<cf::Vec<V>, Cf>::value ? V::vec_size : 0;
+    SameType<cf::Scal, Cf>::value ? 1 :
+    SameType<cf::Vec, Cf>::value ? V::vec_size : 0;
 }
 
 template<typename V, typename Cf>
@@ -524,15 +524,11 @@ struct InterleavedWrapperBase<T, true, true>
   }
 };
 
-template<
-  typename V,
-  template<typename> class CfT,
-  bool is_real,
-	bool is_inverse>
+template<typename V, typename Cf, bool is_real, bool is_inverse>
 struct TestWrapper { };
 
-template<typename V, template<typename> class CfT>
-struct TestWrapper<V, CfT, false, false>
+template<typename V, typename Cf>
+struct TestWrapper<V, Cf, false, false>
 : public SplitWrapperBase<typename V::T, false, false>
 {
   static const bool is_real = false;
@@ -542,7 +538,7 @@ struct TestWrapper<V, CfT, false, false>
   Fft<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, false>(size),
-    state(fft_create<V, CfT, CfT>(
+    state(fft_create<V, Cf, Cf>(
       size.size(),
       &size[0],
       alloc(fft_memsize<V>(size.size(), &size[0])))) {}
@@ -551,8 +547,8 @@ struct TestWrapper<V, CfT, false, false>
   void transform() { fft<T>(state, this->src, this->dst); }
 };
 
-template<typename V, template<typename> class CfT>
-struct TestWrapper<V, CfT, false, true>
+template<typename V, typename Cf>
+struct TestWrapper<V, Cf, false, true>
 : public SplitWrapperBase<typename V::T, false, true>
 {
   static const bool is_real = false;
@@ -562,7 +558,7 @@ struct TestWrapper<V, CfT, false, true>
   Ifft<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, true>(size),
-    state(ifft_create<V, CfT, CfT>(
+    state(ifft_create<V, Cf, Cf>(
       size.size(),
       &size[0],
       alloc(ifft_memsize<V>(size.size(), &size[0])))) {}
@@ -571,8 +567,8 @@ struct TestWrapper<V, CfT, false, true>
   void transform() { ifft<T>(state, this->src, this->dst); }
 };
 
-template<typename V, template<typename> class CfT>
-struct TestWrapper<V, CfT, true, false>
+template<typename V, typename Cf>
+struct TestWrapper<V, Cf, true, false>
 : public SplitWrapperBase<typename V::T, true, false>
 {
   static const bool is_real = true;
@@ -589,7 +585,7 @@ struct TestWrapper<V, CfT, true, false>
 
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, false>(size, im_offset(size)),
-    state(rfft_create<V, CfT>(size.size(), &size[0], 
+    state(rfft_create<V, Cf>(size.size(), &size[0], 
       alloc(rfft_memsize<V>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
@@ -597,8 +593,8 @@ struct TestWrapper<V, CfT, true, false>
   void transform() { rfft(state, this->src, this->dst); }
 };
 
-template<typename V, template<typename> class CfT>
-struct TestWrapper<V, CfT, true, true>
+template<typename V, typename Cf>
+struct TestWrapper<V, Cf, true, true>
 : public SplitWrapperBase<typename V::T, true, true>
 {
   static const bool is_real = true;
@@ -615,7 +611,7 @@ struct TestWrapper<V, CfT, true, true>
 
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, true>(size, im_offset(size)),
-    state(irfft_create<V, CfT>(size.size(), &size[0], 
+    state(irfft_create<V, Cf>(size.size(), &size[0], 
       alloc(irfft_memsize<V>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
@@ -722,7 +718,8 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
       for(Int dft_size = 1; dft_size < n; dft_size *= 2)
       {
         copy(dst, 2 * n, &working[0]);
-        typedef complex_format::Scal<Scalar<T>> CF;
+        typedef Scalar<T> S;
+        typedef complex_format::Scal CF;
         Int twiddle_stride = n / 2 / dft_size;
         for(Int i = 0; i < n / 2; i += dft_size)
         {
@@ -731,11 +728,11 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
           Int twiddle_i = 0;
           for(; src_i < i + dft_size;)
           {
-            auto a = CF::load(&working[0] + src_i * CF::stride, 0);
-            auto b = CF::load(&working[0] + (src_i + n / 2) * CF::stride, 0);
+            auto a = load<S, CF>(&working[0] + src_i * stride<S, CF>(), 0);
+            auto b = load<S, CF>(&working[0] + (src_i + n / 2) * stride<S, CF>(), 0);
             auto mul = twiddle[twiddle_i] * b;
-            CF::store(a + mul, dst + dst_i * CF::stride, 0);
-            CF::store(a - mul, dst + (dst_i + dft_size) * CF::stride, 0);
+            CF::store(a + mul, dst + dst_i * stride<S, CF>(), 0);
+            CF::store(a - mul, dst + (dst_i + dft_size) * stride<S, CF>(), 0);
             src_i++;
             dst_i++;
             twiddle_i += twiddle_stride;
@@ -918,8 +915,7 @@ typedef SseFloat V;
 typedef Scalar<float> V;
 #endif
 
-template<typename T>
-using CfT = complex_format::Split<T>;
+typedef complex_format::Split Cf;
 
 struct Options
 {
@@ -985,7 +981,7 @@ double test_or_bench2(
   const std::unordered_set<std::string>& flags)
 {
   if(impl == "fft")
-    return test_or_bench3<TestWrapper<V, CfT, is_real, is_inverse>>(impl, lsz, flags);
+    return test_or_bench3<TestWrapper<V, Cf, is_real, is_inverse>>(impl, lsz, flags);
 #ifdef HAVE_FFTW
   else if(impl == "fftw")
     return
