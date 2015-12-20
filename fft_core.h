@@ -2700,7 +2700,7 @@ Int rfft_memsize(Int ndim, const Int* dim)
     r = align_size(r + sizeof(T) * dim[0]);
     r = align_size(r + sizeof(T) * 2 * rfft_im_off<T>(ndim, dim));
     r = align_size(r + multi::fft_memsize<V>(dim[0] / 2));
-    r = align_size(r + rfft_memsize<V>(ndim - 1, dim + 1));
+    r = align_size(r + fft_memsize<V>(ndim - 1, dim + 1));
   }
   return r;
 }
