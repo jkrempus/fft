@@ -702,7 +702,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 {
   struct Onedim
   {
-    std::vector<Complex<T>> twiddle;
+    std::vector<Complex<Scalar<T>>> twiddle;
     std::vector<T> working;
     Int n;
     

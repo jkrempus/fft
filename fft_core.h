@@ -770,9 +770,7 @@ struct AvxFloat
 #endif
 
 template<typename V>
-void store_two_pass_twiddle(
-  Complex<typename V::Vec> first,
-  typename V::T* dst)
+void store_two_pass_twiddle(Complex<V> first, typename V::T* dst)
 {
   cf::Vec<V>::store(first, dst, 0);
   auto second = first * first;
@@ -1176,13 +1174,13 @@ void first_three_passes_ct_size(const Arg<typename V::T>& arg)
   first_three_passes_impl<V, SrcCf>(n, n, arg.im_off, arg.src, arg.dst);
 }
 
-template<typename T>
+template<typename V>
 FORCEINLINE void two_passes_inner(
-  Complex<T> src0, Complex<T> src1, Complex<T> src2, Complex<T> src3,
-  Complex<T>& dst0, Complex<T>& dst1, Complex<T>& dst2, Complex<T>& dst3,
-  Complex<T> tw0, Complex<T> tw1, Complex<T> tw2)
+  Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
+  Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3,
+  Complex<V> tw0, Complex<V> tw1, Complex<V> tw2)
 {
-  typedef Complex<T> C;
+  typedef Complex<V> C;
   C mul0 =       src0;
   C mul1 = tw0 * src1;
   C mul2 = tw1 * src2;
@@ -1213,7 +1211,7 @@ void two_passes(const Arg<typename V::T>& arg)
   
   auto start = arg.start_offset * VecCf::idx_ratio;
   auto end = arg.end_offset * VecCf::idx_ratio;
-  
+
   auto tw = arg.twiddle + VecCf::idx_ratio * (n - 4 * dft_size);
   if(start != 0)
     tw += 3 * VecCf::stride * (start >> log2(off1 + off3));
@@ -1953,7 +1951,8 @@ void real_pass(
 
   Vec half = V::vec(0.5);
 
-  Complex<T> middle = SrcCfT<Scalar<T>>::load(src + n / 4 * src_ratio, src_off);
+  Complex<Scalar<T>> middle =
+    SrcCfT<Scalar<T>>::load(src + n / 4 * src_ratio, src_off);
 
   for(
     Int i0 = 1, i1 = n / 2 - V::vec_size, iw = 0; 
@@ -1998,7 +1997,7 @@ void real_pass(
   }
   else
   {
-    Complex<T> r0 = SrcCfT<Scalar<T>>::load(src, src_off);
+    Complex<Scalar<T>> r0 = SrcCfT<Scalar<T>>::load(src, src_off);
     DstCfT<Scalar<T>>::store({r0.re + r0.im, 0}, dst, dst_off);
     DstCfT<Scalar<T>>::store({r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
   }
@@ -2197,9 +2196,9 @@ NOINLINE void two_passes_inner(
   typename Cf::V::T* a1,
   typename Cf::V::T* a2,
   typename Cf::V::T* a3,
-  Complex<typename Cf::V::Vec> t0,
-  Complex<typename Cf::V::Vec> t1,
-  Complex<typename Cf::V::Vec> t2,
+  Complex<typename Cf::V> t0,
+  Complex<typename Cf::V> t1,
+  Complex<typename Cf::V> t2,
   Int m,
   Int im_off)
 {
