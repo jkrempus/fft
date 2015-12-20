@@ -358,10 +358,11 @@ FORCEINLINE void complex_copy(
   typename V::T* src, Int src_off, Int n,
   typename V::T* dst, Int dst_off)
 {
-  for(Int i = 0; i < n; i++)
+  for(auto* end = src + n * SrcCf::idx_ratio; src < end;)
   {
-    auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), src_off);
-    DstCf::store(c, dst + i * stride<V, DstCf>(), dst_off);
+    DstCf::store(load<V, SrcCf>(src, src_off), dst, dst_off);
+    src += stride<V, SrcCf>();
+    dst += stride<V, DstCf>();
   }
 }
 
@@ -2535,7 +2536,7 @@ void fft_impl(
   bool interleaved_src_rows)
 {
   ASSERT(idim < s->ndim);
-  if(idim == s->ndim - 1) fft_impl(s->last_transform, im_off, src, dst);
+  if(idim == s->ndim - 1) onedim::fft_impl(s->last_transform, im_off, src, dst);
   else
   {
     s->transforms[idim]->fun_ptr(
@@ -2819,10 +2820,12 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
   remove_ones(dim_in, ndim_in, dim, ndim);
 
   VEC_TYPEDEFS(V)
+  if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
+    return irfft_create<Scalar<T>, SrcCf>(ndim, dim, mem);
+
   auto r = (Irfft<T>*) mem;
   mem = (void*) align_size(Uint(mem) + sizeof(Irfft<T>));
   
-  ASSERT(ndim > 0); 
   if(ndim == 1)
   {
      r->onedim_transform = onedim::rfft_create<V, SrcCf>(dim[0], mem);
