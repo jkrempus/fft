@@ -188,15 +188,15 @@ namespace complex_format
     template<typename V>
     static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
     {
-      return { V::template load<V>(ptr), V::template load<V>(ptr + off)};
+      return { V::load(ptr), V::load(ptr + off)};
     }
 
     template<typename V>
     static FORCEINLINE Complex<V> unaligned_load(typename V::T* ptr, Int off)
     {
       return {
-        V::template unaligned_load<V>(ptr),
-        V::template unaligned_load<V>(ptr + off)};
+        V::unaligned_load(ptr),
+        V::unaligned_load(ptr + off)};
     }
 
     template<typename V>
@@ -313,14 +313,14 @@ namespace complex_format
     template<typename V>
     static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
     {
-      InputCf::store({a.im, a.re}, ptr, off);
+      InputCf::template store<V>({a.im, a.re}, ptr, off);
     }
 
     template<typename V>
     static FORCEINLINE void unaligned_store(
       Complex<V> a, typename V::T* ptr, Int off)
     {
-      InputCf::unaligned_store({a.im, a.re}, ptr, off);
+      InputCf::template unaligned_store<V>({a.im, a.re}, ptr, off);
     }
   };
 }
@@ -1377,7 +1377,8 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   else
   {
     const Int br_table[m] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
-    AlignedMemory<m * m * stride<V, cf::Vec>() * sizeof(T), align_bytes> mem;
+    const Int memsize = m * m * cf::Vec::idx_ratio * V::vec_size * sizeof(T);
+    AlignedMemory<memsize, align_bytes> mem;
     auto working = (T*) mem.get();
     Int stride_ = vn / m;
 
@@ -1953,7 +1954,9 @@ void real_pass(
 
   Vec half = V::vec(0.5);
 
-  Complex<Scalar<T>> middle = load<V, SrcCf>(src + n / 4 * src_ratio, src_off);
+  typedef Scalar<T> S;
+  typedef Complex<S> SC; 
+  SC middle = load<S, SrcCf>(src + n / 4 * src_ratio, src_off);
 
   for(
     Int i0 = 1, i1 = n / 2 - V::vec_size, iw = 0; 
@@ -1992,15 +1995,16 @@ void real_pass(
 
   if(inverse)
   {
-    T r0 = load<V, SrcCf>(src, src_off).re;
-    T r1 = load<V, SrcCf>(src + n / 2 * src_ratio, src_off).re;
-    DstCf::store({r0 + r1, r0 - r1}, dst, dst_off);
+    T r0 = load<S, SrcCf>(src, src_off).re;
+    T r1 = load<S, SrcCf>(src + n / 2 * src_ratio, src_off).re;
+    DstCf::template store<S>({r0 + r1, r0 - r1}, dst, dst_off);
   }
   else
   {
-    Complex<Scalar<T>> r0 = load<V, SrcCf>(src, src_off);
-    DstCf::store({r0.re + r0.im, 0}, dst, dst_off);
-    DstCf::store({r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
+    SC r0 = load<S, SrcCf>(src, src_off);
+    DstCf::template store<S>({r0.re + r0.im, 0}, dst, dst_off);
+    DstCf::template store<S>(
+      {r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
   }
 }
 
@@ -2128,14 +2132,14 @@ void first_pass(Int n, const SrcRows& src, const DstRows& dst)
     auto d1 = dst.row(i + n / 2);
     for(auto end = s0 + dst.m * SrcRows::Cf::idx_ratio; s0 < end;)
     {
-      C a0 = load<V, SrcRows::Cf>(s0, src.im_off);
-      C a1 = load<V, SrcRows::Cf>(s1, src.im_off);
+      C a0 = load<V, typename SrcRows::Cf>(s0, src.im_off);
+      C a1 = load<V, typename SrcRows::Cf>(s1, src.im_off);
       DstRows::Cf::store(a0 + a1, d0, dst.im_off);
       DstRows::Cf::store(a0 - a1, d1, dst.im_off);
-      s0 += stride<V, SrcRows::Cf>();
-      s1 += stride<V, SrcRows::Cf>();
-      d0 += stride<V, DstRows::Cf>();
-      d1 += stride<V, DstRows::Cf>();
+      s0 += stride<V, typename SrcRows::Cf>();
+      s1 += stride<V, typename SrcRows::Cf>();
+      d0 += stride<V, typename DstRows::Cf>();
+      d1 += stride<V, typename DstRows::Cf>();
     }
   }
 }
@@ -2159,10 +2163,10 @@ void first_two_passes(
 
     for(auto end = s0 + dst.m * SrcRows::Cf::idx_ratio; s0 < end;)
     {
-      C a0 = load<V, SrcRows::Cf>(s0, src.im_off);
-      C a1 = load<V, SrcRows::Cf>(s1, src.im_off);
-      C a2 = load<V, SrcRows::Cf>(s2, src.im_off);
-      C a3 = load<V, SrcRows::Cf>(s3, src.im_off);
+      C a0 = load<V, typename SrcRows::Cf>(s0, src.im_off);
+      C a1 = load<V, typename SrcRows::Cf>(s1, src.im_off);
+      C a2 = load<V, typename SrcRows::Cf>(s2, src.im_off);
+      C a3 = load<V, typename SrcRows::Cf>(s3, src.im_off);
 
       C b0 = a0 + a2;
       C b2 = a0 - a2;
@@ -2179,14 +2183,14 @@ void first_two_passes(
       DstRows::Cf::store(c2, d2, dst.im_off);
       DstRows::Cf::store(c3, d3, dst.im_off);
 
-      s0 += stride<V, SrcRows::Cf>();
-      s1 += stride<V, SrcRows::Cf>();
-      s2 += stride<V, SrcRows::Cf>();
-      s3 += stride<V, SrcRows::Cf>();
-      d0 += stride<V, DstRows::Cf>();
-      d1 += stride<V, DstRows::Cf>();
-      d2 += stride<V, DstRows::Cf>();
-      d3 += stride<V, DstRows::Cf>();
+      s0 += stride<V, typename SrcRows::Cf>();
+      s1 += stride<V, typename SrcRows::Cf>();
+      s2 += stride<V, typename SrcRows::Cf>();
+      s3 += stride<V, typename SrcRows::Cf>();
+      d0 += stride<V, typename DstRows::Cf>();
+      d1 += stride<V, typename DstRows::Cf>();
+      d2 += stride<V, typename DstRows::Cf>();
+      d3 += stride<V, typename DstRows::Cf>();
     }
   }
 }
@@ -2224,10 +2228,10 @@ void two_passes(
   Int dft_size,
   Int start,
   Int end,
-  typename Rows::Cf::V::T* twiddle,
+  typename Rows::V::T* twiddle,
   const Rows& data)
 {
-  typedef typename Rows::Cf::V V; VEC_TYPEDEFS(V);
+  typedef typename Rows::V V; VEC_TYPEDEFS(V);
 
   Int stride = end - start;
   ASSERT(stride * dft_size == n);
@@ -2238,7 +2242,7 @@ void two_passes(
   C tw2 = {V::vec(tw[4]), V::vec(tw[5])}; 
 
   for(Int j = start; j < start + stride / 4; j++)
-    two_passes_inner<typename Rows::Cf>(
+    two_passes_inner<typename Rows::V, typename Rows::Cf>(
       data.row(j + 0 * stride / 4),
       data.row(j + 1 * stride / 4),
       data.row(j + 2 * stride / 4),
@@ -2249,18 +2253,19 @@ void two_passes(
 template<typename Rows>
 void last_pass(
   Int n, Int start, Int end,
-  typename Rows::Cf::V::T* twiddle, const Rows& rows)
+  typename Rows::V::T* twiddle, const Rows& rows)
 {
   typedef typename Rows::V V; VEC_TYPEDEFS(V);
+  typedef typename Rows::Cf Cf;
   ASSERT(end - start == 2);
 
   C tw = {V::vec(twiddle[start]), V::vec(twiddle[start + 1])}; 
   auto p0 = rows.row(start);
   auto p1 = rows.row(start + 1);
-  for(Int i = 0; i < rows.m * Rows::Cf::idx_ratio; i += stride<V, Rows::Cf>())
+  for(Int i = 0; i < rows.m * Rows::Cf::idx_ratio; i += stride<V, Cf>())
   {
-    C b0 = load<V, Rows::Cf>(p0 + i, rows.im_off);
-    C mul = load<V, Rows::Cf>(p1 + i, rows.im_off) * tw;
+    C b0 = load<V, Cf>(p0 + i, rows.im_off);
+    C mul = load<V, Cf>(p1 + i, rows.im_off) * tw;
     Rows::Cf::store(b0 + mul, p0 + i, rows.im_off);
     Rows::Cf::store(b0 - mul, p1 + i, rows.im_off);
   }
@@ -2323,7 +2328,7 @@ void fft_recurse(
   Int start,
   Int end,
   Int dft_size,
-  typename Rows::Cf::V::T* twiddle,
+  typename Rows::V::T* twiddle,
   const Rows& rows)
 {
   if(4 * dft_size <= n)
@@ -2622,7 +2627,7 @@ void multi_real_pass(
     {
       Vec r0 = load<V, DstCf>(s0, dst_im_off).re;
       Vec r1 = load<V, DstCf>(s1, dst_im_off).re;
-      DstCf::store({r0 + r1, r0 - r1}, d, dst_im_off);
+      DstCf::template store<V>({r0 + r1, r0 - r1}, d, dst_im_off);
 
       s0 += stride<V, DstCf>();
       s1 += stride<V, DstCf>();
@@ -2638,8 +2643,8 @@ void multi_real_pass(
     for(auto end = s + m * DstCf::idx_ratio; s < end;)
     {
       C r0 = load<V, DstCf>(s, dst_im_off);
-      DstCf::store({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
-      DstCf::store({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
+      DstCf::template store<V>({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
+      DstCf::template store<V>({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
       
       s += stride<V, DstCf>();
       d0 += stride<V, DstCf>();
