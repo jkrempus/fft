@@ -71,30 +71,6 @@ void dump(T_* ptr, Int n, const char* name, ...)
   std::ofstream(buf, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
 }
 
-#if 0
-char mem[1 << 30];
-char* mem_ptr = mem;
-
-void* alloc(Int n)
-{
-#if 0
-  void* r = valloc(n);
-  //printf("valloc_ allocated range %p %p\n", r, (void*)(Uint(r) + n));
-  return r;
-#else
-  mem_ptr = (char*) align_size(Uint(mem_ptr));
-  auto r = mem_ptr;
-  mem_ptr += n;
-  return r;
-#endif
-}
-
-void dealloc(void* p)
-{
-  //free(p);
-  mem_ptr = mem;
-}
-#else
 void* alloc(Int n)
 {
   void* r = valloc(n);
@@ -105,7 +81,6 @@ void dealloc(void* p)
 {
   free(p);
 }
-#endif
 
 template<typename T>
 T* alloc_array(Int n)
@@ -564,16 +539,16 @@ struct TestWrapper<V, CfT, false, false>
   static const bool is_inverse = false;
   VEC_TYPEDEFS(V);
   typedef T value_type;
-  MultidimState<T>* state;
+  Fft<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, false>(size),
-    state(multidim_fft_state<V, CfT, CfT>(
+    state(fft_create<V, CfT, CfT>(
       size.size(),
       &size[0],
-      alloc(multidim_state_memory_size<V>(size.size(), &size[0])))) {}
+      alloc(fft_memsize<V>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
-  void transform() { multidim_fft<T>(state, this->src, this->dst); }
+  void transform() { fft<T>(state, this->src, this->dst); }
 };
 
 template<typename V, template<typename> class CfT>
@@ -584,16 +559,16 @@ struct TestWrapper<V, CfT, false, true>
   static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
   typedef T value_type;
-  InverseMultidimState<T>* state;
+  Ifft<T>* state;
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, false, true>(size),
-    state(inverse_multidim_fft_state<V, CfT, CfT>(
+    state(ifft_create<V, CfT, CfT>(
       size.size(),
       &size[0],
-      alloc(inverse_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
+      alloc(ifft_memsize<V>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
-  void transform() { inverse_multidim_fft<T>(state, this->src, this->dst); }
+  void transform() { ifft<T>(state, this->src, this->dst); }
 };
 
 template<typename V, template<typename> class CfT>
@@ -604,7 +579,7 @@ struct TestWrapper<V, CfT, true, false>
   static const bool is_inverse = false;
   VEC_TYPEDEFS(V);
   typedef typename V::T value_type;
-  RealMultidimState<T>* state;
+  Rfft<T>* state;
 
   static Int im_offset(const std::vector<Int>& size)
   {
@@ -614,15 +589,12 @@ struct TestWrapper<V, CfT, true, false>
 
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, false>(size, im_offset(size)),
-    state(real_multidim_fft_state<V, CfT>(size.size(), &size[0], 
-      alloc(real_multidim_state_memory_size<V>(size.size(), &size[0])))) {}
+    state(rfft_create<V, CfT>(size.size(), &size[0], 
+      alloc(rfft_memsize<V>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
-  void transform()
-  {
-    real_multidim_fft(state, this->src, this->dst);
-  }
+  void transform() { rfft(state, this->src, this->dst); }
 };
 
 template<typename V, template<typename> class CfT>
@@ -633,7 +605,7 @@ struct TestWrapper<V, CfT, true, true>
   static const bool is_inverse = true;
   VEC_TYPEDEFS(V);
   typedef typename V::T value_type;
-  InverseRealMultidimState<T>* state;
+  Irfft<T>* state;
 
   static Int im_offset(const std::vector<Int>& size)
   {
@@ -643,16 +615,12 @@ struct TestWrapper<V, CfT, true, true>
 
   TestWrapper(const std::vector<Int>& size) :
     SplitWrapperBase<T, true, true>(size, im_offset(size)),
-    state(inverse_real_multidim_fft_state<V, CfT>(size.size(), &size[0], 
-      alloc(inverse_real_multidim_state_memory_size<V>(
-          size.size(), &size[0])))) {}
+    state(irfft_create<V, CfT>(size.size(), &size[0], 
+      alloc(irfft_memsize<V>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
-  void transform()
-  {
-    inverse_real_multidim_fft(state, this->src, this->dst);
-  }
+  void transform() { irfft(state, this->src, this->dst); }
 };
 
 #ifdef HAVE_FFTW
