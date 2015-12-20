@@ -160,11 +160,12 @@ static Int aligned_increment(Int sz, Int bytes) { return align_size(sz + bytes);
 template<typename T>
 T* aligned_increment(T* ptr, Int bytes) { return (T*) align_size(Uint(ptr) + bytes); }
 
-template<typename T>
+template<typename V>
 struct Complex
 {
-  T re;
-  T im;
+  typedef typename V::Vec Vec;
+  Vec re;
+  Vec im;
   FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
   FORCEINLINE Complex adj() { return {re, -im}; }
   FORCEINLINE Complex operator+(Complex other)
@@ -184,7 +185,7 @@ struct Complex
       re * other.im + im * other.re};
   }
   
-  FORCEINLINE Complex operator*(T other)
+  FORCEINLINE Complex operator*(Vec other)
   {
     return {re * other, im * other};
   }
@@ -192,82 +193,89 @@ struct Complex
 
 namespace complex_format
 {
-  template<typename V_>
   struct Split
   {
-    typedef V_ V;
-    typedef typename V::T T;
-    typedef typename V::Vec Vec;
-    typedef Complex<typename V::Vec> C;
-    static const Int stride = V::vec_size;
     static const Int idx_ratio = 1;
 
-    static FORCEINLINE C load(T* ptr, Int off)
+    template<typename V> Int stride(){ return V::vec_size * idx_ratio; }
+
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> load(
+      typename V::T* ptr, Int off)
     {
       return { V::load(ptr), V::load(ptr + off)};
     }
-    
-    static FORCEINLINE C unaligned_load(T* ptr, Int off)
+
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> unaligned_load(
+      typename V::T* ptr, Int off)
     {
       return {V::unaligned_load(ptr), V::unaligned_load(ptr + off)};
     }
 
-    static FORCEINLINE void store(C a, T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE void store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
     {
       V::store(a.re, ptr);
       V::store(a.im, ptr + off);
     }
 
-    static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE void unaligned_store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
     {
       V::unaligned_store(a.re, ptr);
       V::unaligned_store(a.im, ptr + off);
     }
   };
 
-  template<typename V_>
   struct Vec
   {
-    typedef V_ V;
-    typedef typename V::T T;
-    typedef Complex<typename V::Vec> C;
-    static const Int stride = 2 * V::vec_size;
     static const Int idx_ratio = 2;
 
-    static FORCEINLINE C load(T* ptr, Int off)
+    template<typename V> Int stride(){ return V::vec_size * idx_ratio; }
+
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> load(
+      typename V::T* ptr, Int off)
     {
       return {V::load(ptr), V::load(ptr + V::vec_size)};
     }
 
-    static FORCEINLINE C unaligned_load(T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> unaligned_load(
+      typename V::T* ptr, Int off)
     {
       return {V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
     }
 
-    static FORCEINLINE void store(C a, T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE void store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
     {
       V::store(a.re, ptr);
       V::store(a.im, ptr + V::vec_size);
     }
 
-    static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE void unaligned_store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
     {
       V::unaligned_store(a.re, ptr);
       V::unaligned_store(a.im, ptr + V::vec_size);
     }
   };
 
-  template<typename V_>
   struct Scal
   {
-    typedef V_ V;
-    typedef typename V::T T;
-    typedef typename V::Vec Vec;
-    typedef Complex<typename V::Vec> C;
-    static const Int stride = 2 * V::vec_size;
     static const Int idx_ratio = 2;
 
-    static FORCEINLINE C load(T* ptr, Int off)
+    template<typename V> Int stride(){ return V::vec_size * idx_ratio; }
+
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> load(
+      typename V::T* ptr, Int off)
     {
       C r;
       V::deinterleave(
@@ -277,7 +285,9 @@ namespace complex_format
       return r;
     }
 
-    static FORCEINLINE C unaligned_load(T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> unaligned_load(
+      typename V::T* ptr, Int off)
     {
       C r;
       V::deinterleave(
@@ -287,59 +297,62 @@ namespace complex_format
       return r;
     }
 
-    static FORCEINLINE void store(C a, T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE void store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
     {
       V::interleave(a.re, a.im, a.re, a.im);
       V::store(a.re, ptr);
       V::store(a.im, ptr + V::vec_size);
     }
 
-    static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
+    template<typename V>
+    static FORCEINLINE void unaligned_store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
     {
       V::interleave(a.re, a.im, a.re, a.im);
       V::unaligned_store(a.re, ptr);
       V::unaligned_store(a.im, ptr + V::vec_size);
     }
   };
-  
-  template<template<typename> class InputCf>
+
+  template<class InputCf>
   struct Swapped
   {
-    template<typename V_>
-    struct Cf
+    static const Int idx_ratio = InputCf::idx_ratio;
+
+    template<typename V> Int stride(){ return V::vec_size * idx_ratio; }
+
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> load(
+      typename V::T* ptr, Int off)
     {
-      typedef V_ V;
-      typedef typename InputCf<V>::T T;
-      typedef Complex<typename V::Vec> C;
-      static const Int stride = InputCf<V>::stride;
-      static const Int idx_ratio = InputCf<V>::idx_ratio;
+      auto a = InputCf::load<V>(ptr, off);
+      return {a.im, a.re};
+    }
 
-      static FORCEINLINE C load(T* ptr, Int off)
-      {
-        C a = InputCf<V>::load(ptr, off);
-        return {a.im, a.re};
-      }
+    template<typename V>
+    static FORCEINLINE Complex<typename V::Vec> unaligned_load(
+      typename V::T* ptr, Int off)
+    {
+      auto a = InputCf::unaligned_load<V>(ptr, off);
+      return {a.im, a.re};
+    }
 
-      static FORCEINLINE C unaligned_load(T* ptr, Int off)
-      {
-        C a = InputCf<V>::unaligned_load(ptr, off);
-        return {a.im, a.re};
-      }
+    template<typename V>
+    static FORCEINLINE void store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
+    {
+      InputCf::store({a.im, a.re}, ptr, off);
+    }
 
-      static FORCEINLINE void store(C a, T* ptr, Int off)
-      {
-        InputCf<V>::store({a.im, a.re}, ptr, off);
-      }
-
-      static FORCEINLINE void unaligned_store(C a, T* ptr, Int off)
-      {
-        InputCf<V>::unaligned_store({a.im, a.re}, ptr, off);
-      }
-    };
+    template<typename V>
+    static FORCEINLINE void unaligned_store(
+      Complex<typename V::Vec> a, typename V::T* ptr, Int off)
+    {
+      InputCf::unaligned_store({a.im, a.re}, ptr, off);
+    }
   };
-
-  template<typename V> using SwappedVec = Swapped<Vec>::template Cf<V>;
-  template<typename V> using SwappedSplit = Swapped<Split>::template Cf<V>;
 }
 
 namespace cf = complex_format;
@@ -347,11 +360,11 @@ namespace cf = complex_format;
 #define VEC_TYPEDEFS(V) \
   typedef typename V::T T; \
   typedef typename V::Vec Vec; \
-  typedef Complex<typename V::Vec> C; \
+  typedef Complex<V> C; \
   typedef cf::Vec<V> VecCf;
 
 template<typename V>
-Complex<typename V::Vec> reverse_complex(Complex<typename V::Vec> a)
+Complex<V> reverse_complex(Complex<V> a)
 {
   return { V::reverse(a.re), V::reverse(a.im) };
 }
@@ -2830,12 +2843,12 @@ Irfft<typename V::T>* irfft_create(Int ndim, const Int* dim, void* mem)
     mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
 
     r->last_transform = multi::fft_create<
-      V, cf::SwappedVec, cf::SwappedSplit, false>(
+      V, cf::Swapped<cf::Vec>, cf::Swapped<cf::Split>, false>(
         r->outer_n / 2, r->inner_n, mem);
 
     mem = (void*) align_size(Uint(mem) + multi::fft_memsize<V>(dim[0] / 2));
     r->multidim_transform = fft_create<
-      V, cf::Swapped<SrcCfT>:: template Cf, cf::SwappedVec>(
+      V, cf::Swapped<SrcCfT>:: template Cf, cf::Swapped<cf::Vec>>(
         ndim - 1, dim + 1, mem);
 
     r->real_pass = &multi_real_pass<V, cf::Vec, true>;
