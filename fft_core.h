@@ -2678,6 +2678,8 @@ template<typename V>
 Int rfft_memsize(Int ndim, const Int* dim)
 {
   VEC_TYPEDEFS(V)
+  if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
+    return rfft_memsize<Scalar<T>>(ndim, dim);
 
   Int r = 0;
   r = align_size(r + sizeof(Rfft<T>));
@@ -2697,6 +2699,9 @@ template<typename V, typename DstCf>
 Rfft<typename V::T>* rfft_create(Int ndim, const Int* dim, void* mem)
 {
   VEC_TYPEDEFS(V)
+  if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
+    return rfft_create<Scalar<T>, DstCf>(ndim, dim, mem);
+
   auto r = (Rfft<T>*) mem;
   mem = (void*) align_size(Uint(mem) + sizeof(Rfft<T>)); 
   if(ndim == 1)
