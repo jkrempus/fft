@@ -1,3 +1,8 @@
+#ifndef _ARRAY_IPC_H_
+#define _ARRAY_IPC_H_
+
+#ifdef ARRAY_IPC_ENABLED
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -99,12 +104,10 @@ void send(const char* name, T* ptr, size_t len)
   }
 }
 }
-
-#ifdef TEST_ARRAY_IPC
-int main()
+#else
+namespace array_ipc
 {
-  float a[] = {1, 2, 3, 4};
-  array_ipc::send("a", a, 4);
-  return 0;
+template<typename T> void send(const char* name, T* ptr, int len) { }
 }
+#endif
 #endif
