@@ -2465,8 +2465,12 @@ Int product(const Int* b, const Int* e)
 Int product(const Int* p, Int n) { return product(p, p + n); }
 
 template<typename V>
-Int fft_memsize(Int ndim, const Int* dim)
+Int fft_memsize(Int ndim_in, const Int* dim_in)
 {
+  Int dim[maxdim];
+  Int ndim;
+  remove_ones(dim_in, ndim_in, dim, ndim);
+
   VEC_TYPEDEFS(V);
   if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
     return fft_memsize<Scalar<T>>(ndim, dim);
@@ -2692,8 +2696,12 @@ Int rfft_im_off(Int ndim, const Int* dim)
 }
 
 template<typename V>
-Int rfft_memsize(Int ndim, const Int* dim)
+Int rfft_memsize(Int ndim_in, const Int* dim_in)
 {
+  Int dim[maxdim];
+  Int ndim;
+  remove_ones(dim_in, ndim_in, dim, ndim);
+
   VEC_TYPEDEFS(V)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
     return rfft_memsize<Scalar<T>>(ndim, dim);

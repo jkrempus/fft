@@ -583,8 +583,11 @@ struct TestWrapper<V, Cf, true, false>
 
   static Int im_offset(const std::vector<Int>& size)
   {
-    Int inner = product(&size[1], size.size() - 1);
-    return align_size<T>((size[0] / 2 + 1) * inner);
+    auto it = std::find_if(size.begin(), size.end(),
+      [](Int e){ return e > 1; });
+
+    Int inner = product(&it[1], &size[0] + size.size());
+    return align_size<T>((it[0] / 2 + 1) * inner);
   }
 
   TestWrapper(const std::vector<Int>& size) :
