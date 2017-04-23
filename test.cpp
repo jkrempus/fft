@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+#include <cstdarg>
 #include <iostream>
 #include <sys/time.h>
 #include <fstream>
