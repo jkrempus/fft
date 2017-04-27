@@ -146,89 +146,6 @@ Ifft<typename V::T>* ifft_create(Int ndim, const Int* dim, void* mem)
     ndim, dim, mem);
 }
 
-// src and dst must not be the same
-// does not work for inverse yet
-template<typename V, typename DstCf, bool inverse>
-void multi_real_pass(
-  Int n, Int m, typename V::T* twiddle, typename V::T* dst, Int dst_im_off)
-{
-  VEC_TYPEDEFS(V);
-
-  Vec half = V::vec(0.5);
-  Int nbits = log2(n / 2);
-
-  for(Int i = 1; i <= n / 4; i++)
-  {
-    C w = { V::vec(twiddle[i]), V::vec(twiddle[i + n / 2]) };
-
-    auto d0 = dst + i * m * DstCf::idx_ratio; 
-    auto d1 = dst + (n / 2 - i) * m * DstCf::idx_ratio; 
-
-    for(auto end = d0 + m * DstCf::idx_ratio; d0 < end;)
-    {
-      C sval0 = load<V, DstCf>(d0, dst_im_off);
-      C sval1 = load<V, DstCf>(d1, dst_im_off);
-
-      C a, b;
-
-      if(inverse)
-      {
-        a = sval0 + sval1.adj();
-        b = (sval1.adj() - sval0) * w.adj();
-      }
-      else
-      {
-        a = (sval0 + sval1.adj()) * half;
-        b = ((sval0 - sval1.adj()) * w) * half;
-      }
-
-      C dval0 = a + b.mul_neg_i();
-      C dval1 = a.adj() + b.adj().mul_neg_i();
-
-      DstCf::store(dval0, d0, dst_im_off);
-      DstCf::store(dval1, d1, dst_im_off);
-
-      d0 += stride<V, DstCf>();
-      d1 += stride<V, DstCf>();
-    }
-  }
-
-  if(inverse)
-  {
-    auto s0 = dst; 
-    auto s1 = dst + n / 2 * m * DstCf::idx_ratio; 
-    auto d = dst; 
-
-    for(auto end = s0 + m * DstCf::idx_ratio; s0 < end;)
-    {
-      Vec r0 = load<V, DstCf>(s0, dst_im_off).re;
-      Vec r1 = load<V, DstCf>(s1, dst_im_off).re;
-      DstCf::template store<V>({r0 + r1, r0 - r1}, d, dst_im_off);
-
-      s0 += stride<V, DstCf>();
-      s1 += stride<V, DstCf>();
-      d += stride<V, DstCf>();
-    }
-  }
-  else
-  {
-    auto d0 = dst; 
-    auto d1 = dst + n / 2 * m * DstCf::idx_ratio; 
-    auto s = dst; 
-
-    for(auto end = s + m * DstCf::idx_ratio; s < end;)
-    {
-      C r0 = load<V, DstCf>(s, dst_im_off);
-      DstCf::template store<V>({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
-      DstCf::template store<V>({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
-      
-      s += stride<V, DstCf>();
-      d0 += stride<V, DstCf>();
-      d1 += stride<V, DstCf>();
-    }
-  }
-}
-
 template<typename T>
 struct Rfft
 {
@@ -317,7 +234,7 @@ Rfft<typename V::T>* rfft_create(Int ndim_in, const Int* dim_in, void* mem)
 
     mem = (void*) align_size(Uint(mem) + multi::fft_memsize<V>(dim[0] / 2));
     r->multidim_transform = fft_create<V, cf::Vec, DstCf>(ndim - 1, dim + 1, mem);
-    r->real_pass = &multi_real_pass<V, cf::Vec, false>;
+    r->real_pass = &multi::real_pass<V, cf::Vec, false>;
   
     Int m =  r->outer_n / 2;
     compute_twiddle(m, m, r->twiddle, r->twiddle + m);
@@ -423,7 +340,7 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
       V, cf::Swapped<SrcCf>, cf::Swapped<cf::Vec>>(
         ndim - 1, dim + 1, mem);
 
-    r->real_pass = &multi_real_pass<V, cf::Vec, true>;
+    r->real_pass = &multi::real_pass<V, cf::Vec, true>;
   
     Int m =  r->outer_n / 2;
     compute_twiddle(m, m, r->twiddle, r->twiddle + m);
