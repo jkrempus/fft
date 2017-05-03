@@ -21,6 +21,8 @@
 #include "fftw3.h"
 #endif
 
+//#define INTERLEAVED 1;
+
 template<typename T> T sq(T a){ return a * a; }
 
 struct IterateMultidim
@@ -279,7 +281,7 @@ struct SplitWrapperBase<T, false, is_inverse_>
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int> size) :
+  SplitWrapperBase(const std::vector<Int> size, Int im_off = 0) :
     size(size),
     src((T*) alloc(2 * sizeof(T) * product(size))),
     dst((T*) alloc(2 * sizeof(T) * product(size))) { }
@@ -315,7 +317,7 @@ struct SplitWrapperBase<T, true, false>
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
+  SplitWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
     im_off(im_off),
     size(size),
     src(alloc_array<T>(product(size))),
@@ -366,7 +368,7 @@ struct SplitWrapperBase<T, true, true>
   T* src;
   T* dst;
 
-  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
+  SplitWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
     im_off(im_off),
     size(size),
     dst(alloc_array<T>(product(size))),
@@ -416,7 +418,7 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(const std::vector<Int>& size) :
+  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
     size(size),
     src((T*) alloc(2 * sizeof(T) * product(size))),
     dst((T*) alloc(2 * sizeof(T) * product(size))) { }
@@ -452,7 +454,7 @@ struct InterleavedWrapperBase<T, true, false>
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(const std::vector<Int>& size) : size(size)
+  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0) : size(size)
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
@@ -496,7 +498,7 @@ struct InterleavedWrapperBase<T, true, true>
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(const std::vector<Int>& size) :
+  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
     size(size),
     im_offset(align_size<T>(product(size) / 2 + 1))
   {
@@ -529,12 +531,20 @@ struct InterleavedWrapperBase<T, true, true>
   }
 };
 
+#ifdef INTERLEAVED
+template<typename T, bool is_real, bool is_inverse>
+using Base = InterleavedWrapperBase<T, is_real, is_inverse>;
+#else
+template<typename T, bool is_real, bool is_inverse>
+using Base = SplitWrapperBase<T, is_real, is_inverse>;
+#endif
+
 template<typename V, typename Cf, bool is_real, bool is_inverse>
 struct TestWrapper { };
 
 template<typename V, typename Cf>
 struct TestWrapper<V, Cf, false, false>
-: public SplitWrapperBase<typename V::T, false, false>
+: public Base<typename V::T, false, false>
 {
   static const bool is_real = false;
   static const bool is_inverse = false;
@@ -542,7 +552,7 @@ struct TestWrapper<V, Cf, false, false>
   typedef T value_type;
   Fft<T>* state;
   TestWrapper(const std::vector<Int>& size) :
-    SplitWrapperBase<T, false, false>(size),
+    Base<T, false, false>(size),
     state(fft_create<V, Cf, Cf>(
       size.size(),
       &size[0],
@@ -554,7 +564,7 @@ struct TestWrapper<V, Cf, false, false>
 
 template<typename V, typename Cf>
 struct TestWrapper<V, Cf, false, true>
-: public SplitWrapperBase<typename V::T, false, true>
+: public Base<typename V::T, false, true>
 {
   static const bool is_real = false;
   static const bool is_inverse = true;
@@ -562,7 +572,7 @@ struct TestWrapper<V, Cf, false, true>
   typedef T value_type;
   Ifft<T>* state;
   TestWrapper(const std::vector<Int>& size) :
-    SplitWrapperBase<T, false, true>(size),
+    Base<T, false, true>(size),
     state(ifft_create<V, Cf, Cf>(
       size.size(),
       &size[0],
@@ -574,7 +584,7 @@ struct TestWrapper<V, Cf, false, true>
 
 template<typename V, typename Cf>
 struct TestWrapper<V, Cf, true, false>
-: public SplitWrapperBase<typename V::T, true, false>
+: public Base<typename V::T, true, false>
 {
   static const bool is_real = true;
   static const bool is_inverse = false;
@@ -592,7 +602,7 @@ struct TestWrapper<V, Cf, true, false>
   }
 
   TestWrapper(const std::vector<Int>& size) :
-    SplitWrapperBase<T, true, false>(size, im_offset(size)),
+    Base<T, true, false>(size, im_offset(size)),
     state(rfft_create<V, Cf>(size.size(), &size[0], 
       alloc(rfft_memsize<V>(size.size(), &size[0])))) {}
 
@@ -603,7 +613,7 @@ struct TestWrapper<V, Cf, true, false>
 
 template<typename V, typename Cf>
 struct TestWrapper<V, Cf, true, true>
-: public SplitWrapperBase<typename V::T, true, true>
+: public Base<typename V::T, true, true>
 {
   static const bool is_real = true;
   static const bool is_inverse = true;
@@ -618,7 +628,7 @@ struct TestWrapper<V, Cf, true, true>
   }
 
   TestWrapper(const std::vector<Int>& size) :
-    SplitWrapperBase<T, true, true>(size, im_offset(size)),
+    Base<T, true, true>(size, im_offset(size)),
     state(irfft_create<V, Cf>(size.size(), &size[0], 
       alloc(irfft_memsize<V>(size.size(), &size[0])))) {}
 
@@ -923,7 +933,11 @@ typedef SseFloat V;
 typedef Scalar<float> V;
 #endif
 
+#ifdef INTERLEAVED
+typedef complex_format::Scal Cf;
+#else
 typedef complex_format::Split Cf;
+#endif
 
 struct Options
 {
