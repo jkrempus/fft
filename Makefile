@@ -3,7 +3,7 @@ CXX ?= g++
 ifdef DEBUG
 	CXXFLAGS += -std=c++17 -g
 else
-	CXXFLAGS += -std=c++17 -Ofast -ffunction-sections
+	CXXFLAGS += -std=c++17 -Ofast -ffunction-sections -mtune=native
 endif
 
 ifdef FFTW
