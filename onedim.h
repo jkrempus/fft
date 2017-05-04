@@ -472,20 +472,14 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
     for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
     {
       T* src = arg.src + br.i * m * stride<V, cf::Vec>();
-      for(Int i0 = 0; i0 < m; i0++)
-        for(Int i1 = 0; i1 < m; i1++)
-          cf::Vec::store(
-            load<V, cf::Vec>(src + (i0 * stride_ + i1) * stride<V, cf::Vec>(), 0),
-            working + (i0 * m + i1) * stride<V, cf::Vec>(), 0);
-
       T* dst = arg.dst + br.br * m * stride<V, DstCf>();
       for(Int i0 = 0; i0 < m; i0++)
       {
-        T* s = working + br_table[i0] * stride<V, cf::Vec>();
+        T* s = src + br_table[i0] * stride<V, cf::Vec>();
         T* d = dst + i0 * stride_ * stride<V, DstCf>();
         for(Int i1 = 0; i1 < m; i1++)
           DstCf::store(
-            load<V, cf::Vec>(s + br_table[i1] * m * stride<V, cf::Vec>(), 0),
+            load<V, cf::Vec>(s + br_table[i1] * stride_ * stride<V, cf::Vec>(), 0),
             d + i1 * stride<V, DstCf>(), im_off);
       }
     }
@@ -496,6 +490,9 @@ template<typename V, typename DstCf>
 void bit_reverse_pass(const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
+
+  //complex_copy<V, cf::Vec, DstCf>(arg.src, arg.im_off, arg.n, arg.dst, arg.im_off);
+  //return;
 
   Int vn = arg.n / V::vec_size;
   Int im_off = arg.im_off;
@@ -512,7 +509,6 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   {
     const Int memsize = m * m * cf::Vec::idx_ratio * V::vec_size * sizeof(T);
     AlignedMemory<memsize, align_bytes> mem;
-    auto working = (T*) mem.get();
     Int stride_ = vn / m;
 
     for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
@@ -527,7 +523,6 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
       T* dst = arg.dst + br.br * m * stride<V, DstCf>();
       for(Int i0 = 0; i0 < m; i0++)
       {
-        T* s = working + i0 * stride<V, cf::Vec>();
         T* d = dst + i0 * stride_ * stride<V, DstCf>();
         for(Int i1 = 0; i1 < m; i1++)
           DstCf::store(
@@ -557,85 +552,93 @@ FORCEINLINE void last_three_passes_impl(
   Int l6 = 6 * l1;
   Int l7 = 7 * l1;
 
-  auto s = src;
-  for(BitReversed br(l1); br.i < l1; br.advance())
-  {
-    auto d = dst + br.br * stride<V, DstCf>();
+  Int m = 1;
 
-    C a0, a1, a2, a3, a4, a5, a6, a7;
+  //Int off[] = {
+  //  0 * l1 / m, 4 * l1 / m, 2 * l1 / m, 6 * l1 / m,
+  //  1 * l1 / m, 5 * l1 / m, 3 * l1 / m, 7 * l1 / m};
+
+  //Int off[] = {0, 2 * l1 / m, l1 / m, 3 * l1 / m};
+  const Int off[] = {0, l1 / m};
+
+  for(BitReversed br(l1 / m); br.i < l1 / m; br.advance())
+    for(Int i = 0; i < m; i++)
     {
-      C tw0 = load<V, cf::Vec>(twiddle, 0);
-      C tw1 = load<V, cf::Vec>(twiddle + stride<V, cf::Vec>(), 0);
-      C tw2 = load<V, cf::Vec>(twiddle + 2 * stride<V, cf::Vec>(), 0);
+      auto d = dst + br.br * stride<V, DstCf>();
+      auto s = src + 8 * stride<V, cf::Vec>() * br.i;
+      auto tw = twiddle + 5 * stride<V, cf::Vec>() * br.i;
 
+      C a0, a1, a2, a3, a4, a5, a6, a7;
       {
-        C mul0 =       load<V, cf::Vec>(s, 0);
-        C mul1 = tw0 * load<V, cf::Vec>(s + 2 * stride<V, cf::Vec>(), 0);
-        C mul2 = tw1 * load<V, cf::Vec>(s + 4 * stride<V, cf::Vec>(), 0);
-        C mul3 = tw2 * load<V, cf::Vec>(s + 6 * stride<V, cf::Vec>(), 0);
+        C tw0 = load<V, cf::Vec>(tw, 0);
+        C tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
+        C tw2 = load<V, cf::Vec>(tw + 2 * stride<V, cf::Vec>(), 0);
 
-        C sum02 = mul0 + mul2;
-        C dif02 = mul0 - mul2;
-        C sum13 = mul1 + mul3;
-        C dif13 = mul1 - mul3;
+        {
+          C mul0 =       load<V, cf::Vec>(s, 0);
+          C mul1 = tw0 * load<V, cf::Vec>(s + 2 * stride<V, cf::Vec>(), 0);
+          C mul2 = tw1 * load<V, cf::Vec>(s + 4 * stride<V, cf::Vec>(), 0);
+          C mul3 = tw2 * load<V, cf::Vec>(s + 6 * stride<V, cf::Vec>(), 0);
 
-        a0 = sum02 + sum13; 
-        a1 = dif02 + dif13.mul_neg_i();
-        a2 = sum02 - sum13;
-        a3 = dif02 - dif13.mul_neg_i();
+          C sum02 = mul0 + mul2;
+          C dif02 = mul0 - mul2;
+          C sum13 = mul1 + mul3;
+          C dif13 = mul1 - mul3;
+
+          a0 = sum02 + sum13; 
+          a1 = dif02 + dif13.mul_neg_i();
+          a2 = sum02 - sum13;
+          a3 = dif02 - dif13.mul_neg_i();
+        }
+
+        {
+          C mul0 =       load<V, cf::Vec>(s + 1 * stride<V, cf::Vec>(), 0);
+          C mul1 = tw0 * load<V, cf::Vec>(s + 3 * stride<V, cf::Vec>(), 0);
+          C mul2 = tw1 * load<V, cf::Vec>(s + 5 * stride<V, cf::Vec>(), 0);
+          C mul3 = tw2 * load<V, cf::Vec>(s + 7 * stride<V, cf::Vec>(), 0);
+
+          C sum02 = mul0 + mul2;
+          C dif02 = mul0 - mul2;
+          C sum13 = mul1 + mul3;
+          C dif13 = mul1 - mul3;
+
+          a4 = sum02 + sum13;
+          a5 = dif02 + dif13.mul_neg_i();
+          a6 = sum02 - sum13;
+          a7 = dif02 - dif13.mul_neg_i();
+        }
       }
 
       {
-        C mul0 =       load<V, cf::Vec>(s + 1 * stride<V, cf::Vec>(), 0);
-        C mul1 = tw0 * load<V, cf::Vec>(s + 3 * stride<V, cf::Vec>(), 0);
-        C mul2 = tw1 * load<V, cf::Vec>(s + 5 * stride<V, cf::Vec>(), 0);
-        C mul3 = tw2 * load<V, cf::Vec>(s + 7 * stride<V, cf::Vec>(), 0);
+        C tw3 = load<V, cf::Vec>(tw + 3 * stride<V, cf::Vec>(), 0);
+        {
+          auto mul = tw3 * a4;
+          DstCf::store(a0 + mul, d + 0, im_off);
+          DstCf::store(a0 - mul, d + l4 * stride<V, DstCf>(), im_off);
+        }
 
-        C sum02 = mul0 + mul2;
-        C dif02 = mul0 - mul2;
-        C sum13 = mul1 + mul3;
-        C dif13 = mul1 - mul3;
+        {
+          auto mul = tw3.mul_neg_i() * a6;
+          DstCf::store(a2 + mul, d + l2 * stride<V, DstCf>(), im_off);
+          DstCf::store(a2 - mul, d + l6 * stride<V, DstCf>(), im_off);
+        }
+      }
 
-        a4 = sum02 + sum13;
-        a5 = dif02 + dif13.mul_neg_i();
-        a6 = sum02 - sum13;
-        a7 = dif02 - dif13.mul_neg_i();
+      {
+        C tw4 = load<V, cf::Vec>(tw + 4 * stride<V, cf::Vec>(), 0);
+        {
+          auto mul = tw4 * a5;
+          DstCf::store(a1 + mul, d + l1 * stride<V, DstCf>(), im_off);
+          DstCf::store(a1 - mul, d + l5 * stride<V, DstCf>(), im_off);
+        }
+
+        {
+          auto mul = tw4.mul_neg_i() * a7;
+          DstCf::store(a3 + mul, d + l3 * stride<V, DstCf>(), im_off);
+          DstCf::store(a3 - mul, d + l7 * stride<V, DstCf>(), im_off);
+        }
       }
     }
-
-    {
-      C tw3 = load<V, cf::Vec>(twiddle + 3 * stride<V, cf::Vec>(), 0);
-      {
-        auto mul = tw3 * a4;
-        DstCf::store(a0 + mul, d + 0, im_off);
-        DstCf::store(a0 - mul, d + l4 * stride<V, DstCf>(), im_off);
-      }
-
-      {
-        auto mul = tw3.mul_neg_i() * a6;
-        DstCf::store(a2 + mul, d + l2 * stride<V, DstCf>(), im_off);
-        DstCf::store(a2 - mul, d + l6 * stride<V, DstCf>(), im_off);
-      }
-    }
-
-    {
-      C tw4 = load<V, cf::Vec>(twiddle + 4 * stride<V, cf::Vec>(), 0);
-      {
-        auto mul = tw4 * a5;
-        DstCf::store(a1 + mul, d + l1 * stride<V, DstCf>(), im_off);
-        DstCf::store(a1 - mul, d + l5 * stride<V, DstCf>(), im_off);
-      }
-
-      {
-        auto mul = tw4.mul_neg_i() * a7;
-        DstCf::store(a3 + mul, d + l3 * stride<V, DstCf>(), im_off);
-        DstCf::store(a3 - mul, d + l7 * stride<V, DstCf>(), im_off);
-      }
-    }
-
-    s += 8 * stride<V, cf::Vec>();
-    twiddle += 5 * stride<V, cf::Vec>();
-  }
 }
 
 template<typename V, typename DstCf>
@@ -780,6 +783,8 @@ void init_steps(Fft<typename V::T>& state)
   else
     state.tiny_transform_fun = nullptr;
 
+  constexpr bool new_ = false;
+
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
@@ -813,7 +818,7 @@ void init_steps(Fft<typename V::T>& state)
     }
     else if(dft_size >= V::vec_size)
     {
-      if(state.n < large_fft_size && dft_size * 8 == state.n)
+      if((new_ || state.n < large_fft_size) && dft_size * 8 == state.n)
       {
         if(state.n == V::vec_size * 8)
           step.fun_ptr = &last_three_passes_vec_ct_size<V, DstCf, V::vec_size * 8>;
@@ -880,7 +885,7 @@ void init_steps(Fft<typename V::T>& state)
     dft_size <<= step.npasses;
   }
 
-  if(state.n >= large_fft_size)
+  if(!new_ && state.n >= large_fft_size)
   {
     Step<T> step;
     step.npasses = 0;
