@@ -475,6 +475,15 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
       T* dst = arg.dst + br.br * m * stride<V, DstCf>();
       for(Int i0 = 0; i0 < m; i0++)
       {
+        auto p = (const char*)(
+            src + i0 * stride_ * stride<V, cf::Vec>());
+
+        for(Int off = 0; off < m * sizeof(T) * stride<V, cf::Vec>(); off += 64)
+          _mm_prefetch(p, _MM_HINT_T1);
+      }
+
+      for(Int i0 = 0; i0 < m; i0++)
+      {
         T* s = src + br_table[i0] * stride<V, cf::Vec>();
         T* d = dst + i0 * stride_ * stride<V, DstCf>();
         for(Int i1 = 0; i1 < m; i1++)
@@ -783,8 +792,6 @@ void init_steps(Fft<typename V::T>& state)
   else
     state.tiny_transform_fun = nullptr;
 
-  constexpr bool new_ = false;
-
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
@@ -818,7 +825,7 @@ void init_steps(Fft<typename V::T>& state)
     }
     else if(dft_size >= V::vec_size)
     {
-      if((new_ || state.n < large_fft_size) && dft_size * 8 == state.n)
+      if((state.n < large_fft_size) && dft_size * 8 == state.n)
       {
         if(state.n == V::vec_size * 8)
           step.fun_ptr = &last_three_passes_vec_ct_size<V, DstCf, V::vec_size * 8>;
@@ -885,7 +892,7 @@ void init_steps(Fft<typename V::T>& state)
     dft_size <<= step.npasses;
   }
 
-  if(!new_ && state.n >= large_fft_size)
+  if(state.n >= large_fft_size)
   {
     Step<T> step;
     step.npasses = 0;
