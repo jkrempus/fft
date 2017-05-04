@@ -811,8 +811,10 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   }
 };
 
+using TestResult = std::pair<double, double>;
+
 template<typename Fft>
-double bench(const std::vector<Int>& size, double requested_operations)
+TestResult bench(const std::vector<Int>& size, double requested_operations)
 {
   Int n = product(size);
   typedef typename Fft::value_type T;
@@ -838,8 +840,8 @@ double bench(const std::vector<Int>& size, double requested_operations)
     }
   }
   double t1 = get_time(); 
-  
-  return operations / (t1 - t0);
+
+  return TestResult(operations / (t1 - t0), (t1 - t0) / iter / n);
 }
 
 template<typename Fft0, typename Fft1>
@@ -981,7 +983,7 @@ parse_sizes(const std::vector<std::string>& positional)
 }
 
 template<typename Fft>
-double test_or_bench3(
+TestResult test_or_bench3(
   const std::string& impl,
   const std::vector<Int>& lsz,
   const std::unordered_set<std::string>& flags)
@@ -993,11 +995,12 @@ double test_or_bench3(
     return bench<Fft>(size, 1e11);
   else
     //TODO: Use long double for ReferenceFft
-    return compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size);
+    return 
+      TestResult(compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size), 0);
 }
 
 template<bool is_real, bool is_inverse>
-double test_or_bench2(
+TestResult test_or_bench2(
   const std::string& impl,
   const std::vector<Int>& lsz,
   const std::unordered_set<std::string>& flags)
@@ -1014,7 +1017,7 @@ double test_or_bench2(
 }
 
 template<bool is_real>
-double test_or_bench1(
+TestResult test_or_bench1(
   const std::string& impl,
   const std::vector<Int>& lsz,
   const std::unordered_set<std::string>& flags)
@@ -1025,7 +1028,7 @@ double test_or_bench1(
     return test_or_bench2<is_real, false>(impl, lsz, flags);
 }
 
-double test_or_bench0(
+TestResult test_or_bench0(
   const std::string& impl,
   const std::vector<Int>& lsz,
   const std::unordered_set<std::string>& flags)
@@ -1049,9 +1052,12 @@ int main(int argc, char** argv)
     for(auto e : sz) printf("%2d ", e);
     fflush(stdout);
     if(opt.flags.count("-b") > 0)
-      printf("%f GFLOPS\n", test_or_bench0(opt.positional[0], sz, opt.flags) * 1e-9);
+    {
+      auto r = test_or_bench0(opt.positional[0], sz, opt.flags);
+      printf("%f GFLOPS  %f ns\n",  r.first * 1e-9, r.second * 1e9);
+    }
     else
-      printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags));
+      printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags).first);
 
     bool break_outer = true;
     for(Int i = sz.size() - 1; i >= 0; i--)
