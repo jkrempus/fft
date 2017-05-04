@@ -455,6 +455,7 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   constexpr Int br_table[] = {0, 4, 2, 6, 1, 5, 3, 7};
   //const Int br_table[] = {0, 2, 1, 3};
   constexpr int m = sizeof(br_table) / sizeof(br_table[0]);
+
   if(vn < m * m)
   {
     for(BitReversed br(vn); br.i < vn; br.advance())
@@ -465,31 +466,26 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   }
   else
   {
-    const Int memsize = m * m * cf::Vec::idx_ratio * V::vec_size * sizeof(T);
-    AlignedMemory<memsize, align_bytes> mem;
-    auto working = (T*) mem.get();
     Int stride_ = vn / m;
 
     for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
     {
       T* src = arg.src + br.i * m * stride<V, cf::Vec>();
       T* dst = arg.dst + br.br * m * stride<V, DstCf>();
-      for(Int i0 = 0; i0 < m; i0++)
-      {
-        auto p = (const char*)(src + i0 * stride_ * stride<V, cf::Vec>());
-
-        for(Int off = 0; off < m * sizeof(T) * stride<V, cf::Vec>(); off += 64)
-          _mm_prefetch(p + off, _MM_HINT_T0);
-      }
 
       for(Int i0 = 0; i0 < m; i0++)
       {
         T* s = src + br_table[i0] * stride<V, cf::Vec>();
         T* d = dst + i0 * stride_ * stride<V, DstCf>();
         for(Int i1 = 0; i1 < m; i1++)
+        {
+          auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
           DstCf::store(
-            load<V, cf::Vec>(s + br_table[i1] * stride_ * stride<V, cf::Vec>(), 0),
+            load<V, cf::Vec>(this_s, 0),
             d + i1 * stride<V, DstCf>(), im_off);
+
+          _mm_prefetch(this_s + m * stride<V, cf::Vec>(), _MM_HINT_T0);
+        }
       }
     }
   }
