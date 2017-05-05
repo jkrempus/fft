@@ -37,8 +37,7 @@ void print_vec(T a)
 }
 #endif
 
-//Int large_fft_size = 1 << 14;
-Int large_fft_size = 1 << 14;
+Int large_fft_size = 1 << 13;
 Int optimal_size = 1 << 10;
 Int max_vec_size = 8;
 const Int align_bytes = 64;
@@ -220,6 +219,13 @@ namespace complex_format
       V::store(a.re, ptr);
       V::store(a.im, ptr + off);
     }
+    
+    template<typename V>
+    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
+    {
+      V::stream(a.re, ptr);
+      V::stream(a.im, ptr + off);
+    }
 
     template<typename V>
     static FORCEINLINE void unaligned_store(
@@ -251,6 +257,13 @@ namespace complex_format
     {
       V::store(a.re, ptr);
       V::store(a.im, ptr + V::vec_size);
+    }
+
+    template<typename V>
+    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
+    {
+      V::stream(a.re, ptr);
+      V::stream(a.im, ptr + V::vec_size);
     }
 
     template<typename V>
@@ -303,6 +316,14 @@ namespace complex_format
     }
 
     template<typename V>
+    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
+    {
+      V::interleave(a.re, a.im, a.re, a.im);
+      V::stream(a.re, ptr);
+      V::stream(a.im, ptr + V::vec_size);
+    }
+
+    template<typename V>
     static FORCEINLINE void unaligned_store(
       Complex<V> a, typename V::T* ptr, Int off)
     {
@@ -335,6 +356,12 @@ namespace complex_format
     static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
     {
       InputCf::template store<V>({a.im, a.re}, ptr, off);
+    }
+
+    template<typename V>
+    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
+    {
+      InputCf::template stream<V>({a.im, a.re}, ptr, off);
     }
 
     template<typename V>
@@ -490,6 +517,7 @@ struct Scalar
   static Vec load(T* p) { return *p; }
   static Vec unaligned_load(T* p) { return *p; }
   static void store(Vec val, T* p) { *p = val; }
+  static void stream(Vec val, T* p) { *p = val; }
   static void unaligned_store(Vec val, T* p) { *p = val; }
 };
 
@@ -767,6 +795,7 @@ struct AvxFloat
 
   static Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
   static void store(Vec val, T* p) { _mm256_store_ps(p, val); }
+  static void stream(Vec val, T* p) { _mm256_stream_ps(p, val); }
   static void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
 };
 #endif

@@ -444,6 +444,7 @@ struct AlignedMemory
   void* get() { return (void*)((Uint(mem) + alignment - 1) & ~(alignment - 1)); }
 };
 
+#if 1
 template<typename V, typename DstCf>
 void bit_reverse_pass(const Arg<typename V::T>& arg)
 {
@@ -451,7 +452,6 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
 
   Int vn = arg.n / V::vec_size;
   Int im_off = arg.im_off;
-  //const Int br_table[] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
   constexpr Int br_table[] = {0, 4, 2, 6, 1, 5, 3, 7};
   //const Int br_table[] = {0, 2, 1, 3};
   constexpr int m = sizeof(br_table) / sizeof(br_table[0]);
@@ -480,16 +480,75 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
         for(Int i1 = 0; i1 < m; i1++)
         {
           auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
-          DstCf::store(
+          DstCf::stream(
             load<V, cf::Vec>(this_s, 0),
             d + i1 * stride<V, DstCf>(), im_off);
-
-          _mm_prefetch(this_s + m * stride<V, cf::Vec>(), _MM_HINT_T0);
         }
       }
     }
   }
 }
+#else
+template<typename V, typename DstCf>
+void bit_reverse_pass(const Arg<typename V::T>& arg)
+{
+  VEC_TYPEDEFS(V);
+
+  Int vn = arg.n / V::vec_size;
+  Int im_off = arg.im_off;
+  const Int br_table[] = {0, 2, 1, 3};
+  constexpr int m = sizeof(br_table) / sizeof(br_table[0]);
+
+  if(vn < m * m)
+  {
+    for(BitReversed br(vn); br.i < vn; br.advance())
+      DstCf::store(
+        load<V, cf::Vec>(arg.src + br.i * stride<V, cf::Vec>(), 0),
+        arg.dst + br.br * stride<V, DstCf>(),
+        im_off);
+  }
+  else
+  {
+    Int stride_ = vn / m;
+    
+    for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
+    {
+      T* src = arg.src + br.i * m * stride<V, cf::Vec>();
+      T* dst = arg.dst + br.br * m * stride<V, DstCf>();
+
+      for(int off = 0; off < 2; off++)
+      {
+        Vec tmp[m*m];
+        for(Int i0 = 0; i0 < m; i0++)
+          for(Int i1 = 0; i1 < m; i1++)
+            tmp[i0 * m + i1] = V::load(
+                src + (i0 * stride_ + i1) * stride<V, cf::Vec>() +
+                off * V::vec_size);
+        
+        for(Int i0 = 0; i0 < m; i0++)
+          for(Int i1 = 0; i1 < m; i1++)
+            V::store(
+                tmp[br_table[i1] * m + br_table[i0]],
+                dst + (i0 * stride_ + i1) * stride<V, DstCf>() +
+                off * im_off);
+      }
+
+      for(Int i0 = 0; i0 < m; i0++)
+      {
+        T* s = src + br_table[i0] * stride<V, cf::Vec>();
+        T* d = dst + i0 * stride_ * stride<V, DstCf>();
+        for(Int i1 = 0; i1 < m; i1++)
+        {
+          auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
+          DstCf::store(
+            load<V, cf::Vec>(this_s, 0),
+            d + i1 * stride<V, DstCf>(), im_off);
+        }
+      }
+    }
+  }
+}
+#endif
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_three_passes_impl(
