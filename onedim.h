@@ -17,7 +17,6 @@ struct Arg
   T* twiddle;
   T* tiny_twiddle;
   T* dst;
-  Int* br_table;
 };
 
 template<typename T>
@@ -39,7 +38,6 @@ struct Fft
   T* working0;
   T* working1;
   T* twiddle;
-  Int* br_table;
   T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
@@ -49,15 +47,6 @@ struct Fft
 };
 
 template<typename T> struct Ifft;
-
-template<typename V, typename DstCf>
-void init_br_table(Fft<typename V::T>& state)
-{
-  if(state.steps[state.nsteps - 1].npasses == 0) return;
-  auto len = (state.n / V::vec_size) >> state.steps[state.nsteps - 1].npasses;
-  for(BitReversed br(len); br.i < len; br.advance())
-    state.br_table[br.i] = br.br * stride<V, DstCf>();
-}
 
 template<typename V, Int dft_size, typename SrcCf>
 void ct_dft_size_pass(const Arg<typename V::T>& arg)
@@ -339,7 +328,7 @@ void two_passes(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename DstCf>
-void last_two_passes_impl(Int n, Int* br, const Arg<typename V::T>& arg)
+void last_two_passes_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   Int vn = n / V::vec_size;
@@ -352,7 +341,7 @@ void last_two_passes_impl(Int n, Int* br, const Arg<typename V::T>& arg)
   auto dst2 = dst1 + vn / 4 * stride<V, DstCf>(); 
   auto dst3 = dst2 + vn / 4 * stride<V, DstCf>(); 
 
-  for(auto end = src + vn * stride<V, cf::Vec>(); src < end; )
+  for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
   {
     auto tw0 = load<V, cf::Vec>(tw, 0);
     auto tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
@@ -369,8 +358,7 @@ void last_two_passes_impl(Int n, Int* br, const Arg<typename V::T>& arg)
 
     src += 4 * stride<V, cf::Vec>();
 
-    Int d = br[0];
-    br++;
+    Int d = br.br * stride<V, DstCf>();
     DstCf::store(d0, dst0 + d, arg.im_off);
     DstCf::store(d1, dst1 + d, arg.im_off);
     DstCf::store(d2, dst2 + d, arg.im_off);
@@ -381,22 +369,17 @@ void last_two_passes_impl(Int n, Int* br, const Arg<typename V::T>& arg)
 template<typename V, typename DstCf>
 void last_two_passes(const Arg<typename V::T>& arg)
 {
-  last_two_passes_impl<V, DstCf>(arg.n, arg.br_table, arg);
+  last_two_passes_impl<V, DstCf>(arg.n, arg);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_two_passes(const Arg<typename V::T>& arg)
 {
-  const Int len = n / V::vec_size / 4;
-  Int br_table[len];
-  for(BitReversed br(len); br.i < len; br.advance())
-    br_table[br.i] = br.br * stride<V, DstCf>();
-
-  last_two_passes_impl<V, DstCf>(n, br_table, arg);
+  last_two_passes_impl<V, DstCf>(n, arg);
 }
 
 template<typename V, typename DstCf>
-FORCEINLINE void last_pass_impl(Int n, Int* br, const Arg<typename V::T>& arg)
+FORCEINLINE void last_pass_impl(Int n, const Arg<typename V::T>& arg)
 {
   VEC_TYPEDEFS(V);
   Int vn = n / V::vec_size;
@@ -406,15 +389,14 @@ FORCEINLINE void last_pass_impl(Int n, Int* br, const Arg<typename V::T>& arg)
   auto dst0 = arg.dst; 
   auto dst1 = dst0 + vn / 2 * stride<V, DstCf>(); 
 
-  for(auto end = src + vn * stride<V, cf::Vec>(); src < end; )
+  for(BitReversed br(vn / 2); br.i < vn / 2; br.advance())
   {
     C a0 = load<V, cf::Vec>(src, 0);
     C mul = load<V, cf::Vec>(src + stride<V, cf::Vec>(), 0) * load<V, cf::Vec>(tw, 0);
     tw += stride<V, cf::Vec>();
     src += 2 * stride<V, cf::Vec>();
 
-    Int d = br[0];
-    br++;
+    Int d = br.br * stride<V, DstCf>();
     DstCf::store(a0 + mul, dst0 + d, arg.im_off);
     DstCf::store(a0 - mul, dst1 + d, arg.im_off);
   }
@@ -423,18 +405,13 @@ FORCEINLINE void last_pass_impl(Int n, Int* br, const Arg<typename V::T>& arg)
 template<typename V, typename DstCf>
 void last_pass(const Arg<typename V::T>& arg)
 {
-  last_pass_impl<V, DstCf>(arg.n, arg.br_table, arg);
+  last_pass_impl<V, DstCf>(arg.n, arg);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_pass(const Arg<typename V::T>& arg)
 {
-  const Int len = n / V::vec_size / 2;
-  Int br_table[len];
-  for(BitReversed br(len); br.i < len; br.advance())
-    br_table[br.i] = br.br * stride<V, DstCf>();
-
-  last_pass_impl<V, DstCf>(n, br_table, arg);
+  last_pass_impl<V, DstCf>(n, arg);
 }
 
 template<Int sz, Int alignment>
@@ -444,7 +421,6 @@ struct AlignedMemory
   void* get() { return (void*)((Uint(mem) + alignment - 1) & ~(alignment - 1)); }
 };
 
-#if 1
 template<typename V, typename DstCf>
 void bit_reverse_pass(const Arg<typename V::T>& arg)
 {
@@ -452,8 +428,9 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
 
   Int vn = arg.n / V::vec_size;
   Int im_off = arg.im_off;
-  constexpr Int br_table[] = {0, 4, 2, 6, 1, 5, 3, 7};
   //const Int br_table[] = {0, 2, 1, 3};
+  constexpr Int br_table[] = {0, 4, 2, 6, 1, 5, 3, 7};
+  //constexpr Int br_table[] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
   constexpr int m = sizeof(br_table) / sizeof(br_table[0]);
 
   if(vn < m * m)
@@ -490,67 +467,6 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
 
   _mm_sfence();
 }
-#else
-template<typename V, typename DstCf>
-void bit_reverse_pass(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-
-  Int vn = arg.n / V::vec_size;
-  Int im_off = arg.im_off;
-  const Int br_table[] = {0, 2, 1, 3};
-  constexpr int m = sizeof(br_table) / sizeof(br_table[0]);
-
-  if(vn < m * m)
-  {
-    for(BitReversed br(vn); br.i < vn; br.advance())
-      DstCf::store(
-        load<V, cf::Vec>(arg.src + br.i * stride<V, cf::Vec>(), 0),
-        arg.dst + br.br * stride<V, DstCf>(),
-        im_off);
-  }
-  else
-  {
-    Int stride_ = vn / m;
-    
-    for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
-    {
-      T* src = arg.src + br.i * m * stride<V, cf::Vec>();
-      T* dst = arg.dst + br.br * m * stride<V, DstCf>();
-
-      for(int off = 0; off < 2; off++)
-      {
-        Vec tmp[m*m];
-        for(Int i0 = 0; i0 < m; i0++)
-          for(Int i1 = 0; i1 < m; i1++)
-            tmp[i0 * m + i1] = V::load(
-                src + (i0 * stride_ + i1) * stride<V, cf::Vec>() +
-                off * V::vec_size);
-        
-        for(Int i0 = 0; i0 < m; i0++)
-          for(Int i1 = 0; i1 < m; i1++)
-            V::store(
-                tmp[br_table[i1] * m + br_table[i0]],
-                dst + (i0 * stride_ + i1) * stride<V, DstCf>() +
-                off * im_off);
-      }
-
-      for(Int i0 = 0; i0 < m; i0++)
-      {
-        T* s = src + br_table[i0] * stride<V, cf::Vec>();
-        T* d = dst + i0 * stride_ * stride<V, DstCf>();
-        for(Int i1 = 0; i1 < m; i1++)
-        {
-          auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
-          DstCf::store(
-            load<V, cf::Vec>(this_s, 0),
-            d + i1 * stride<V, DstCf>(), im_off);
-        }
-      }
-    }
-  }
-}
-#endif
 
 template<typename V, typename DstCf>
 FORCEINLINE void last_three_passes_impl(
@@ -558,7 +474,6 @@ FORCEINLINE void last_three_passes_impl(
   Int im_off,
   typename V::T* src,
   typename V::T* twiddle,
-  Int* br_table,
   typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
@@ -653,14 +568,14 @@ template<typename V, typename DstCf>
 void last_three_passes_vec(const Arg<typename V::T>& arg)
 {
   last_three_passes_impl<V, DstCf>(
-    arg.n, arg.im_off, arg.src, arg.twiddle, arg.br_table, arg.dst);
+    arg.n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V, typename DstCf, Int n>
 void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
 {
   last_three_passes_impl<V, DstCf>(
-    n, arg.im_off, arg.src, arg.twiddle, arg.br_table, arg.dst);
+    n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V>
@@ -924,7 +839,6 @@ Int fft_memsize(Int n)
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
   sz = aligned_increment(sz, tiny_twiddle_bytes<V>() * n);
-  sz = aligned_increment(sz, sizeof(Int) * n / V::vec_size / 2);
   return sz;
 }
 
@@ -955,14 +869,10 @@ Fft<typename V::T>* fft_create(Int n, void* ptr)
   state->tiny_twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, tiny_twiddle_bytes<V>());
 
-  state->br_table = (Int*) ptr;
-
   init_steps<V, SrcCf, DstCf>(*state);
 
   init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
     n, state->working0, state->twiddle, state->tiny_twiddle);
-
-  init_br_table<V, DstCf>(*state);
 
   return state;
 }
@@ -993,7 +903,6 @@ NOINLINE void recursive_passes(
   arg.src = p;
   arg.dst = nullptr;
   arg.twiddle = state->twiddle;
-  arg.br_table = nullptr;
   arg.tiny_twiddle = nullptr;
   
   state->steps[step].fun_ptr(arg);
@@ -1028,7 +937,6 @@ FORCEINLINE void fft_impl(const Fft<T>* state, Int im_off, T* src, T* dst)
   arg.end_offset = state->n;
   arg.src = src;
   arg.twiddle = state->twiddle;
-  arg.br_table = state->br_table;
   arg.tiny_twiddle = state->tiny_twiddle;
 
   auto w0 = state->working0;

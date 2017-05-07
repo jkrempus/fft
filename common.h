@@ -38,7 +38,7 @@ void print_vec(T a)
 #endif
 
 Int large_fft_size = 1 << 13;
-Int optimal_size = 1 << 10;
+Int optimal_size = 1 << 11;
 Int max_vec_size = 8;
 const Int align_bytes = 64;
 
