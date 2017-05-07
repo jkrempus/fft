@@ -199,10 +199,12 @@ namespace complex_format
   {
     static const Int idx_ratio = 1;
 
-    template<typename V>
+    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
     {
-      return { V::load(ptr), V::load(ptr + off)};
+      return {
+        V::template load<flags>(ptr),
+        V::template load<flags>(ptr + off)};
     }
 
     template<typename V>
@@ -213,20 +215,13 @@ namespace complex_format
         V::unaligned_load(ptr + off)};
     }
 
-    template<typename V>
+    template<Uint flags = 0, typename V>
     static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
     {
-      V::store(a.re, ptr);
-      V::store(a.im, ptr + off);
+      V::template store<flags>(a.re, ptr);
+      V::template store<flags>(a.im, ptr + off);
     }
     
-    template<typename V>
-    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::stream(a.re, ptr);
-      V::stream(a.im, ptr + off);
-    }
-
     template<typename V>
     static FORCEINLINE void unaligned_store(
       Complex<V> a, typename V::T* ptr, Int off)
@@ -240,30 +235,25 @@ namespace complex_format
   {
     static const Int idx_ratio = 2;
 
-    template<typename V>
+    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
     {
-      return {V::load(ptr), V::load(ptr + V::vec_size)};
+      return {
+        V::template load<flags>(ptr),
+        V::template load<flags>(ptr + V::vec_size)};
     }
-    
+
     template<typename V>
     static FORCEINLINE Complex<V> unaligned_load(typename V::T* ptr, Int off)
     {
       return {V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
     }
 
-    template<typename V>
+    template<Uint flags = 0, typename V>
     static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
     {
-      V::store(a.re, ptr);
-      V::store(a.im, ptr + V::vec_size);
-    }
-
-    template<typename V>
-    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::stream(a.re, ptr);
-      V::stream(a.im, ptr + V::vec_size);
+      V::template store<flags>(a.re, ptr);
+      V::template store<flags>(a.im, ptr + V::vec_size);
     }
 
     template<typename V>
@@ -279,21 +269,16 @@ namespace complex_format
   {
     static const Int idx_ratio = 2;
 
-    template<typename V>
+    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
     {
       Complex<V> r;
       V::deinterleave(
-        V::load(ptr), V::load(ptr + V::vec_size),
+        V::template load<flags>(ptr),
+        V::template load<flags>(ptr + V::vec_size),
         r.re, r.im);
 
       return r;
-    }
-
-    template<typename V>
-    static FORCEINLINE Complex<V> stream_(typename V::T* ptr, Int off)
-    {
-      return load<V>(ptr, off);
     }
 
     template<typename V>
@@ -307,20 +292,12 @@ namespace complex_format
       return r;
     }
 
-    template<typename V>
+    template<Uint flags = 0, typename V>
     static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
     {
       V::interleave(a.re, a.im, a.re, a.im);
-      V::store(a.re, ptr);
-      V::store(a.im, ptr + V::vec_size);
-    }
-
-    template<typename V>
-    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::interleave(a.re, a.im, a.re, a.im);
-      V::stream(a.re, ptr);
-      V::stream(a.im, ptr + V::vec_size);
+      V::template store<flags>(a.re, ptr);
+      V::template store<flags>(a.im, ptr + V::vec_size);
     }
 
     template<typename V>
@@ -338,10 +315,10 @@ namespace complex_format
   {
     static const Int idx_ratio = InputCf::idx_ratio;
 
-    template<typename V>
+    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
     {
-      auto a = InputCf::template load<V>(ptr, off);
+      auto a = InputCf::template load<V, flags>(ptr, off);
       return {a.im, a.re};
     }
 
@@ -352,16 +329,10 @@ namespace complex_format
       return {a.im, a.re};
     }
 
-    template<typename V>
+    template<Uint flags = 0, typename V>
     static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
     {
-      InputCf::template store<V>({a.im, a.re}, ptr, off);
-    }
-
-    template<typename V>
-    static FORCEINLINE void stream(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      InputCf::template stream<V>({a.im, a.re}, ptr, off);
+      InputCf::template store<flags, V>({a.im, a.re}, ptr, off);
     }
 
     template<typename V>
@@ -373,10 +344,10 @@ namespace complex_format
   };
 }
 
-template<typename V, typename Cf>
+template<typename V, typename Cf, Uint flags = 0>
 FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
 {
-  return Cf::template load<V>(ptr, off);
+  return Cf::template load<V, flags>(ptr, off);
 }
 
 template<typename V, typename Cf>
@@ -455,6 +426,9 @@ float SinCosTable<float>::cos[64] = {
   0x1p+0, 0x1p+0, 0x1p+0, 0x1p+0, 
   0x1p+0, 0x1p+0, 0x1p+0, 0x1p+0};
 
+
+constexpr Uint stream_flag = 1;
+
 template<typename T_>
 struct Scalar
 {
@@ -514,10 +488,9 @@ struct Scalar
     return v;
   }
 
-  static Vec load(T* p) { return *p; }
+  template<Uint flags = 0> static Vec load(T* p) { return *p; }
   static Vec unaligned_load(T* p) { return *p; }
-  static void store(Vec val, T* p) { *p = val; }
-  static void stream(Vec val, T* p) { *p = val; }
+  template<Uint flags = 0> static void store(Vec val, T* p) { *p = val; }
   static void unaligned_store(Vec val, T* p) { *p = val; }
 };
 
@@ -606,6 +579,7 @@ struct Neon
 
   static Vec load(T* p) { return vld1q_f32(p); }
   static Vec unaligned_load(T* p) { return vld1q_f32(p); }
+  template<Uint flags = 0>
   static void store(Vec val, T* p) { vst1q_f32(p, val); }
   static void unaligned_store(Vec val, T* p) { vst1q_f32(p, val); }
 };
@@ -679,9 +653,24 @@ struct SseFloat
     return _mm_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
   }
 
-  static Vec load(T* p) { return _mm_load_ps(p); }
+  template<Uint flags = 0>
+  static Vec load(T* p)
+  {
+    return (flags & stream_flag) ? 
+      _mm_castsi128_ps(_mm_stream_load_si128((__m128i*) p)) :
+      _mm_load_ps(p);
+  }
+
   static Vec unaligned_load(T* p) { return _mm_loadu_ps(p); }
-  static void store(Vec val, T* p) { _mm_store_ps(p, val); }
+  template<Uint flags = 0>
+  static void store(Vec val, T* p)
+  {
+    if((flags & stream_flag))
+      _mm_stream_ps(p, val);
+    else
+      _mm_store_ps(p, val);
+  }
+
   static void unaligned_store(Vec val, T* p) { _mm_storeu_ps(p, val); }
 };
 #endif
@@ -791,11 +780,24 @@ struct AvxFloat
     return _mm256_permute2f128_ps(v, v, _MM_SHUFFLE(0, 0, 0, 1));
   }
 
-  static Vec load(T* p) { return _mm256_load_ps(p); }
+  template<Uint flags = 0>
+  static Vec load(T* p)
+  {
+    return (flags & stream_flag) ?
+      _mm256_castsi256_ps(_mm256_stream_load_si256((__m256i*) p)) :
+      _mm256_load_ps(p);
+  }
 
   static Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
-  static void store(Vec val, T* p) { _mm256_store_ps(p, val); }
-  static void stream(Vec val, T* p) { _mm256_stream_ps(p, val); }
+  template<Uint flags = 0>
+  static void store(Vec val, T* p)
+  {
+    if((flags & stream_flag))
+      _mm256_stream_ps(p, val);
+    else
+      _mm256_store_ps(p, val);
+  }
+
   static void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
 };
 #endif

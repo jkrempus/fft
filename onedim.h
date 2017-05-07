@@ -459,7 +459,7 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   if(vn < m * m)
   {
     for(BitReversed br(vn); br.i < vn; br.advance())
-      DstCf::store(
+      DstCf::template store<stream_flag>(
         load<V, cf::Vec>(arg.src + br.i * stride<V, cf::Vec>(), 0),
         arg.dst + br.br * stride<V, DstCf>(),
         im_off);
@@ -480,13 +480,15 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
         for(Int i1 = 0; i1 < m; i1++)
         {
           auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
-          DstCf::stream(
+          DstCf::template store<stream_flag>(
             load<V, cf::Vec>(this_s, 0),
             d + i1 * stride<V, DstCf>(), im_off);
         }
       }
     }
   }
+
+  _mm_sfence();
 }
 #else
 template<typename V, typename DstCf>
@@ -1139,13 +1141,13 @@ void real_pass(
   {
     T r0 = load<S, SrcCf>(src, src_off).re;
     T r1 = load<S, SrcCf>(src + n / 2 * src_ratio, src_off).re;
-    DstCf::template store<S>({r0 + r1, r0 - r1}, dst, dst_off);
+    DstCf::template store<0, S>({r0 + r1, r0 - r1}, dst, dst_off);
   }
   else
   {
     SC r0 = load<S, SrcCf>(src, src_off);
-    DstCf::template store<S>({r0.re + r0.im, 0}, dst, dst_off);
-    DstCf::template store<S>(
+    DstCf::template store<0, S>({r0.re + r0.im, 0}, dst, dst_off);
+    DstCf::template store<0, S>(
       {r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
   }
 }

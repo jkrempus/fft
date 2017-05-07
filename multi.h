@@ -366,7 +366,7 @@ void real_pass(
     {
       Vec r0 = load<V, DstCf>(s0, dst_im_off).re;
       Vec r1 = load<V, DstCf>(s1, dst_im_off).re;
-      DstCf::template store<V>({r0 + r1, r0 - r1}, d, dst_im_off);
+      DstCf::template store<0, V>({r0 + r1, r0 - r1}, d, dst_im_off);
 
       s0 += stride<V, DstCf>();
       s1 += stride<V, DstCf>();
@@ -382,8 +382,8 @@ void real_pass(
     for(auto end = s + m * DstCf::idx_ratio; s < end;)
     {
       C r0 = load<V, DstCf>(s, dst_im_off);
-      DstCf::template store<V>({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
-      DstCf::template store<V>({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
+      DstCf::template store<0, V>({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
+      DstCf::template store<0, V>({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
       
       s += stride<V, DstCf>();
       d0 += stride<V, DstCf>();
