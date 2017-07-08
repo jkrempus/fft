@@ -811,7 +811,13 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   }
 };
 
-using TestResult = std::pair<double, double>;
+struct TestResult
+{
+  double flops;
+  double error;
+  double time_per_element;
+  uint64_t element_iterations;
+};
 
 template<typename Fft>
 TestResult bench(const std::vector<Int>& size, double requested_operations)
@@ -841,11 +847,15 @@ TestResult bench(const std::vector<Int>& size, double requested_operations)
   }
   double t1 = get_time(); 
 
-  return TestResult(operations / (t1 - t0), (t1 - t0) / iter / n);
+  TestResult r;
+  r.flops = operations / (t1 - t0);
+  r.element_iterations = iter * uint64_t(n);
+  r.time_per_element = (t1 - t0) / iter / n;
+  return r;
 }
 
 template<typename Fft0, typename Fft1>
-typename Fft0::value_type compare(const std::vector<Int>& size)
+TestResult compare(const std::vector<Int>& size)
 {
   static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
@@ -918,7 +928,9 @@ typename Fft0::value_type compare(const std::vector<Int>& size)
   dealloc(dst0);
   dealloc(dst1);
 
-  return std::sqrt(diff_sumsq / sum_sumsq);
+  TestResult r;
+  r.error = std::sqrt(diff_sumsq / sum_sumsq);
+  return r;
 }
 
 extern "C" void* aligned_alloc(size_t, size_t);
@@ -996,7 +1008,7 @@ TestResult test_or_bench3(
   else
     //TODO: Use long double for ReferenceFft
     return 
-      TestResult(compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size), 0);
+      compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size);
 }
 
 template<bool is_real, bool is_inverse>
@@ -1054,10 +1066,10 @@ int main(int argc, char** argv)
     if(opt.flags.count("-b") > 0)
     {
       auto r = test_or_bench0(opt.positional[0], sz, opt.flags);
-      printf("%f GFLOPS  %f ns\n",  r.first * 1e-9, r.second * 1e9);
+      printf("%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
     }
     else
-      printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags).first);
+      printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags).error);
 
     bool break_outer = true;
     for(Int i = sz.size() - 1; i >= 0; i--)
