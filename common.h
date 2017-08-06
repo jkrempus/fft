@@ -351,7 +351,7 @@ FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
 }
 
 template<typename V, typename Cf>
-FORCEINLINE Int stride() { return Cf::idx_ratio * V::vec_size; }
+FORCEINLINE constexpr Int stride() { return Cf::idx_ratio * V::vec_size; }
 
 namespace cf = complex_format;
 

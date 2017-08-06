@@ -280,7 +280,7 @@ struct Irfft
   Int inner_n;
   Int im_off;
   Int src_idx_ratio;
-  onedim::Rfft<T>* onedim_transform;
+  onedim::Irfft<T>* onedim_transform;
   Fft<T>* multidim_transform;
   multi::Fft<T>* last_transform;
   void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
@@ -308,7 +308,7 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
   
   if(ndim == 1)
   {
-     r->onedim_transform = onedim::rfft_create<V, SrcCf>(dim[0], mem);
+     r->onedim_transform = onedim::irfft_create<V, SrcCf>(dim[0], mem);
      r->src_idx_ratio = 0;
      r->working0 = nullptr;
      r->twiddle = nullptr;
@@ -352,7 +352,7 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
 template<typename T>
 void irfft(Irfft<T>* s, T* src, T* dst)
 {
-  if(s->onedim_transform) return onedim::rfft(s->onedim_transform, src, dst);
+  if(s->onedim_transform) return onedim::irfft(s->onedim_transform, src, dst);
   
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   const Int nbits = log2(s->outer_n / 2);

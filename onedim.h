@@ -1157,15 +1157,16 @@ Irfft<typename V::T>* irfft_create(Int n, void* ptr)
 template<typename T>
 void irfft(const Irfft<T>* state, T* src, T* dst)
 {
+  auto complex_state = ((Fft<T>*) state->state);
   state->real_pass(
-    state->state->n * 2,
+    complex_state->n * 2,
     src,
-    align_size<T>(state->state->n + 1),
+    align_size<T>(complex_state->n + 1),
     state->twiddle,
-    state->state->working1,
-    state->state->n);
+    complex_state->working1,
+    complex_state->n);
 
-  ifft(state->state, state->state->working1, dst);
+  ifft(state->state, complex_state->working1, dst);
 }
 }
 #endif
