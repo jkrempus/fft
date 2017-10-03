@@ -669,20 +669,168 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
   }
 }
 
+template<int len, typename T>
+struct ReImTable
+{
+  T re[len];
+  T im[len];
+};
+
+template<int n, int vsz, typename T>
+constexpr ReImTable<(n > vsz ? n : vsz), T>
+create_ct_sized_fft_twiddle_table()
+{
+  constexpr int len = n > vsz ? n : vsz;
+  ReImTable<len, T> r = {0};
+  for(int i = 0; i < n; i++)
+  {
+    T re = T(1);
+    T im = T(0);
+    int table_i = 1;
+    for(int bit = n / 2; bit > 0; bit >>= 1, table_i++)
+      if((i & bit) != 0)
+      {
+        T table_re = SinCosTable<T>::cos[table_i];
+        T table_im = SinCosTable<T>::sin[table_i];
+
+        T new_re = table_re * re - table_im * im;
+        T new_im = table_re * im + table_im * re;
+
+        re = new_re;
+        im = new_im;
+      }
+
+    r.re[i] = re;
+    r.im[i] = -im;
+  }
+
+  for(int i = 0; i < vsz; i++)
+  {
+    r.re[i] = r.re[i & (n - 1)];
+    r.im[i] = r.im[i & (n - 1)];
+  }
+
+  return r;
+}
+
+template<int n, int vsz, typename T>
+struct CtSizedFftTwiddleTable
+{
+  static constexpr ReImTable<(n > vsz ? n : vsz), float> value =
+    create_ct_sized_fft_twiddle_table<n, vsz, float>();
+};
+
+template<int n, int vsz, typename T>
+constexpr ReImTable<(n > vsz ? n : vsz), float>
+CtSizedFftTwiddleTable<n, vsz, T>::value;
+
+template<bool cond, typename T> struct enable_if { };
+template<typename T> struct enable_if<true, T> { using type = T; };
+
+template<bool cond, typename T>
+using enif = typename enable_if<cond, T>::type;
+
+constexpr bool is_power_of_4(Int n)
+{
+  while(n >= 4) n /= 4;
+  return n == 1;
+}
+
+template<typename V, Int vn, Int dft_sz>
+FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
+  typename V::Vec (&src_re)[vn],
+  typename V::Vec (&src_im)[vn],
+  typename V::Vec (&dst_re)[vn],
+  typename V::Vec (&dst_im)[vn])
+{
+  VEC_TYPEDEFS(V);
+  constexpr Int vsz = V::vec_size;
+  auto& table = CtSizedFftTwiddleTable<vn * vsz, vsz, T>::value;
+
+  for(Int i = 0; i < vn / 2; i++)
+  {
+    C a = { src_re[i], src_im[i] };
+    C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
+    C t = { table.re[i], table.im[i] };
+    if(dft_sz > 1) b = b * t;
+    C dst_a = a + b;
+    C dst_b = a - b;
+
+    V::template interleave_multi<vsz / dft_sz>(
+      dst_a.re, dst_b.re, dst_re[2 * i], dst_re[2 * i + 1]);
+
+    V::template interleave_multi<vsz / dft_sz>(
+      dst_a.im, dst_b.im, dst_im[2 * i], dst_im[2 * i + 1]);
+  }
+}
+
+template<typename V, Int vn, Int dft_sz>
+FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
+  typename V::Vec (&src_re)[vn],
+  typename V::Vec (&src_im)[vn],
+  typename V::Vec (&dst_re)[vn],
+  typename V::Vec (&dst_im)[vn])
+{
+  VEC_TYPEDEFS(V);
+  constexpr Int vsz = V::vec_size;
+  constexpr Int vdft_sz = dft_sz / vsz;
+  auto& table = CtSizedFftTwiddleTable<vn * vsz, vsz, T>::value;
+
+  for(Int i = 0; i < vn / 2; i += vdft_sz)
+  {
+    for(Int j = 0; j < vdft_sz; j++)
+    {
+      C src_a = { src_re[i + j], src_im[i + j] };
+      C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
+      C t = { table.re[i], table.im[i] };
+      C m = src_b * t;
+      C dst_a = src_a + m; 
+      C dst_b = src_a - m;
+
+      dst_re[2 * i + j] = dst_a.re;
+      dst_im[2 * i + j] = dst_a.im;
+
+      dst_re[2 * i + j + vsz] = dst_a.re;
+      dst_im[2 * i + j + vsz] = dst_a.im;
+    }
+  }
+}
+
 template<typename V, typename SrcCf, typename DstCf, Int n>
 void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
 {
   VEC_TYPEDEFS(V);
-  if(n == 1)
+  constexpr Int vsz = V::vec_size;
+
+  //Round up just to make it compile
+  constexpr Int vn = (n + V::vec_size - 1) / V::vec_size;
+
+  Vec a_re[vn];
+  Vec a_im[vn];
+  Vec b_re[vn];
+  Vec b_im[vn];
+
+  for(Int i = 0; i < vn; i++)
   {
-    DstCf::store(load<V, SrcCf>(src, im_off), dst, im_off);
+    auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), im_off);
+    a_re[i] = c.re;
+    a_im[i] = c.im;
   }
-  else if(n == 2)
+
+  if(n >  1) tiny_transform_pass<V, vn,  1>(a_re, a_im, b_re, b_im);
+  if(n >  2) tiny_transform_pass<V, vn,  2>(b_re, b_im, a_re, a_im);
+  if(n >  4) tiny_transform_pass<V, vn,  4>(a_re, a_im, b_re, b_im);
+  if(n >  8) tiny_transform_pass<V, vn,  8>(b_re, b_im, a_re, a_im);
+  if(n > 16) tiny_transform_pass<V, vn, 16>(a_re, a_im, b_re, b_im);
+
+  for(Int i = 0; i < vn; i++)
   {
-    auto a0 = load<V, SrcCf>(src, im_off);
-    auto a1 = load<V, SrcCf>(src + stride<V, SrcCf>(), im_off);
-    DstCf::store(a0 + a1, dst, im_off);
-    DstCf::store(a0 - a1, dst + stride<V, DstCf>(), im_off);
+    C c;
+    constexpr bool result_in_a = is_power_of_4(n);
+    if(result_in_a) c = { a_re[i], a_im[i] };
+    else c = { b_re[i], b_im[i] };
+
+    DstCf::store(c, dst + i * stride<V, DstCf>(), im_off);
   }
 }
 
@@ -693,13 +841,16 @@ void init_steps(Fft<typename V::T>& state)
   Int step_index = 0;
   state.ncopies = 0;
 
-  if(state.n <= 2)
+  if(state.n <= 8 || state.n < V::vec_size * V::vec_size)
   {
     state.nsteps = 0;
     state.tiny_transform_fun = 
-      state.n == 0 ?  &tiny_transform<V, SrcCf, DstCf, 0> :
-      state.n == 1 ?  &tiny_transform<V, SrcCf, DstCf, 1> :
-      state.n == 2 ?  &tiny_transform<V, SrcCf, DstCf, 2> : nullptr;
+      state.n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
+      state.n ==  2 ?  &tiny_transform<V, SrcCf, DstCf,  2> :
+      state.n ==  4 ?  &tiny_transform<V, SrcCf, DstCf,  4> :
+      state.n ==  8 ?  &tiny_transform<V, SrcCf, DstCf,  8> :
+      state.n == 16 ?  &tiny_transform<V, SrcCf, DstCf, 16> :
+      state.n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> : nullptr;
 
     return;
   }
