@@ -751,7 +751,7 @@ FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
   {
     C a = { src_re[i], src_im[i] };
     C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
-    C t = { table.re[i], table.im[i] };
+    C t = { table.re[0], table.im[0] };
     if(dft_sz > 1) b = b * t;
     C dst_a = a + b;
     C dst_b = a - b;
@@ -790,8 +790,8 @@ FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
       dst_re[2 * i + j] = dst_a.re;
       dst_im[2 * i + j] = dst_a.im;
 
-      dst_re[2 * i + j + vsz] = dst_a.re;
-      dst_im[2 * i + j + vsz] = dst_a.im;
+      dst_re[2 * i + j + vsz] = dst_b.re;
+      dst_im[2 * i + j + vsz] = dst_b.im;
     }
   }
 }
