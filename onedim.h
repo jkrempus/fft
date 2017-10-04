@@ -738,14 +738,12 @@ constexpr bool is_power_of_4(Int n)
 
 template<typename V, Int vn, Int dft_sz>
 FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
-  typename V::Vec (&src_re)[vn],
-  typename V::Vec (&src_im)[vn],
-  typename V::Vec (&dst_re)[vn],
-  typename V::Vec (&dst_im)[vn])
+  typename V::Vec (&src_re)[vn], typename V::Vec (&src_im)[vn],
+  typename V::Vec (&dst_re)[vn], typename V::Vec (&dst_im)[vn])
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
-  auto& table = CtSizedFftTwiddleTable<vn * vsz, vsz, T>::value;
+  auto& table = CtSizedFftTwiddleTable<dft_sz, vsz, T>::value;
 
   for(Int i = 0; i < vn / 2; i++)
   {
@@ -766,15 +764,13 @@ FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
 
 template<typename V, Int vn, Int dft_sz>
 FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
-  typename V::Vec (&src_re)[vn],
-  typename V::Vec (&src_im)[vn],
-  typename V::Vec (&dst_re)[vn],
-  typename V::Vec (&dst_im)[vn])
+  typename V::Vec (&src_re)[vn], typename V::Vec (&src_im)[vn],
+  typename V::Vec (&dst_re)[vn], typename V::Vec (&dst_im)[vn])
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
   constexpr Int vdft_sz = dft_sz / vsz;
-  auto& table = CtSizedFftTwiddleTable<vn * vsz, vsz, T>::value;
+  auto& table = CtSizedFftTwiddleTable<dft_sz, vsz, T>::value;
 
   for(Int i = 0; i < vn / 2; i += vdft_sz)
   {
@@ -782,18 +778,29 @@ FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
     {
       C src_a = { src_re[i + j], src_im[i + j] };
       C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
-      C t = { table.re[i], table.im[i] };
+      C t = { table.re[j], table.im[j] };
       C m = src_b * t;
-      C dst_a = src_a + m; 
+      C dst_a = src_a + m;
       C dst_b = src_a - m;
 
       dst_re[2 * i + j] = dst_a.re;
       dst_im[2 * i + j] = dst_a.im;
 
-      dst_re[2 * i + j + vsz] = dst_b.re;
-      dst_im[2 * i + j + vsz] = dst_b.im;
+      dst_re[2 * i + j + vdft_sz] = dst_b.re;
+      dst_im[2 * i + j + vdft_sz] = dst_b.im;
     }
   }
+}
+
+template<typename V, Int vn>
+FORCEINLINE enif<V::vec_size == 1, void> print(typename V::Vec (&s)[vn])
+{
+  for(Int i = 0; i < vn; i++) printf("%f\n", float(s[i]));
+}
+
+template<typename V, Int vn>
+FORCEINLINE enif<V::vec_size != 1, void> print(typename V::Vec (&s)[vn])
+{
 }
 
 template<typename V, typename SrcCf, typename DstCf, Int n>
