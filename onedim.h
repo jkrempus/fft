@@ -749,7 +749,7 @@ FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
   {
     C a = { src_re[i], src_im[i] };
     C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
-    C t = { table.re[0], table.im[0] };
+    C t = { V::unaligned_load(table.re), V::unaligned_load(table.im) };
     if(dft_sz > 1) b = b * t;
     C dst_a = a + b;
     C dst_b = a - b;
@@ -778,7 +778,10 @@ FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
     {
       C src_a = { src_re[i + j], src_im[i + j] };
       C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
-      C t = { table.re[j], table.im[j] };
+      C t = {
+        V::unaligned_load(table.re + j),
+        V::unaligned_load(table.im + j) };
+
       C m = src_b * t;
       C dst_a = src_a + m;
       C dst_b = src_a - m;
@@ -790,17 +793,6 @@ FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
       dst_im[2 * i + j + vdft_sz] = dst_b.im;
     }
   }
-}
-
-template<typename V, Int vn>
-FORCEINLINE enif<V::vec_size == 1, void> print(typename V::Vec (&s)[vn])
-{
-  for(Int i = 0; i < vn; i++) printf("%f\n", float(s[i]));
-}
-
-template<typename V, Int vn>
-FORCEINLINE enif<V::vec_size != 1, void> print(typename V::Vec (&s)[vn])
-{
 }
 
 template<typename V, typename SrcCf, typename DstCf, Int n>
