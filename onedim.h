@@ -779,8 +779,8 @@ FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
       C src_a = { src_re[i + j], src_im[i + j] };
       C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
       C t = {
-        V::unaligned_load(table.re + j),
-        V::unaligned_load(table.im + j) };
+        V::unaligned_load(table.re + j * vsz),
+        V::unaligned_load(table.im + j * vsz) };
 
       C m = src_b * t;
       C dst_a = src_a + m;
