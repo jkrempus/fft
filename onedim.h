@@ -736,10 +736,9 @@ constexpr bool is_power_of_4(Int n)
   return n == 1;
 }
 
-template<typename V, Int vn, Int dft_sz>
+template<typename V, Int vn, Int dft_sz, typename A>
 FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
-  typename V::Vec (&src_re)[vn], typename V::Vec (&src_im)[vn],
-  typename V::Vec (&dst_re)[vn], typename V::Vec (&dst_im)[vn])
+  A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
@@ -762,10 +761,9 @@ FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
   }
 }
 
-template<typename V, Int vn, Int dft_sz>
+template<typename V, Int vn, Int dft_sz, typename A>
 FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
-  typename V::Vec (&src_re)[vn], typename V::Vec (&src_im)[vn],
-  typename V::Vec (&dst_re)[vn], typename V::Vec (&dst_im)[vn])
+  A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
@@ -795,6 +793,38 @@ FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
   }
 }
 
+//One weird trick to prevent GCC from needlessly
+//writing array elements to the stack.
+template<typename Vec, int n> struct Locals
+{
+  Vec a[n];
+  Vec& operator[](int i) { return a[i]; }
+};
+
+template<typename Vec> struct Locals<Vec, 1>
+{
+  Vec a0;
+  Vec& operator[](int i) { return a0; }
+};
+
+template<typename Vec> struct Locals<Vec, 2>
+{
+  Vec a0, a1;
+  Vec& operator[](int i) { return i == 0 ? a0 : a1; }
+};
+
+template<typename Vec> struct Locals<Vec, 4>
+{
+  Vec a0, a1, a2, a3;
+  Vec& operator[](int i)
+  {
+    return 
+      i == 0 ? a0 :
+      i == 1 ? a1 :
+      i == 2 ? a2 : a3;
+  }
+};
+
 template<typename V, typename SrcCf, typename DstCf, Int n>
 void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
 {
@@ -804,10 +834,10 @@ void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
   //Round up just to make it compile
   constexpr Int vn = (n + V::vec_size - 1) / V::vec_size;
 
-  Vec a_re[vn];
-  Vec a_im[vn];
-  Vec b_re[vn];
-  Vec b_im[vn];
+  Locals<Vec, vn> a_re;
+  Locals<Vec, vn> a_im;
+  Locals<Vec, vn> b_re;
+  Locals<Vec, vn> b_im;
 
   for(Int i = 0; i < vn; i++)
   {
