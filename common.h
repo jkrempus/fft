@@ -487,8 +487,8 @@ struct Scalar
     return v;
   }
 
-  template<Uint flags = 0> static Vec load(T* p) { return *p; }
-  static Vec unaligned_load(T* p) { return *p; }
+  template<Uint flags = 0> static Vec load(const T* p) { return *p; }
+  static Vec unaligned_load(const T* p) { return *p; }
   template<Uint flags = 0> static void store(Vec val, T* p) { *p = val; }
   static void unaligned_store(Vec val, T* p) { *p = val; }
 };
@@ -576,8 +576,8 @@ struct Neon
   
   static Vec reverse(Vec v) { return v; } //TODO
 
-  static Vec load(T* p) { return vld1q_f32(p); }
-  static Vec unaligned_load(T* p) { return vld1q_f32(p); }
+  static Vec load(const T* p) { return vld1q_f32(p); }
+  static Vec unaligned_load(const T* p) { return vld1q_f32(p); }
   template<Uint flags = 0>
   static void store(Vec val, T* p) { vst1q_f32(p, val); }
   static void unaligned_store(Vec val, T* p) { vst1q_f32(p, val); }
@@ -653,14 +653,14 @@ struct SseFloat
   }
 
   template<Uint flags = 0>
-  static Vec load(T* p)
+  static Vec load(const T* p)
   {
     return (flags & stream_flag) ? 
       _mm_castsi128_ps(_mm_stream_load_si128((__m128i*) p)) :
       _mm_load_ps(p);
   }
 
-  static Vec unaligned_load(T* p) { return _mm_loadu_ps(p); }
+  static Vec unaligned_load(const T* p) { return _mm_loadu_ps(p); }
   template<Uint flags = 0>
   static void store(Vec val, T* p)
   {
@@ -780,14 +780,14 @@ struct AvxFloat
   }
 
   template<Uint flags = 0>
-  static Vec load(T* p)
+  static Vec load(const T* p)
   {
     return (flags & stream_flag) ?
       _mm256_castsi256_ps(_mm256_stream_load_si256((__m256i*) p)) :
       _mm256_load_ps(p);
   }
 
-  static Vec unaligned_load(T* p) { return _mm256_loadu_ps(p); }
+  static Vec unaligned_load(const T* p) { return _mm256_loadu_ps(p); }
   template<Uint flags = 0>
   static void store(Vec val, T* p)
   {
