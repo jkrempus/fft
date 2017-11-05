@@ -969,8 +969,9 @@ Fft<typename V::T>* fft_create(Int n, void* ptr)
 
   init_steps<V, SrcCf, DstCf>(*state);
 
-  init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
-    n, state->working0, state->twiddle, state->tiny_twiddle);
+  if(!state->tiny_transform_fun)
+    init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
+      n, state->working0, state->twiddle, state->tiny_twiddle);
 
   return state;
 }
