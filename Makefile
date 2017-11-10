@@ -2,6 +2,8 @@ CXX ?= g++
 
 ifdef DEBUG
 	CXXFLAGS += -std=c++17 -g
+	#CXXFLAGS += -fsanitize=address 
+	#LDFLAGS += -lasan
 else
 	CXXFLAGS += -std=c++17 -Ofast -ffunction-sections -mtune=native
 endif
