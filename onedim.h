@@ -668,12 +668,6 @@ template<int n, int vsz, typename T>
 constexpr ReImTable<(n > vsz ? n : vsz), float>
 CtSizedFftTwiddleTable<n, vsz, T>::value;
 
-template<bool cond, typename T> struct enable_if { };
-template<typename T> struct enable_if<true, T> { using type = T; };
-
-template<bool cond, typename T>
-using enif = typename enable_if<cond, T>::type;
-
 constexpr bool is_power_of_4(Int n)
 {
   while(n >= 4) n /= 4;
@@ -681,58 +675,54 @@ constexpr bool is_power_of_4(Int n)
 }
 
 template<typename V, Int vn, Int dft_sz, typename A>
-FORCEINLINE enif<(dft_sz < V::vec_size), void> tiny_transform_pass(
-  A& src_re, A& src_im, A& dst_re, A& dst_im)
+FORCEINLINE void tiny_transform_pass(A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
   auto& table = CtSizedFftTwiddleTable<dft_sz, vsz, T>::value;
 
-  for(Int i = 0; i < vn / 2; i++)
+  if constexpr(dft_sz < V::vec_size)
   {
-    C a = { src_re[i], src_im[i] };
-    C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
-    C t = { V::unaligned_load(table.re), V::unaligned_load(table.im) };
-    if(dft_sz > 1) b = b * t;
-    C dst_a = a + b;
-    C dst_b = a - b;
-
-    V::template interleave_multi<vsz / dft_sz>(
-      dst_a.re, dst_b.re, dst_re[2 * i], dst_re[2 * i + 1]);
-
-    V::template interleave_multi<vsz / dft_sz>(
-      dst_a.im, dst_b.im, dst_im[2 * i], dst_im[2 * i + 1]);
-  }
-}
-
-template<typename V, Int vn, Int dft_sz, typename A>
-FORCEINLINE enif<(dft_sz >= V::vec_size), void> tiny_transform_pass(
-  A& src_re, A& src_im, A& dst_re, A& dst_im)
-{
-  VEC_TYPEDEFS(V);
-  constexpr Int vsz = V::vec_size;
-  constexpr Int vdft_sz = dft_sz / vsz;
-  auto& table = CtSizedFftTwiddleTable<dft_sz, vsz, T>::value;
-
-  for(Int i = 0; i < vn / 2; i += vdft_sz)
-  {
-    for(Int j = 0; j < vdft_sz; j++)
+    for(Int i = 0; i < vn / 2; i++)
     {
-      C src_a = { src_re[i + j], src_im[i + j] };
-      C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
-      C t = {
-        V::unaligned_load(table.re + j * vsz),
-        V::unaligned_load(table.im + j * vsz) };
+      C a = { src_re[i], src_im[i] };
+      C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
+      C t = { V::unaligned_load(table.re), V::unaligned_load(table.im) };
+      if(dft_sz > 1) b = b * t;
+      C dst_a = a + b;
+      C dst_b = a - b;
 
-      C m = src_b * t;
-      C dst_a = src_a + m;
-      C dst_b = src_a - m;
+      V::template interleave_multi<vsz / dft_sz>(
+        dst_a.re, dst_b.re, dst_re[2 * i], dst_re[2 * i + 1]);
 
-      dst_re[2 * i + j] = dst_a.re;
-      dst_im[2 * i + j] = dst_a.im;
+      V::template interleave_multi<vsz / dft_sz>(
+        dst_a.im, dst_b.im, dst_im[2 * i], dst_im[2 * i + 1]);
+    }
+  }
+  else
+  {
+    constexpr Int vdft_sz = dft_sz / vsz;
 
-      dst_re[2 * i + j + vdft_sz] = dst_b.re;
-      dst_im[2 * i + j + vdft_sz] = dst_b.im;
+    for(Int i = 0; i < vn / 2; i += vdft_sz)
+    {
+      for(Int j = 0; j < vdft_sz; j++)
+      {
+        C src_a = { src_re[i + j], src_im[i + j] };
+        C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
+        C t = {
+          V::unaligned_load(table.re + j * vsz),
+          V::unaligned_load(table.im + j * vsz) };
+
+        C m = src_b * t;
+        C dst_a = src_a + m;
+        C dst_b = src_a - m;
+
+        dst_re[2 * i + j] = dst_a.re;
+        dst_im[2 * i + j] = dst_a.im;
+
+        dst_re[2 * i + j + vdft_sz] = dst_b.re;
+        dst_im[2 * i + j + vdft_sz] = dst_b.im;
+      }
     }
   }
 }
