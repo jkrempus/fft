@@ -674,90 +674,117 @@ constexpr bool is_power_of_4(Int n)
   return n == 1;
 }
 
-template<typename V, Int vn, Int dft_sz, typename A>
-FORCEINLINE void tiny_transform_pass(A& src_re, A& src_im, A& dst_re, A& dst_im)
+template<int n, typename T>
+struct Bunch
+{
+  T val;
+  Bunch<n - 1, T> rest;
+};
+
+template<typename T> struct Bunch<0, T> {};
+
+template<int i, int n, typename T>
+FORCEINLINE auto& get(Bunch<n, T>& a)
+{
+  if constexpr (i == 0)
+    return a.val;
+  else
+    return get<i - 1>(a.rest);
+}
+
+template<Int i, Int vn, Int dft_sz, typename V, typename A>
+FORCEINLINE void tiny_transform_pass_iterate_small(
+  A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
   auto& table = CtSizedFftTwiddleTable<dft_sz, vsz, T>::value;
 
-  if constexpr(dft_sz < V::vec_size)
-  {
-    for(Int i = 0; i < vn / 2; i++)
-    {
-      C a = { src_re[i], src_im[i] };
-      C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
-      C t = { V::unaligned_load(table.re), V::unaligned_load(table.im) };
-      if(dft_sz > 1) b = b * t;
-      C dst_a = a + b;
-      C dst_b = a - b;
+  C a = { get<i>(src_re), get<i>(src_im) };
+  C b = { get<i + vn / 2>(src_re), get<i + vn / 2>(src_im) };
+  C t = { V::unaligned_load(table.re), V::unaligned_load(table.im) };
+  if(dft_sz > 1) b = b * t;
+  C dst_a = a + b;
+  C dst_b = a - b;
 
-      V::template interleave_multi<vsz / dft_sz>(
-        dst_a.re, dst_b.re, dst_re[2 * i], dst_re[2 * i + 1]);
+  V::template interleave_multi<vsz / dft_sz>(
+    dst_a.re, dst_b.re, get<2 * i>(dst_re), get<2 * i + 1>(dst_re));
 
-      V::template interleave_multi<vsz / dft_sz>(
-        dst_a.im, dst_b.im, dst_im[2 * i], dst_im[2 * i + 1]);
-    }
-  }
-  else
-  {
-    constexpr Int vdft_sz = dft_sz / vsz;
+  V::template interleave_multi<vsz / dft_sz>(
+    dst_a.im, dst_b.im, get<2 * i>(dst_im), get<2 * i + 1>(dst_im));
 
-    for(Int i = 0; i < vn / 2; i += vdft_sz)
-    {
-      for(Int j = 0; j < vdft_sz; j++)
-      {
-        C src_a = { src_re[i + j], src_im[i + j] };
-        C src_b = { src_re[i + j + vn / 2], src_im[i + j + vn / 2] };
-        C t = {
-          V::unaligned_load(table.re + j * vsz),
-          V::unaligned_load(table.im + j * vsz) };
-
-        C m = src_b * t;
-        C dst_a = src_a + m;
-        C dst_b = src_a - m;
-
-        dst_re[2 * i + j] = dst_a.re;
-        dst_im[2 * i + j] = dst_a.im;
-
-        dst_re[2 * i + j + vdft_sz] = dst_b.re;
-        dst_im[2 * i + j + vdft_sz] = dst_b.im;
-      }
-    }
-  }
+  if constexpr (i + 1 < vn / 2)
+    tiny_transform_pass_iterate_small<i + 1, vn, dft_sz, V>(
+        src_re, src_im, dst_re, dst_im);
 }
 
-//One weird trick to prevent GCC from needlessly
-//writing array elements to the stack.
-template<typename Vec, int n> struct Locals
+template<Int k, Int vn, Int dft_sz, typename V, typename A>
+FORCEINLINE void tiny_transform_pass_iterate_large(
+  A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
-  Vec a[n];
-  Vec& operator[](int i) { return a[i]; }
-};
+  VEC_TYPEDEFS(V);
+  constexpr Int vsz = V::vec_size;
+  auto& table = CtSizedFftTwiddleTable<dft_sz, vsz, T>::value;
 
-template<typename Vec> struct Locals<Vec, 1>
-{
-  Vec a0;
-  Vec& operator[](int i) { return a0; }
-};
+  constexpr Int vdft_sz = dft_sz / vsz;
+  constexpr Int j = k % vdft_sz;
+  constexpr Int i = k - j;
+  C src_a = { get<i + j>(src_re), get<i + j>(src_im) };
+  C src_b = { get<i + j + vn / 2>(src_re), get<i + j + vn / 2>(src_im) };
+  C t = {
+    V::unaligned_load(table.re + j * vsz),
+    V::unaligned_load(table.im + j * vsz) };
 
-template<typename Vec> struct Locals<Vec, 2>
-{
-  Vec a0, a1;
-  Vec& operator[](int i) { return i == 0 ? a0 : a1; }
-};
+  C m = src_b * t;
+  C dst_a = src_a + m;
+  C dst_b = src_a - m;
 
-template<typename Vec> struct Locals<Vec, 4>
+  get<2 * i + j>(dst_re) = dst_a.re;
+  get<2 * i + j>(dst_im) = dst_a.im;
+
+  get<2 * i + j + vdft_sz>(dst_re) = dst_b.re;
+  get<2 * i + j + vdft_sz>(dst_im) = dst_b.im;
+
+  if constexpr (k + 1 < vn / 2)
+    tiny_transform_pass_iterate_large<k + 1, vn, dft_sz, V>(
+      src_re, src_im, dst_re, dst_im);
+}
+
+template<Int vn, Int dft_sz, typename V, typename A>
+FORCEINLINE void tiny_transform_pass(A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
-  Vec a0, a1, a2, a3;
-  Vec& operator[](int i)
-  {
-    return 
-      i == 0 ? a0 :
-      i == 1 ? a1 :
-      i == 2 ? a2 : a3;
-  }
-};
+  if constexpr (dft_sz < V::vec_size)
+    tiny_transform_pass_iterate_small<0, vn, dft_sz, V>(
+      src_re, src_im, dst_re, dst_im);
+  else
+    tiny_transform_pass_iterate_large<0, vn, dft_sz, V>(
+      src_re, src_im, dst_re, dst_im);
+}
+
+template<Int i, Int vn, typename V, typename SrcCf, typename A>
+FORCEINLINE void tiny_transform_load(
+    typename V::T* src, Int im_off, A& dst_re, A& dst_im)
+{
+  VEC_TYPEDEFS(V);
+  auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), im_off);
+  get<i>(dst_re) = c.re;
+  get<i>(dst_im) = c.im;
+
+  if constexpr (i + 1 < vn)
+    tiny_transform_load<i + 1, vn, V, SrcCf, A>(src, im_off, dst_re, dst_im);
+}
+
+template<Int i, Int vn, typename V, typename DstCf, typename A>
+FORCEINLINE void tiny_transform_store(
+    typename V::T* dst, Int im_off, A& src_re, A& src_im)
+{
+  VEC_TYPEDEFS(V);
+  C c = { get<i>(src_re), get<i>(src_im) };
+  DstCf::store(c, dst + i * stride<V, DstCf>(), im_off);
+
+  if constexpr (i + 1 < vn)
+    tiny_transform_store<i + 1, vn, V, DstCf, A>(dst, im_off, src_re, src_im);
+}
 
 template<typename V, typename SrcCf, typename DstCf, Int n>
 void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
@@ -768,33 +795,23 @@ void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
   //Round up just to make it compile
   constexpr Int vn = (n + V::vec_size - 1) / V::vec_size;
 
-  Locals<Vec, vn> a_re;
-  Locals<Vec, vn> a_im;
-  Locals<Vec, vn> b_re;
-  Locals<Vec, vn> b_im;
+  Bunch<vn, Vec> a_re;
+  Bunch<vn, Vec> a_im;
+  Bunch<vn, Vec> b_re;
+  Bunch<vn, Vec> b_im;
 
-  for(Int i = 0; i < vn; i++)
-  {
-    auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), im_off);
-    a_re[i] = c.re;
-    a_im[i] = c.im;
-  }
+  tiny_transform_load<0, vn, V, SrcCf>(src, im_off, a_re, a_im);
 
-  if(n >  1) tiny_transform_pass<V, vn,  1>(a_re, a_im, b_re, b_im);
-  if(n >  2) tiny_transform_pass<V, vn,  2>(b_re, b_im, a_re, a_im);
-  if(n >  4) tiny_transform_pass<V, vn,  4>(a_re, a_im, b_re, b_im);
-  if(n >  8) tiny_transform_pass<V, vn,  8>(b_re, b_im, a_re, a_im);
-  if(n > 16) tiny_transform_pass<V, vn, 16>(a_re, a_im, b_re, b_im);
+  if constexpr (n >  1) tiny_transform_pass<vn,  1, V>(a_re, a_im, b_re, b_im);
+  if constexpr (n >  2) tiny_transform_pass<vn,  2, V>(b_re, b_im, a_re, a_im);
+  if constexpr (n >  4) tiny_transform_pass<vn,  4, V>(a_re, a_im, b_re, b_im);
+  if constexpr (n >  8) tiny_transform_pass<vn,  8, V>(b_re, b_im, a_re, a_im);
+  if constexpr (n > 16) tiny_transform_pass<vn, 16, V>(a_re, a_im, b_re, b_im);
 
-  for(Int i = 0; i < vn; i++)
-  {
-    C c;
-    constexpr bool result_in_a = is_power_of_4(n);
-    if(result_in_a) c = { a_re[i], a_im[i] };
-    else c = { b_re[i], b_im[i] };
-
-    DstCf::store(c, dst + i * stride<V, DstCf>(), im_off);
-  }
+  if constexpr(is_power_of_4(n))
+    tiny_transform_store<0, vn, V, SrcCf>(dst, im_off, a_re, a_im);
+  else
+    tiny_transform_store<0, vn, V, DstCf>(dst, im_off, b_re, b_im);
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -807,10 +824,12 @@ void init_steps(Fft<typename V::T>& state)
   {
     state.nsteps = 0;
     state.tiny_transform_fun = 
+#if 0
       state.n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
       state.n ==  2 ?  &tiny_transform<V, SrcCf, DstCf,  2> :
       state.n ==  4 ?  &tiny_transform<V, SrcCf, DstCf,  4> :
       state.n ==  8 ?  &tiny_transform<V, SrcCf, DstCf,  8> :
+#endif
       state.n == 16 ?  &tiny_transform<V, SrcCf, DstCf, 16> :
       state.n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> : nullptr;
 
