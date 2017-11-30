@@ -839,12 +839,9 @@ TestResult bench(const std::vector<Int>& size, double requested_operations)
   {
     fft.transform();
     int64_t j = i / (iter / 10);
-    if(j * (iter / 10) == i)
-    {
-      printf("%d ", j);
-      fflush(stdout);
-    }
+    //if(j * (iter / 10) == i) { printf("%d ", j); fflush(stdout); }
   }
+
   double t1 = get_time(); 
 
   TestResult r;

@@ -34,8 +34,7 @@ struct Fft
 {
   Int n;
   Int im_off;
-  T* working0;
-  T* working1;
+  T* working;
   T* twiddle;
   T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
@@ -925,7 +924,6 @@ Int fft_memsize(Int n)
   sz = aligned_increment(sz, sizeof(Fft<T>));
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
   sz = aligned_increment(sz, sizeof(T) * 2 * n);
-  sz = aligned_increment(sz, sizeof(T) * 2 * n);
   sz = aligned_increment(sz, tiny_twiddle_bytes<V>() * n);
   return sz;
 }
@@ -945,10 +943,7 @@ Fft<typename V::T>* fft_create(Int n, void* ptr)
   state->im_off = n;
   ptr = aligned_increment(ptr, sizeof(Fft<T>));
 
-  state->working0 = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
-
-  state->working1 = (T*) ptr;
+  state->working = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
 
   state->twiddle = (T*) ptr;
@@ -961,7 +956,7 @@ Fft<typename V::T>* fft_create(Int n, void* ptr)
 
   if(!state->tiny_transform_fun)
     init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
-      n, state->working0, state->twiddle, state->tiny_twiddle);
+      n, state->working, state->twiddle, state->tiny_twiddle);
 
   return state;
 }
@@ -1028,7 +1023,7 @@ FORCEINLINE void fft_impl(const Fft<T>* state, Int im_off, T* src, T* dst)
   arg.twiddle = state->twiddle;
   arg.tiny_twiddle = state->tiny_twiddle;
 
-  auto w0 = state->working0;
+  auto w0 = state->working;
  
   arg.src = src;
   arg.dst = w0;
@@ -1148,6 +1143,7 @@ struct Rfft
 {
   Fft<T>* state;
   T* twiddle;
+  T* working;
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
@@ -1160,6 +1156,7 @@ Int rfft_memsize(Int n)
 
   Int sz = 0;
   sz = aligned_increment(sz, sizeof(Rfft<T>));
+  sz = aligned_increment(sz, sizeof(T) * n);
   sz = aligned_increment(sz, sizeof(T) * n);
   sz = aligned_increment(sz, fft_memsize<V>(n));
   return sz;
@@ -1175,6 +1172,9 @@ Rfft<typename V::T>* rfft_create(Int n, void* ptr)
   Rfft<T>* r = (Rfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Rfft<T>));
 
+  r->working = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * n);
+ 
   r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
  
@@ -1192,10 +1192,10 @@ Rfft<typename V::T>* rfft_create(Int n, void* ptr)
 template<typename T>
 void rfft(const Rfft<T>* state, T* src, T* dst)
 {
-  fft(state->state, src, state->state->working1);
+  fft(state->state, src, state->working);
   state->real_pass(
     state->state->n * 2,
-    state->state->working1,
+    state->working,
     state->state->n, 
     state->twiddle,
     dst,
@@ -1207,6 +1207,7 @@ struct Irfft
 {
   Ifft<T>* state;
   T* twiddle;
+  T* working;
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
@@ -1222,6 +1223,9 @@ Irfft<typename V::T>* irfft_create(Int n, void* ptr)
 
   auto r = (Irfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Irfft<T>));
+
+  r->working = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * n);
 
   r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
@@ -1246,10 +1250,10 @@ void irfft(const Irfft<T>* state, T* src, T* dst)
     src,
     align_size<T>(complex_state->n + 1),
     state->twiddle,
-    complex_state->working1,
+    state->working,
     complex_state->n);
 
-  ifft(state->state, complex_state->working1, dst);
+  ifft(state->state, state->working, dst);
 }
 }
 #endif
