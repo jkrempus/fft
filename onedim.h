@@ -1250,10 +1250,10 @@ void irfft(const Irfft<T>* state, T* src, T* dst)
     src,
     align_size<T>(complex_state->n + 1),
     state->twiddle,
-    state->working,
+    dst,
     complex_state->n);
 
-  ifft(state->state, state->working, dst);
+  ifft(state->state, dst, dst);
 }
 }
 #endif
