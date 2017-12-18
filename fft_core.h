@@ -95,7 +95,8 @@ void fft_impl(
   bool interleaved_src_rows)
 {
   ASSERT(idim < s->ndim);
-  if(idim == s->ndim - 1) onedim::fft_impl(s->last_transform, im_off, src, dst);
+  if(idim == s->ndim - 1)
+    onedim::fft_impl(s->last_transform, src, im_off, dst, im_off);
   else
   {
     s->transforms[idim]->fun_ptr(

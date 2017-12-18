@@ -39,7 +39,9 @@ struct Fft
   T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
-  typedef void (*tiny_transform_fun_type)(T* src, T* dst, Int im_off);
+  typedef void (*tiny_transform_fun_type)(
+    T* src, Int src_im_off, T* dst, Int dst_im_off);
+
   tiny_transform_fun_type tiny_transform_fun;
 };
 
@@ -759,7 +761,9 @@ template<typename Vec> struct Locals<Vec, 4>
 };
 
 template<typename V, typename SrcCf, typename DstCf, Int n>
-void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
+void tiny_transform(
+  typename V::T* src, Int src_im_off,
+  typename V::T* dst, Int dst_im_off)
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
@@ -774,7 +778,7 @@ void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
 
   for(Int i = 0; i < vn; i++)
   {
-    auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), im_off);
+    auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), src_im_off);
     a_re[i] = c.re;
     a_im[i] = c.im;
   }
@@ -792,7 +796,7 @@ void tiny_transform(typename V::T* src, typename V::T* dst, Int im_off)
     if(result_in_a) c = { a_re[i], a_im[i] };
     else c = { b_re[i], b_im[i] };
 
-    DstCf::store(c, dst + i * stride<V, DstCf>(), im_off);
+    DstCf::store(c, dst + i * stride<V, DstCf>(), dst_im_off);
   }
 }
 
@@ -1005,17 +1009,20 @@ NOINLINE void recursive_passes(
 }
 
 template<typename T>
-FORCEINLINE void fft_impl(const Fft<T>* state, Int im_off, T* src, T* dst)
+FORCEINLINE void fft_impl(
+  const Fft<T>* state,
+  T* src, Int src_im_off,
+  T* dst, Int dst_im_off)
 {
   if(state->tiny_transform_fun)
   {
-    state->tiny_transform_fun(src, dst, im_off);
+    state->tiny_transform_fun(src, src_im_off, dst, dst_im_off);
     return;
   }
 
   Arg<T> arg;
   arg.n = state->n;
-  arg.im_off = im_off;
+  arg.im_off = src_im_off;
   arg.dft_size = 1;
   arg.start_offset = 0;
   arg.end_offset = state->n;
@@ -1047,20 +1054,22 @@ FORCEINLINE void fft_impl(const Fft<T>* state, Int im_off, T* src, T* dst)
     }
   }
 
-  arg.dst = dst;  
+  arg.dst = dst;
+  arg.im_off = dst_im_off;
   state->steps[state->nsteps - 1].fun_ptr(arg);
 }
 
 template<typename T>
 void fft(const Fft<T>* state, T* src, T* dst)
 {
-  fft_impl(state, state->n, src, dst);
+  fft_impl(state, src, state->n, dst, state->n);
 }
 
 template<typename T>
 void ifft(const Ifft<T>* state, T* src, T* dst)
 {
-  fft_impl((Fft<T>*) state, ((Fft<T>*) state)->n, src, dst);
+  Int n = ((Fft<T>*) state)->n;
+  fft_impl((Fft<T>*) state, src, n, dst, n);
 }
 
 template<
