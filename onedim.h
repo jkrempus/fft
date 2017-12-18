@@ -932,10 +932,7 @@ Int fft_memsize(Int n)
   return sz;
 }
 
-template<
-  typename V,
-  typename SrcCf,
-  typename DstCf>
+template<typename V, typename SrcCf, typename DstCf>
 Fft<typename V::T>* fft_create(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
@@ -1151,8 +1148,8 @@ template<typename T>
 struct Rfft
 {
   Fft<T>* state;
-  T* twiddle;
   T* working;
+  T* twiddle;
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
@@ -1181,14 +1178,14 @@ Rfft<typename V::T>* rfft_create(Int n, void* ptr)
   Rfft<T>* r = (Rfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Rfft<T>));
 
-  r->working = (T*) ptr;
+  r->working = SameType<DstCf, cf::Split>::value ? nullptr : (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
  
   r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
  
   r->real_pass = &real_pass<V, cf::Split, DstCf, false>;
-  
+
   Int m =  n / 2;
   compute_twiddle(m, m, r->twiddle, r->twiddle + m);
   copy(r->twiddle + 1, m - 1, r->twiddle);
@@ -1201,14 +1198,18 @@ Rfft<typename V::T>* rfft_create(Int n, void* ptr)
 template<typename T>
 void rfft(const Rfft<T>* state, T* src, T* dst)
 {
-  fft(state->state, src, state->working);
+  Int n = state->state->n;
+  Int dst_im_off = align_size<T>(n + 1);
+
+  T* w = state->working ? state->working : dst;
+  Int w_im_off = state->working ? n : dst_im_off;
+
+  fft_impl(state->state, src, n, w, w_im_off);
   state->real_pass(
-    state->state->n * 2,
-    state->working,
-    state->state->n, 
+    n * 2,
+    w, w_im_off, 
     state->twiddle,
-    dst,
-    align_size<T>(state->state->n + 1));
+    dst, dst_im_off);
 }
 
 template<typename T>
@@ -1216,11 +1217,11 @@ struct Irfft
 {
   Ifft<T>* state;
   T* twiddle;
-  T* working;
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
-template<typename V> Int irfft_memsize(Int n) { return rfft_memsize<V>(n); }
+template<typename V>
+Int irfft_memsize(Int n) { return rfft_memsize<V>(n); }
 
 template<typename V, typename SrcCf>
 Irfft<typename V::T>* irfft_create(Int n, void* ptr)
@@ -1232,9 +1233,6 @@ Irfft<typename V::T>* irfft_create(Int n, void* ptr)
 
   auto r = (Irfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Irfft<T>));
-
-  r->working = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * n);
 
   r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
