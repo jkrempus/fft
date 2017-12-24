@@ -38,7 +38,7 @@ Int fft_memsize(Int ndim_in, const Int* dim_in)
   for(Int i = 0; i < ndim - 1; i++)
     r = align_size(r + multi::fft_memsize<V>(dim[i]));
 
-  r = align_size(r + onedim::fft_memsize<V>(dim[ndim - 1]));
+  r = align_size(r + onedim::fft_memsize<V, cf::Split, cf::Split>(dim[ndim - 1])); //TODO
 
   return r;
 }
@@ -182,7 +182,7 @@ Int rfft_memsize(Int ndim_in, const Int* dim_in)
   Int r = 0;
   r = align_size(r + sizeof(Rfft<T>));
   if(ndim == 1)
-    r = align_size(r + onedim::rfft_memsize<V>(dim[0]));
+    r = align_size(r + onedim::rfft_memsize<V, cf::Split>(dim[0])); //TODO
   else
   {
     r = align_size(r + sizeof(T) * dim[0]);

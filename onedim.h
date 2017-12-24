@@ -917,53 +917,58 @@ void init_steps(Fft<typename V::T>& state)
 #endif
 }
 
-template<typename V>
-Int fft_memsize(Int n)
+template<bool do_create, typename V, typename SrcCf, typename DstCf>
+Int fft_create_impl(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
   if(n <= V::vec_size && V::vec_size != 1)
-    return fft_memsize<Scalar<T>>(n);
+    return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(n, ptr);
 
-  Int sz = 0;
-  sz = aligned_increment(sz, sizeof(Fft<T>));
-  sz = aligned_increment(sz, sizeof(T) * 2 * n);
-  sz = aligned_increment(sz, sizeof(T) * 2 * n);
-  sz = aligned_increment(sz, tiny_twiddle_bytes<V>() * n);
-  return sz;
+  auto state = (Fft<T>*) ptr;
+  if(do_create) state->n = n;
+  if(do_create) state->im_off = n;
+
+  ptr = aligned_increment(ptr, sizeof(Fft<T>));
+
+  if(do_create) state->working = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
+
+  if(do_create) state->twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
+
+  if(do_create) state->tiny_twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, tiny_twiddle_bytes<V>());
+
+  if(do_create)
+  {
+    init_steps<V, SrcCf, DstCf>(*state);
+
+    if(!state->tiny_transform_fun)
+      init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
+        n, state->working, state->twiddle, state->tiny_twiddle);
+  }
+
+  return Int(ptr);
+}
+
+template<typename V, typename SrcCf, typename DstCf>
+Int fft_memsize(Int n)
+{
+  return fft_create_impl<false, V, SrcCf, DstCf>(n, nullptr);
 }
 
 template<typename V, typename SrcCf, typename DstCf>
 Fft<typename V::T>* fft_create(Int n, void* ptr)
 {
-  VEC_TYPEDEFS(V);
-  if(n <= V::vec_size && V::vec_size != 1)
-    return fft_create<Scalar<T>, SrcCf, DstCf>(n, ptr);
-
-  auto state = (Fft<T>*) ptr;
-  state->n = n;
-  state->im_off = n;
-  ptr = aligned_increment(ptr, sizeof(Fft<T>));
-
-  state->working = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
-
-  state->twiddle = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
-
-  state->tiny_twiddle = (T*) ptr;
-  ptr = aligned_increment(ptr, tiny_twiddle_bytes<V>());
-
-  init_steps<V, SrcCf, DstCf>(*state);
-
-  if(!state->tiny_transform_fun)
-    init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
-      n, state->working, state->twiddle, state->tiny_twiddle);
-
-  return state;
+  fft_create_impl<true, V, SrcCf, DstCf>(n, ptr);
+  return (Fft<typename V::T>*) ptr;
 }
 
-template<typename V>
-Int ifft_memsize(Int n){ return fft_memsize<V>(n); }
+template<typename V, typename SrcCf, typename DstCf>
+Int ifft_memsize(Int n)
+{
+  return fft_memsize<V, cf::Swapped<SrcCf>, cf::Swapped<DstCf>>(n);
+}
 
 template<typename V, typename SrcCf, typename DstCf>
 Ifft<typename V::T>* ifft_create(Int n, void* ptr)
@@ -1153,46 +1158,52 @@ struct Rfft
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
-template<typename V>
-Int rfft_memsize(Int n)
+template<bool do_create, typename V, typename DstCf>
+Int rfft_create_impl(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
   if(V::vec_size != 1 && n <= 2 * V::vec_size)
-    return rfft_memsize<Scalar<T>>(n);
+    return rfft_create_impl<do_create, Scalar<T>, DstCf>(n, ptr);
 
-  Int sz = 0;
-  sz = aligned_increment(sz, sizeof(Rfft<T>));
-  sz = aligned_increment(sz, sizeof(T) * n);
-  sz = aligned_increment(sz, sizeof(T) * n);
-  sz = aligned_increment(sz, fft_memsize<V>(n));
-  return sz;
+  Rfft<T>* r = (Rfft<T>*) ptr;
+  ptr = aligned_increment(ptr, sizeof(Rfft<T>));
+
+  if(do_create)
+    r->working = SameType<DstCf, cf::Split>::value ? nullptr : (T*) ptr;
+
+  ptr = aligned_increment(ptr, sizeof(T) * n);
+ 
+  if(do_create) r->twiddle = (T*) ptr;
+  ptr = aligned_increment(ptr, sizeof(T) * n);
+ 
+  if(do_create)
+  {
+    r->real_pass = &real_pass<V, cf::Split, DstCf, false>;
+
+    Int m =  n / 2;
+    compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    copy(r->twiddle + 1, m - 1, r->twiddle);
+    copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+  
+    r->state = fft_create<V, cf::Scal, cf::Split>(n / 2, ptr);
+  }
+
+  ptr = aligned_increment(ptr, fft_memsize<V, cf::Scal, cf::Split>(n / 2));
+
+  return Int(ptr);
+}
+
+template<typename V, typename DstCf>
+Int rfft_memsize(Int n)
+{
+  return rfft_create_impl<false, V, DstCf>(n, nullptr);
 }
 
 template<typename V, typename DstCf>
 Rfft<typename V::T>* rfft_create(Int n, void* ptr)
 {
-  VEC_TYPEDEFS(V);
-  if(V::vec_size != 1 && n <= 2 * V::vec_size)
-    return rfft_create<Scalar<T>, DstCf>(n, ptr);
-
-  Rfft<T>* r = (Rfft<T>*) ptr;
-  ptr = aligned_increment(ptr, sizeof(Rfft<T>));
-
-  r->working = SameType<DstCf, cf::Split>::value ? nullptr : (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * n);
- 
-  r->twiddle = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * n);
- 
-  r->real_pass = &real_pass<V, cf::Split, DstCf, false>;
-
-  Int m =  n / 2;
-  compute_twiddle(m, m, r->twiddle, r->twiddle + m);
-  copy(r->twiddle + 1, m - 1, r->twiddle);
-  copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
-  
-  r->state = fft_create<V, cf::Scal, cf::Split>(n / 2, ptr);
-  return r;
+  rfft_create_impl<true, V, DstCf>(n, ptr);
+  return (Rfft<typename V::T>*) ptr;
 }
 
 template<typename T>
@@ -1220,33 +1231,49 @@ struct Irfft
   void (*real_pass)(Int, T*, Int, T*, T*, Int);
 };
 
-template<typename V>
-Int irfft_memsize(Int n) { return rfft_memsize<V>(n); }
-
-template<typename V, typename SrcCf>
-Irfft<typename V::T>* irfft_create(Int n, void* ptr)
+template<bool do_create, typename V, typename SrcCf>
+Int irfft_create_impl(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  VEC_TYPEDEFS(V);
   if(V::vec_size != 1 && n <= 2 * V::vec_size)
-    return irfft_create<Scalar<T>, SrcCf>(n, ptr);
+    return irfft_create_impl<do_create, Scalar<T>, SrcCf>(n, ptr);
 
   auto r = (Irfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Irfft<T>));
 
-  r->twiddle = (T*) ptr;
+  if(do_create) r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
 
-  r->real_pass = &real_pass<V, SrcCf, cf::Split, true>;
+  if(do_create)
+  {
+    r->real_pass = &real_pass<V, SrcCf, cf::Split, true>;
 
-  Int m =  n / 2;
-  compute_twiddle(m, m, r->twiddle, r->twiddle + m);
-  copy(r->twiddle + 1, m - 1, r->twiddle);
-  copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+    Int m =  n / 2;
+    compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    copy(r->twiddle + 1, m - 1, r->twiddle);
+    copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
 
-  r->state = ifft_create<V, cf::Split, cf::Scal>(n / 2, ptr);
-  return r;
+    r->state = ifft_create<V, cf::Split, cf::Scal>(n / 2, ptr);
+  }
+
+  ptr = aligned_increment(ptr, ifft_memsize<V, cf::Split, cf::Scal>(n / 2));
+
+  return Int(ptr);
 }
+
+template<typename V, typename SrcCf>
+Int irfft_memsize(Int n)
+{
+  return irfft_create_impl<false, V, SrcCf>(n, nullptr);
+}
+
+template<typename V, typename SrcCf>
+Irfft<typename V::T>* irfft_create(Int n, void* ptr)
+{
+  irfft_create_impl<true, V, SrcCf>(n, ptr);
+  return (Irfft<typename V::T>*) ptr;
+}
+
 
 template<typename T>
 void irfft(const Irfft<T>* state, T* src, T* dst)
