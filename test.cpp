@@ -556,7 +556,7 @@ struct TestWrapper<V, Cf, false, false>
     state(fft_create<V, Cf, Cf>(
       size.size(),
       &size[0],
-      alloc(fft_memsize<V>(size.size(), &size[0])))) {}
+      alloc(fft_memsize<V, Cf, Cf>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
   void transform() { fft<T>(state, this->src, this->dst); }

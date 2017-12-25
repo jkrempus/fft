@@ -19,54 +19,42 @@ struct Fft
   multi::Fft<T>* transforms[maxdim];
 };
 
-template<typename V>
-Int fft_memsize(Int ndim_in, const Int* dim_in)
+template<bool do_create, typename V, typename SrcCf, typename DstCf>
+Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 {
   Int dim[maxdim];
   Int ndim;
   remove_ones(dim_in, ndim_in, dim, ndim);
+  Int num_elements = product(dim, ndim);
 
   VEC_TYPEDEFS(V);
   if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
-    return fft_memsize<Scalar<T>>(ndim, dim);
-
-  Int r = align_size(sizeof(Fft<T>));
-
-  Int working_size = 2 * sizeof(T) * product(dim, ndim);
-  r = align_size(r + working_size);
-
-  for(Int i = 0; i < ndim - 1; i++)
-    r = align_size(r + multi::fft_memsize<V>(dim[i]));
-
-  r = align_size(r + onedim::fft_memsize<V, cf::Split, cf::Split>(dim[ndim - 1])); //TODO
-
-  return r;
-}
-
-template<typename V, typename SrcCf, typename DstCf>
-Fft<typename V::T>* fft_create(Int ndim_in, const Int* dim_in, void* mem)
-{
-  Int dim[maxdim];
-  Int ndim;
-  remove_ones(dim_in, ndim_in, dim, ndim);
-
-  VEC_TYPEDEFS(V);
-  if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
-    return fft_create<Scalar<T>, SrcCf, DstCf>(ndim, dim, mem);
+    return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(ndim, dim, mem);
 
   auto s = (Fft<typename V::T>*) mem;
-  s->ndim = ndim;
-  s->working_idx_ratio = cf::Vec::idx_ratio;
-  s->dst_idx_ratio = DstCf::idx_ratio;
-  mem = (void*) align_size(Uint(mem) + sizeof(Fft<T>));
-  s->working = (T*) mem;
+  mem = aligned_increment(mem, sizeof(Fft<T>));
  
-  s->num_elements = product(dim, ndim);
-  Int working_size = 2 * sizeof(T) * s->num_elements;
+  if(do_create)
+  {
+    s->ndim = ndim;
+    s->working_idx_ratio = cf::Vec::idx_ratio;
+    s->dst_idx_ratio = DstCf::idx_ratio;
+    s->working = (T*) mem;
+    s->num_elements = num_elements;
+  }
+ 
+  Int working_size = 2 * sizeof(T) * num_elements;
   mem = (void*) align_size(Uint(mem) + working_size);
 
   if(ndim == 1)
-    s->last_transform = onedim::fft_create<V, SrcCf, DstCf>(dim[ndim - 1], mem);
+  {
+    if(do_create)
+      s->last_transform =
+        onedim::fft_create<V, SrcCf, DstCf>(dim[ndim - 1], mem);
+
+    mem = aligned_increment(
+      mem, onedim::fft_memsize<V, SrcCf, DstCf>(dim[ndim - 1]));
+  }
   else
   {
     for(Int i = 0; i < ndim - 1; i++)
@@ -74,19 +62,45 @@ Fft<typename V::T>* fft_create(Int ndim_in, const Int* dim_in, void* mem)
       Int m = product(dim + i + 1, dim + ndim);
 
       if(i == 0)
-        s->transforms[i] = multi::fft_create<V, SrcCf, cf::Vec, true>(
-          dim[i], m, mem);
-      else
-        s->transforms[i] = multi::fft_create<V, cf::Vec, cf::Vec, true>(
-          dim[i], m, mem);
+      {
+        if(do_create)
+          s->transforms[i] = multi::fft_create<V, SrcCf, cf::Vec, true>(
+            dim[i], m, mem);
 
-      mem = (void*) align_size(Uint(mem) + multi::fft_memsize<V>(dim[i]));
+        mem = aligned_increment(mem, multi::fft_memsize<V>(dim[i]));
+      }
+      else
+      {
+        if(do_create)
+          s->transforms[i] = multi::fft_create<V, cf::Vec, cf::Vec, true>(
+            dim[i], m, mem);
+
+        mem = aligned_increment(mem, multi::fft_memsize<V>(dim[i]));
+      }
     }
 
-    s->last_transform = onedim::fft_create<V, cf::Vec, DstCf>(dim[ndim - 1], mem);
+    if(do_create)
+      s->last_transform =
+        onedim::fft_create<V, cf::Vec, DstCf>(dim[ndim - 1], mem);
+
+    mem = aligned_increment(
+      mem, onedim::fft_memsize<V, cf::Vec, DstCf>(dim[ndim - 1]));
   }
 
-  return s;
+  return Int(mem);
+}
+
+template<typename V, typename SrcCf, typename DstCf>
+Int fft_memsize(Int ndim_in, const Int* dim_in)
+{
+  return fft_create_impl<false, V, SrcCf, DstCf>(ndim_in, dim_in, nullptr);
+}
+
+template<typename V, typename SrcCf, typename DstCf>
+Fft<typename V::T>* fft_create(Int ndim_in, const Int* dim_in, void* mem)
+{
+  fft_create_impl<true, V, SrcCf, DstCf>(ndim_in, dim_in, mem);
+  return (Fft<typename V::T>*) mem;
 }
 
 template<typename T>
@@ -136,7 +150,7 @@ void ifft(Ifft<T>* state, T* src, T* dst)
 template<typename V>
 Int ifft_memsize(Int ndim, const Int* dim)
 {
-  return fft_memsize<V>(ndim, dim); 
+  return fft_memsize<V, cf::Split, cf::Split>(ndim, dim); 
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -188,7 +202,7 @@ Int rfft_memsize(Int ndim_in, const Int* dim_in)
     r = align_size(r + sizeof(T) * dim[0]);
     r = align_size(r + sizeof(T) * 2 * rfft_im_off<T>(ndim, dim));
     r = align_size(r + multi::fft_memsize<V>(dim[0] / 2));
-    r = align_size(r + fft_memsize<V>(ndim - 1, dim + 1));
+    r = align_size(r + fft_memsize<V, cf::Split, cf::Split>(ndim - 1, dim + 1));
   }
   return r;
 }
