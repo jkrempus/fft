@@ -576,7 +576,7 @@ struct TestWrapper<V, Cf, false, true>
     state(ifft_create<V, Cf, Cf>(
       size.size(),
       &size[0],
-      alloc(ifft_memsize<V>(size.size(), &size[0])))) {}
+      alloc(ifft_memsize<V, Cf, Cf>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
   void transform() { ifft<T>(state, this->src, this->dst); }
@@ -604,7 +604,7 @@ struct TestWrapper<V, Cf, true, false>
   TestWrapper(const std::vector<Int>& size) :
     Base<T, true, false>(size, im_offset(size)),
     state(rfft_create<V, Cf>(size.size(), &size[0], 
-      alloc(rfft_memsize<V>(size.size(), &size[0])))) {}
+      alloc(rfft_memsize<V, Cf>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
@@ -630,7 +630,7 @@ struct TestWrapper<V, Cf, true, true>
   TestWrapper(const std::vector<Int>& size) :
     Base<T, true, true>(size, im_offset(size)),
     state(irfft_create<V, Cf>(size.size(), &size[0], 
-      alloc(irfft_memsize<V>(size.size(), &size[0])))) {}
+      alloc(irfft_memsize<V, Cf>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 

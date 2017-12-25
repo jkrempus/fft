@@ -147,10 +147,11 @@ void ifft(Ifft<T>* state, T* src, T* dst)
   fft_impl<T>(0, s, s->num_elements, src, s->working, dst, false);
 }
 
-template<typename V>
+template<typename V, typename SrcCf, typename DstCf>
 Int ifft_memsize(Int ndim, const Int* dim)
 {
-  return fft_memsize<V, cf::Split, cf::Split>(ndim, dim); 
+  VEC_TYPEDEFS(V);
+  return fft_memsize<V, cf::Swapped<SrcCf>, cf::Swapped<DstCf>>(ndim, dim);
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -182,8 +183,8 @@ Int rfft_im_off(Int ndim, const Int* dim)
   return align_size<T>(product(dim + 1, dim + ndim) * (dim[0] / 2 + 1));
 }
 
-template<typename V>
-Int rfft_memsize(Int ndim_in, const Int* dim_in)
+template<bool do_create, typename V, typename DstCf>
+Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 {
   Int dim[maxdim];
   Int ndim;
@@ -191,71 +192,82 @@ Int rfft_memsize(Int ndim_in, const Int* dim_in)
 
   VEC_TYPEDEFS(V)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
-    return rfft_memsize<Scalar<T>>(ndim, dim);
+    return rfft_create_impl<do_create, Scalar<T>, DstCf>(ndim, dim, mem);
 
-  Int r = 0;
-  r = align_size(r + sizeof(Rfft<T>));
+  auto r = (Rfft<T>*) mem;
+  mem = aligned_increment(mem, sizeof(Rfft<T>));
+
   if(ndim == 1)
-    r = align_size(r + onedim::rfft_memsize<V, cf::Split>(dim[0])); //TODO
+  {
+    if(do_create)
+    {
+      r->onedim_transform = onedim::rfft_create<V, DstCf>(dim[0], mem);
+      r->dst_idx_ratio = 0;
+      r->working0 = nullptr;
+      r->twiddle = nullptr;
+      r->outer_n = 0;
+      r->inner_n = 0;
+      r->im_off = 0;
+      r->multidim_transform = nullptr;
+      r->first_transform = nullptr;
+      r->real_pass = nullptr;
+    }
+
+    mem = aligned_increment(mem, onedim::rfft_memsize<V, DstCf>(dim[0]));
+  }
   else
   {
-    r = align_size(r + sizeof(T) * dim[0]);
-    r = align_size(r + sizeof(T) * 2 * rfft_im_off<T>(ndim, dim));
-    r = align_size(r + multi::fft_memsize<V>(dim[0] / 2));
-    r = align_size(r + fft_memsize<V, cf::Split, cf::Split>(ndim - 1, dim + 1));
+    if(do_create)
+    {
+      r->dst_idx_ratio = DstCf::idx_ratio;
+      r->outer_n = dim[0];
+      r->inner_n = product(dim + 1, dim + ndim);
+      r->onedim_transform = nullptr;
+      r->im_off = rfft_im_off<T>(ndim, dim);
+      r->twiddle = (T*) mem;
+    }
+
+    mem = aligned_increment(mem, sizeof(T) * dim[0]);
+
+    if(do_create) r->working0 = (T*) mem;
+
+    mem = aligned_increment(mem, 2 * sizeof(T) * r->im_off);
+    
+    if(do_create)
+      r->first_transform = multi::fft_create<V, cf::Split, cf::Vec, false>(
+        r->outer_n / 2, r->inner_n, mem);
+
+    mem = aligned_increment(mem, multi::fft_memsize<V>(dim[0] / 2));
+
+    if(do_create)
+    {
+      r->multidim_transform =
+        fft_create<V, cf::Vec, DstCf>(ndim - 1, dim + 1, mem);
+
+      r->real_pass = &multi::real_pass<V, cf::Vec, false>;
+  
+      Int m =  r->outer_n / 2;
+      compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    }
+    
+    mem = aligned_increment(
+      mem, fft_memsize<V, cf::Vec, DstCf>(ndim - 1, dim + 1));
   }
-  return r;
+
+  return Int(mem);
+}
+
+template<typename V, typename DstCf>
+Int rfft_memsize(Int ndim_in, const Int* dim_in)
+{
+  return rfft_create_impl<false, V, DstCf>(ndim_in, dim_in, nullptr);
 }
 
 template<typename V, typename DstCf>
 Rfft<typename V::T>* rfft_create(Int ndim_in, const Int* dim_in, void* mem)
 {
-  Int dim[maxdim];
-  Int ndim;
-  remove_ones(dim_in, ndim_in, dim, ndim);
-
-  VEC_TYPEDEFS(V)
-  if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
-    return rfft_create<Scalar<T>, DstCf>(ndim, dim, mem);
-
-  auto r = (Rfft<T>*) mem;
-  mem = (void*) align_size(Uint(mem) + sizeof(Rfft<T>)); 
-  if(ndim == 1)
-  {
-     r->onedim_transform = onedim::rfft_create<V, DstCf>(dim[0], mem);
-     r->dst_idx_ratio = 0;
-     r->working0 = nullptr;
-     r->twiddle = nullptr;
-     r->outer_n = 0;
-     r->inner_n = 0;
-     r->im_off = 0;
-     r->multidim_transform = nullptr;
-     r->first_transform = nullptr;
-     r->real_pass = nullptr;
-  }
-  else
-  {
-    r->dst_idx_ratio = DstCf::idx_ratio;
-    r->outer_n = dim[0];
-    r->inner_n = product(dim + 1, dim + ndim);
-    r->onedim_transform = nullptr;
-    r->im_off = rfft_im_off<T>(ndim, dim);
-    r->twiddle = (T*) mem;
-    mem = (void*) align_size(Uint(mem) + sizeof(T) * dim[0]);
-    r->working0 = (T*) mem;
-    mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
-    r->first_transform = multi::fft_create<V, cf::Split, cf::Vec, false>(
-      r->outer_n / 2, r->inner_n, mem);
-
-    mem = (void*) align_size(Uint(mem) + multi::fft_memsize<V>(dim[0] / 2));
-    r->multidim_transform = fft_create<V, cf::Vec, DstCf>(ndim - 1, dim + 1, mem);
-    r->real_pass = &multi::real_pass<V, cf::Vec, false>;
-  
-    Int m =  r->outer_n / 2;
-    compute_twiddle(m, m, r->twiddle, r->twiddle + m);
-  }
-  
-  return r;
+  rfft_create_impl<true, V, DstCf>(ndim_in, dim_in, mem);
+  return (Rfft<typename V::T>*) mem;
 }
 
 template<typename T>
@@ -301,14 +313,8 @@ struct Irfft
   void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
 };
 
-template<typename V>
-Int irfft_memsize(Int ndim, const Int* dim)
-{
-  return rfft_memsize<V>(ndim, dim);
-}
-
-template<typename V, typename SrcCf>
-Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
+template<bool do_create, typename V, typename SrcCf>
+Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 {
   Int dim[maxdim];
   Int ndim;
@@ -316,53 +322,87 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
 
   VEC_TYPEDEFS(V)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
-    return irfft_create<Scalar<T>, SrcCf>(ndim, dim, mem);
+    return irfft_create_impl<do_create, Scalar<T>, SrcCf>(ndim, dim, mem);
 
   auto r = (Irfft<T>*) mem;
-  mem = (void*) align_size(Uint(mem) + sizeof(Irfft<T>));
+  mem = aligned_increment(mem, sizeof(Irfft<T>));
   
   if(ndim == 1)
   {
-     r->onedim_transform = onedim::irfft_create<V, SrcCf>(dim[0], mem);
-     r->src_idx_ratio = 0;
-     r->working0 = nullptr;
-     r->twiddle = nullptr;
-     r->outer_n = 0;
-     r->inner_n = 0;
-     r->im_off = 0;
-     r->multidim_transform = nullptr;
-     r->last_transform = nullptr;
-     r->real_pass = nullptr;
+    if(do_create)
+    {
+      r->onedim_transform = onedim::irfft_create<V, SrcCf>(dim[0], mem);
+      r->src_idx_ratio = 0;
+      r->working0 = nullptr;
+      r->twiddle = nullptr;
+      r->outer_n = 0;
+      r->inner_n = 0;
+      r->im_off = 0;
+      r->multidim_transform = nullptr;
+      r->last_transform = nullptr;
+      r->real_pass = nullptr;
+    }
+
+    mem = aligned_increment(mem, onedim::irfft_memsize<V, SrcCf>(dim[0]));
   }
   else
   {
-    r->src_idx_ratio = SrcCf::idx_ratio;
-    r->outer_n = dim[0];
-    r->inner_n = product(dim + 1, dim + ndim);
-    r->onedim_transform = nullptr;
-    r->im_off = rfft_im_off<T>(ndim, dim);
-    r->twiddle = (T*) mem;
-    mem = (void*) align_size(Uint(mem) + sizeof(T) * dim[0]);
-    r->working0 = (T*) mem;
-    mem = (void*) align_size(Uint(mem) + 2 * sizeof(T) * r->im_off);
+    if(do_create)
+    {
+      r->src_idx_ratio = SrcCf::idx_ratio;
+      r->outer_n = dim[0];
+      r->inner_n = product(dim + 1, dim + ndim);
+      r->onedim_transform = nullptr;
+      r->im_off = rfft_im_off<T>(ndim, dim);
+      r->twiddle = (T*) mem;
+    }
 
-    r->last_transform = multi::fft_create<
-      V, cf::Swapped<cf::Vec>, cf::Swapped<cf::Split>, false>(
-        r->outer_n / 2, r->inner_n, mem);
+    mem = aligned_increment(mem, sizeof(T) * dim[0]);
+    
+    if(do_create) r->working0 = (T*) mem;
+    mem = aligned_increment(mem, 2 * sizeof(T) * r->im_off);
 
-    mem = (void*) align_size(Uint(mem) + multi::fft_memsize<V>(dim[0] / 2));
-    r->multidim_transform = fft_create<
-      V, cf::Swapped<SrcCf>, cf::Swapped<cf::Vec>>(
-        ndim - 1, dim + 1, mem);
+    if(do_create)
+      r->last_transform = multi::fft_create<
+        V, cf::Swapped<cf::Vec>, cf::Swapped<cf::Split>, false>(
+          r->outer_n / 2, r->inner_n, mem);
 
-    r->real_pass = &multi::real_pass<V, cf::Vec, true>;
-  
-    Int m =  r->outer_n / 2;
-    compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    mem = aligned_increment(mem, multi::fft_memsize<V>(dim[0] / 2));
+
+    if(do_create)
+    {
+      r->multidim_transform = fft_create<
+        V, cf::Swapped<SrcCf>, cf::Swapped<cf::Vec>>(
+          ndim - 1, dim + 1, mem);
+
+      r->real_pass = &multi::real_pass<V, cf::Vec, true>;
+
+      Int m =  r->outer_n / 2;
+      compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    }
+
+    mem = aligned_increment( 
+      mem,
+      fft_memsize<V, cf::Swapped<SrcCf>, cf::Swapped<cf::Vec>>(
+        ndim - 1, dim + 1));
   }
-  
-  return r; 
+
+  return Int(mem); 
 }
+
+template<typename V, typename SrcCf>
+Int irfft_memsize(Int ndim_in, const Int* dim_in)
+{
+  return irfft_create_impl<false, V, SrcCf>(ndim_in, dim_in, nullptr);
+}
+
+template<typename V, typename SrcCf>
+Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
+{
+  irfft_create_impl<true, V, SrcCf>(ndim_in, dim_in, mem);
+  return (Irfft<typename V::T>*) mem;
+}
+
 
 template<typename T>
 void irfft(Irfft<T>* s, T* src, T* dst)
