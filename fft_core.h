@@ -67,7 +67,8 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
           s->transforms[i] = multi::fft_create<V, SrcCf, cf::Vec, true>(
             dim[i], m, mem);
 
-        mem = aligned_increment(mem, multi::fft_memsize<V>(dim[i]));
+        mem = aligned_increment(
+          mem, multi::fft_memsize<V, SrcCf, cf::Vec, true>(dim[i], m));
       }
       else
       {
@@ -75,7 +76,8 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
           s->transforms[i] = multi::fft_create<V, cf::Vec, cf::Vec, true>(
             dim[i], m, mem);
 
-        mem = aligned_increment(mem, multi::fft_memsize<V>(dim[i]));
+        mem = aligned_increment(
+          mem, multi::fft_memsize<V, cf::Vec, cf::Vec, true>(dim[i], m));
       }
     }
 
@@ -237,7 +239,9 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
       r->first_transform = multi::fft_create<V, cf::Split, cf::Vec, false>(
         r->outer_n / 2, r->inner_n, mem);
 
-    mem = aligned_increment(mem, multi::fft_memsize<V>(dim[0] / 2));
+    mem = aligned_increment(
+      mem, multi::fft_memsize<V, cf::Split, cf::Vec, false>(
+        r->outer_n / 2, r->inner_n));
 
     if(do_create)
     {
@@ -362,18 +366,23 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
     if(do_create) r->working0 = (T*) mem;
     mem = aligned_increment(mem, 2 * sizeof(T) * r->im_off);
 
+
+    using SwSrc = cf::Swapped<SrcCf>;
+    using SwVec = cf::Swapped<cf::Vec>;
+    using SwSplit = cf::Swapped<cf::Split>;
+
     if(do_create)
       r->last_transform = multi::fft_create<
-        V, cf::Swapped<cf::Vec>, cf::Swapped<cf::Split>, false>(
-          r->outer_n / 2, r->inner_n, mem);
+        V, SwVec, SwSplit, false>(r->outer_n / 2, r->inner_n, mem);
 
-    mem = aligned_increment(mem, multi::fft_memsize<V>(dim[0] / 2));
+    mem = aligned_increment(
+      mem, multi::fft_memsize<V, SwVec, SwSplit, false>(
+        r->outer_n / 2, r->inner_n));
 
     if(do_create)
     {
       r->multidim_transform = fft_create<
-        V, cf::Swapped<SrcCf>, cf::Swapped<cf::Vec>>(
-          ndim - 1, dim + 1, mem);
+        V, SwSrc, SwVec>(ndim - 1, dim + 1, mem);
 
       r->real_pass = &multi::real_pass<V, cf::Vec, true>;
 
@@ -382,9 +391,7 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
     }
 
     mem = aligned_increment( 
-      mem,
-      fft_memsize<V, cf::Swapped<SrcCf>, cf::Swapped<cf::Vec>>(
-        ndim - 1, dim + 1));
+      mem, fft_memsize<V, SwSrc, SwVec>(ndim - 1, dim + 1));
   }
 
   return Int(mem); 

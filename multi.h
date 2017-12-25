@@ -278,36 +278,51 @@ void fft(
       BrRows<V, DstCf>({s->n, dst, s->m, dst_stride, dst_off}));
 }
 
-template<typename V>
-Int fft_memsize(Int n)
+template<
+  bool do_create, typename V, typename SrcCf, typename DstCf, bool br_dst_rows>
+Int fft_create_impl(Int n, Int m, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  Int r = 0;
-  r = aligned_increment(r, sizeof(Fft<T>));
-  r = aligned_increment(r, 2 * n * sizeof(T));
-  r = aligned_increment(r, 2 * n * sizeof(T));
-  return r;
+  
+  auto r = (Fft<T>*) ptr;
+  ptr = aligned_increment(ptr, sizeof(Fft<T>));
+  
+  if(do_create)
+  {
+    r->n = n;
+    r->m = m;
+    r->working = (T*) ptr;
+  }
+  
+  ptr = aligned_increment(ptr, 2 * n * sizeof(T));
+  
+  if(do_create)
+  {
+    r->twiddle = (T*) ptr;
+
+    init_twiddle<Scalar<T>>(
+      [n](Int s, Int dft_size){ return 4 * dft_size <= n ? 2 : 1; },
+      n, r->working, r->twiddle, nullptr);
+  
+    r->fun_ptr = &fft<V, SrcCf, DstCf, br_dst_rows>;
+  }
+
+  ptr = aligned_increment(ptr, 2 * n * sizeof(T));
+
+  return Int(ptr);
+}
+
+template<typename V, typename SrcCf, typename DstCf, bool br_dst_rows>
+Int fft_memsize(Int n, Int m)
+{
+  return fft_create_impl<false, V, SrcCf, DstCf, br_dst_rows>(n, m, nullptr);
 }
 
 template<typename V, typename SrcCf, typename DstCf, bool br_dst_rows>
 Fft<typename V::T>* fft_create(Int n, Int m, void* ptr)
 {
-  VEC_TYPEDEFS(V);
-  auto r = (Fft<T>*) ptr;
-  ptr = aligned_increment(ptr, sizeof(Fft<T>));
-  r->n = n;
-  r->m = m;
-  r->working = (T*) ptr;
-  ptr = aligned_increment(ptr, 2 * n * sizeof(T));
-  r->twiddle = (T*) ptr;
-  ptr = aligned_increment(ptr, 2 * n * sizeof(T));
-  
-  init_twiddle<Scalar<T>>(
-    [n](Int s, Int dft_size){ return 4 * dft_size <= n ? 2 : 1; },
-    n, r->working, r->twiddle, nullptr);
-
-  r->fun_ptr = &fft<V, SrcCf, DstCf, br_dst_rows>;
-  return r;
+  fft_create_impl<true, V, SrcCf, DstCf, br_dst_rows>(n, m, ptr);
+  return (Fft<typename V::T>*) ptr;
 }
 
 // src and dst must not be the same
