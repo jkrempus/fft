@@ -1096,7 +1096,13 @@ void real_pass(
   Vec half = V::vec(0.5);
 
   typedef Scalar<T> S;
-  typedef Complex<S> SC; 
+  typedef Complex<S> SC;
+
+  //src and dst may be the same, so we need to store some values
+  //here before they get overwritten
+
+  T src_start_re = load<S, SrcCf>(src, src_off).re;
+  T src_mid_re = load<S, SrcCf>(src + n / 2 * src_ratio, src_off).re;
   SC middle = load<S, SrcCf>(src + n / 4 * src_ratio, src_off);
 
   for(
@@ -1107,8 +1113,6 @@ void real_pass(
     C w = load<V, cf::Split>(twiddle + iw, n / 2);
     C s0 = SrcCf::template unaligned_load<V>(src + i0 * src_ratio, src_off);
     C s1 = reverse_complex<V>(load<V, SrcCf>(src + i1 * src_ratio, src_off));
-
-    //printf("%f %f %f %f %f %f\n", s0.re, s0.im, s1.re, s1.im, w.re, w.im);
 
     C a, b;
 
@@ -1136,9 +1140,9 @@ void real_pass(
 
   if(inverse)
   {
-    T r0 = load<S, SrcCf>(src, src_off).re;
-    T r1 = load<S, SrcCf>(src + n / 2 * src_ratio, src_off).re;
-    DstCf::template store<0, S>({r0 + r1, r0 - r1}, dst, dst_off);
+    DstCf::template store<0, S>(
+      {src_start_re + src_mid_re, src_start_re - src_mid_re},
+      dst, dst_off);
   }
   else
   {
