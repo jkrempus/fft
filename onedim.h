@@ -1168,11 +1168,16 @@ Int rfft_create_impl(Int n, void* ptr)
   Rfft<T>* r = (Rfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Rfft<T>));
 
-  if(do_create)
-    r->working = SameType<DstCf, cf::Split>::value ? nullptr : (T*) ptr;
+  if(SameType<DstCf, cf::Split>::value)
+  {
+    if(do_create) r->working = nullptr;
+  }
+  else
+  {
+    if(do_create) r->working = (T*) ptr;
+    ptr = aligned_increment(ptr, sizeof(T) * n);
+  }
 
-  ptr = aligned_increment(ptr, sizeof(T) * n);
- 
   if(do_create) r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
  
