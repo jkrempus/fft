@@ -1101,8 +1101,8 @@ void real_pass(
   //src and dst may be the same, so we need to store some values
   //here before they get overwritten
 
-  T src_start_re = load<S, SrcCf>(src, src_off).re;
-  T src_mid_re = load<S, SrcCf>(src + n / 2 * src_ratio, src_off).re;
+  SC src_start = load<S, SrcCf>(src, src_off);
+  SC src_end = load<S, SrcCf>(src + n / 2 * src_ratio, src_off);
   SC middle = load<S, SrcCf>(src + n / 4 * src_ratio, src_off);
 
   for(
@@ -1141,15 +1141,14 @@ void real_pass(
   if(inverse)
   {
     DstCf::template store<0, S>(
-      {src_start_re + src_mid_re, src_start_re - src_mid_re},
+      {src_start.re + src_end.re, src_start.re - src_end.re},
       dst, dst_off);
   }
   else
   {
-    SC r0 = load<S, SrcCf>(src, src_off);
-    DstCf::template store<0, S>({r0.re + r0.im, 0}, dst, dst_off);
+    DstCf::template store<0, S>({src_start.re + src_start.im, 0}, dst, dst_off);
     DstCf::template store<0, S>(
-      {r0.re - r0.im, 0}, dst + n / 2 * dst_ratio, dst_off);
+      {src_start.re - src_start.im, 0}, dst + n / 2 * dst_ratio, dst_off);
   }
 }
 
@@ -1225,6 +1224,7 @@ void rfft(const Rfft<T>* state, T* src, T* dst)
   Int w_im_off = state->working ? n : dst_im_off;
 
   fft_impl(state->state, src, n, w, w_im_off);
+
   state->real_pass(
     n * 2,
     w, w_im_off, 
