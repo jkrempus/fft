@@ -24,7 +24,7 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 {
   Int dim[maxdim];
   Int ndim;
-  remove_ones(dim_in, ndim_in, dim, ndim);
+  remove_redundant_dimensions(dim_in, ndim_in, dim, ndim);
   Int num_elements = product(dim, ndim);
 
   VEC_TYPEDEFS(V);
@@ -190,7 +190,7 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 {
   Int dim[maxdim];
   Int ndim;
-  remove_ones(dim_in, ndim_in, dim, ndim);
+  remove_redundant_dimensions(dim_in, ndim_in, dim, ndim);
 
   VEC_TYPEDEFS(V)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
@@ -322,7 +322,7 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 {
   Int dim[maxdim];
   Int ndim;
-  remove_ones(dim_in, ndim_in, dim, ndim);
+  remove_redundant_dimensions(dim_in, ndim_in, dim, ndim);
 
   VEC_TYPEDEFS(V)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)

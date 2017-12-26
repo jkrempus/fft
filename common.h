@@ -70,7 +70,7 @@ Int log2(Int a)
   return r;
 }
 
-void remove_ones(
+void remove_redundant_dimensions(
   const Int* src, Int src_n, Int* dst, Int& dst_n)
 {
   dst_n = 0;
@@ -80,6 +80,12 @@ void remove_ones(
       dst[dst_n] = src[i];
       dst_n++;
     }
+
+  if(dst_n == 0)
+  {
+    dst[dst_n] = 1;
+    dst_n++;
+  }
 }
 
 #if WORD_SIZE == 64
