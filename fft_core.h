@@ -219,13 +219,16 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
   }
   else
   {
+    Int im_off = rfft_im_off<T>(ndim, dim);
+    Int inner_n = product(dim + 1, dim + ndim);
+    Int outer_n = dim[0];
     if(do_create)
     {
       r->dst_idx_ratio = DstCf::idx_ratio;
-      r->outer_n = dim[0];
-      r->inner_n = product(dim + 1, dim + ndim);
+      r->outer_n = outer_n;
+      r->inner_n = inner_n;
       r->onedim_transform = nullptr;
-      r->im_off = rfft_im_off<T>(ndim, dim);
+      r->im_off = im_off;
       r->twiddle = (T*) mem;
     }
 
@@ -233,15 +236,15 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 
     if(do_create) r->working0 = (T*) mem;
 
-    mem = aligned_increment(mem, 2 * sizeof(T) * r->im_off);
-    
+    mem = aligned_increment(mem, 2 * sizeof(T) * im_off);
+
     if(do_create)
       r->first_transform = multi::fft_create<V, cf::Split, cf::Vec, false>(
-        r->outer_n / 2, r->inner_n, mem);
+        outer_n / 2, inner_n, mem);
 
     mem = aligned_increment(
       mem, multi::fft_memsize<V, cf::Split, cf::Vec, false>(
-        r->outer_n / 2, r->inner_n));
+        outer_n / 2, inner_n));
 
     if(do_create)
     {
@@ -253,7 +256,7 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
       Int m =  r->outer_n / 2;
       compute_twiddle(m, m, r->twiddle, r->twiddle + m);
     }
-    
+
     mem = aligned_increment(
       mem, fft_memsize<V, cf::Vec, DstCf>(ndim - 1, dim + 1));
   }
@@ -351,20 +354,23 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
   }
   else
   {
+    Int im_off = rfft_im_off<T>(ndim, dim);
+    Int inner_n = product(dim + 1, dim + ndim);
+    Int outer_n = dim[0];
     if(do_create)
     {
       r->src_idx_ratio = SrcCf::idx_ratio;
-      r->outer_n = dim[0];
-      r->inner_n = product(dim + 1, dim + ndim);
+      r->outer_n = outer_n;
+      r->inner_n = inner_n;
       r->onedim_transform = nullptr;
-      r->im_off = rfft_im_off<T>(ndim, dim);
+      r->im_off = im_off;
       r->twiddle = (T*) mem;
     }
 
     mem = aligned_increment(mem, sizeof(T) * dim[0]);
     
     if(do_create) r->working0 = (T*) mem;
-    mem = aligned_increment(mem, 2 * sizeof(T) * r->im_off);
+    mem = aligned_increment(mem, 2 * sizeof(T) * im_off);
 
 
     using SwSrc = cf::Swapped<SrcCf>;
@@ -373,11 +379,11 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
 
     if(do_create)
       r->last_transform = multi::fft_create<
-        V, SwVec, SwSplit, false>(r->outer_n / 2, r->inner_n, mem);
+        V, SwVec, SwSplit, false>(outer_n / 2, inner_n, mem);
 
     mem = aligned_increment(
       mem, multi::fft_memsize<V, SwVec, SwSplit, false>(
-        r->outer_n / 2, r->inner_n));
+        outer_n / 2, inner_n));
 
     if(do_create)
     {
