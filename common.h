@@ -157,12 +157,6 @@ Int align_size(Int size)
   return (size + align_bytes / sizeof(T) - 1) & ~(align_bytes / sizeof(T) - 1);
 };
 
-template<typename V>
-Int tiny_twiddle_bytes()
-{
-  return sizeof(typename V::Vec) * 2 * tiny_log2(V::vec_size);
-}
-
 static Int aligned_increment(Int sz, Int bytes) { return align_size(sz + bytes); }
 
 template<typename T>
@@ -872,8 +866,7 @@ void init_twiddle(
   const NumPassesCallback& num_passes_callback,
   Int n,
   typename V::T* working,
-  typename V::T* dst,
-  typename V::T* tiny_dst)
+  typename V::T* dst)
 {
   VEC_TYPEDEFS(V);
   if(n <= 2) return;
@@ -890,18 +883,6 @@ void init_twiddle(
       end_re - size, end_im - size,
       size, size,
       end_re - 2 * size, end_im - 2 * size);
-
-  for(Int size = 2; size < V::vec_size; size *= 2)
-  {
-    auto re = tiny_dst + 2 * V::vec_size * tiny_log2(size);
-    auto im = re + V::vec_size;
-
-    for(Int j = 0; j < V::vec_size; j++)
-    {
-      re[j] = (end_re - 2 * size)[j & (size - 1)];
-      im[j] = (end_im - 2 * size)[j & (size - 1)];
-    }
-  }
 
   for(Int si = 0, di = 0; si < n;
     si += stride<V, cf::Split>(), di += stride<V, cf::Vec>())

@@ -15,7 +15,6 @@ struct Arg
   Int end_offset;
   T* src;
   T* twiddle;
-  T* tiny_twiddle;
   T* dst;
 };
 
@@ -36,7 +35,6 @@ struct Fft
   Int im_off;
   T* working;
   T* twiddle;
-  T* tiny_twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
   typedef void (*tiny_transform_fun_type)(
@@ -936,16 +934,13 @@ Int fft_create_impl(Int n, void* ptr)
   if(do_create) state->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
 
-  if(do_create) state->tiny_twiddle = (T*) ptr;
-  ptr = aligned_increment(ptr, tiny_twiddle_bytes<V>());
-
   if(do_create)
   {
     init_steps<V, SrcCf, DstCf>(*state);
 
     if(!state->tiny_transform_fun)
       init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
-        n, state->working, state->twiddle, state->tiny_twiddle);
+        n, state->working, state->twiddle);
   }
 
   return Int(ptr);
@@ -993,7 +988,6 @@ NOINLINE void recursive_passes(
   arg.src = p;
   arg.dst = nullptr;
   arg.twiddle = state->twiddle;
-  arg.tiny_twiddle = nullptr;
   
   state->steps[step].fun_ptr(arg);
 
@@ -1030,7 +1024,6 @@ FORCEINLINE void fft_impl(
   arg.end_offset = state->n;
   arg.src = src;
   arg.twiddle = state->twiddle;
-  arg.tiny_twiddle = state->tiny_twiddle;
 
   auto w0 = state->working;
  

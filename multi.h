@@ -302,7 +302,7 @@ Int fft_create_impl(Int n, Int m, void* ptr)
 
     init_twiddle<Scalar<T>>(
       [n](Int s, Int dft_size){ return 4 * dft_size <= n ? 2 : 1; },
-      n, r->working, r->twiddle, nullptr);
+      n, r->working, r->twiddle);
   
     r->fun_ptr = &fft<V, SrcCf, DstCf, br_dst_rows>;
   }
