@@ -871,8 +871,9 @@ void init_twiddle(
   VEC_TYPEDEFS(V);
   if(n <= 2) return;
 
-  auto end_re = dst + n;
-  auto end_im = dst + 2 * n;
+  auto end_re = working + n;
+  auto end_im = working + 2 * n;
+
   end_re[-1] = T(0);
   end_im[-1] = T(0);
   end_re[-2] = T(1);
@@ -884,74 +885,59 @@ void init_twiddle(
       size, size,
       end_re - 2 * size, end_im - 2 * size);
 
-  for(Int si = 0, di = 0; si < n;
-    si += stride<V, cf::Split>(), di += stride<V, cf::Vec>())
-  {
-    cf::Vec::store(load<V, cf::Split>(dst + si, n), working + di, 0);
-  }
+  using DstCf = cf::Vec;
+  Int dst_idx_ratio = DstCf::idx_ratio;
+  Int dst_stride = stride<V, DstCf>();
 
-  copy(working, 2 * n, dst);
-
-  // It's all in Vec format after this point
-  typedef cf::Vec CF;
-  
   for(Int dft_size = 1, s = 0; dft_size < n; s++)
   {
     Int npasses = num_passes_callback(s, dft_size);
 
-		if(npasses == 5 && dft_size == 1)
-		{
-			Int ds = dft_size << 3;
-			auto src_row0 = working + (n - 4 * ds) * CF::idx_ratio;
-			auto dst_row0 = dst + (n - 4 * ds) * CF::idx_ratio;
-			for(Int i = 0; i < ds * CF::idx_ratio; i += stride<V, CF>())
-				store_two_pass_twiddle<V>(load<V, CF>(src_row0 + i, 0), dst_row0 + 3 * i);
-		}
-    else if(npasses == 3 && dft_size >= V::vec_size)
+		if(npasses == 3 && dft_size >= V::vec_size)
     {
-      auto src_row0 = working + (n - 4 * dft_size) * CF::idx_ratio;
-      auto src_row1 = working + (n - 8 * dft_size) * CF::idx_ratio;
-      auto dst_row1 = dst + (n - 8 * dft_size) * CF::idx_ratio;
+      auto src_row0 = working + (n - 4 * dft_size);
+      auto src_row1 = working + (n - 8 * dft_size);
+      auto dst_row1 = dst + (n - 8 * dft_size) * dst_idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
       BitReversed br(vdft_size);
       for(; br.i < vdft_size; br.advance())
       {
         store_two_pass_twiddle<V>(
-          load<V, CF>(src_row0 + br.i * stride<V, CF>(), 0),
-          dst_row1 + 5 * br.br * stride<V, CF>());
+          load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+          dst_row1 + 5 * br.br * dst_stride);
 
-        CF::store(
-          load<V, CF>(src_row1 + br.i * stride<V, CF>(), 0),
-          dst_row1 + 5 * br.br * stride<V, CF>() + 3 * stride<V, CF>(), 0);
-        
-        CF::store(
-          load<V, CF>(src_row1 + br.i * stride<V, CF>() + dft_size * CF::idx_ratio, 0),
-          dst_row1 + 5 * br.br * stride<V, CF>() + 4 * stride<V, CF>(), 0);
+        DstCf::store(
+          load<V, cf::Split>(src_row1 + br.i * V::vec_size, n),
+          dst_row1 + 5 * br.br * dst_stride + 3 * dst_stride, 0);
+
+        DstCf::store(
+          load<V, cf::Split>(src_row1 + br.i * V::vec_size + dft_size, n),
+          dst_row1 + 5 * br.br * dst_stride + 4 * dst_stride, 0);
       }
     }
     else if(npasses == 2 && dft_size >= V::vec_size)
     {
-      auto src_row0 = working + (n - 4 * dft_size) * CF::idx_ratio;
-      auto dst_row0 = dst + (n - 4 * dft_size) * CF::idx_ratio;
+      auto src_row0 = working + (n - 4 * dft_size);
+      auto dst_row0 = dst + (n - 4 * dft_size) * dst_idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
       BitReversed br(vdft_size);
       for(; br.i < vdft_size; br.advance())
       {
         store_two_pass_twiddle<V>(
-          load<V, CF>(src_row0 + br.i * stride<V, CF>(), 0),
-          dst_row0 + 3 * br.br * stride<V, CF>());
+          load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+          dst_row0 + 3 * br.br * dst_stride);
       }
     }
     else if(npasses == 1 && dft_size >= V::vec_size)
     {
-      auto src_row0 = working + (n - 2 * dft_size) * CF::idx_ratio;
-      auto dst_row0 = dst + (n - 2 * dft_size) * CF::idx_ratio;
+      auto src_row0 = working + (n - 2 * dft_size);
+      auto dst_row0 = dst + (n - 2 * dft_size) * dst_idx_ratio;
       Int vdft_size = dft_size / V::vec_size;
       BitReversed br(vdft_size);
       for(; br.i < vdft_size; br.advance())
-        CF::store(
-          load<V, CF>(src_row0 + br.i * stride<V, CF>(), 0),
-          dst_row0 + br.br * stride<V, CF>(),
+        DstCf::store(
+          load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+          dst_row0 + br.br * dst_stride,
           0);
     }
 
