@@ -880,6 +880,20 @@ void compute_twiddle_range(Int n, T* dst_re, T* dst_im)
 }
 
 template<typename V>
+Int twiddle_for_step_memsize(Int dft_size, Int npasses)
+{
+  VEC_TYPEDEFS(V);
+
+  if(dft_size < V::vec_size || npasses < 1 || npasses > 3) return 0;
+
+  Int m = 
+    npasses == 1 ? 1 : 
+    npasses == 2 ? 3 : 5;
+
+  return sizeof(T) * dft_size * m * cf::Vec::idx_ratio;
+}
+
+template<typename V>
 void twiddle_for_step_create(
   const typename V::T* twiddle_range,
   Int twiddle_range_n,
@@ -889,13 +903,17 @@ void twiddle_for_step_create(
 {
   VEC_TYPEDEFS(V);
 
+  if(dft_size < V::vec_size || npasses < 1 || npasses > 3) return;
+
   Int n = twiddle_range_n;
+
   ASSERT(n >= (dft_size << npasses));
+
   using DstCf = cf::Vec;
   Int dst_idx_ratio = DstCf::idx_ratio;
   Int dst_stride = stride<V, DstCf>();
 
-  if(npasses == 3 && dft_size >= V::vec_size)
+  if(npasses == 3)
   {
     auto src_row0 = twiddle_range + (n - 4 * dft_size);
     auto src_row1 = twiddle_range + (n - 8 * dft_size);
@@ -916,7 +934,7 @@ void twiddle_for_step_create(
         dst + 5 * br.br * dst_stride + 4 * dst_stride, 0);
     }
   }
-  else if(npasses == 2 && dft_size >= V::vec_size)
+  else if(npasses == 2)
   {
     auto src_row0 = twiddle_range + (n - 4 * dft_size);
     Int vdft_size = dft_size / V::vec_size;
@@ -928,7 +946,7 @@ void twiddle_for_step_create(
         dst + 3 * br.br * dst_stride);
     }
   }
-  else if(npasses == 1 && dft_size >= V::vec_size)
+  else if(npasses == 1)
   {
     auto src_row0 = twiddle_range + (n - 2 * dft_size);
     Int vdft_size = dft_size / V::vec_size;
@@ -956,9 +974,10 @@ void init_twiddle(
   for(Int dft_size = 1, s = 0; dft_size < n; s++)
   {
     Int npasses = num_passes_callback(s, dft_size);
-    
+
     auto dst_row = dst + (n - (dft_size << npasses)) * cf::Vec::idx_ratio;
     twiddle_for_step_create<V>(working, n, dft_size, npasses, dst_row);
+
     dft_size <<= npasses;
   }
 }
