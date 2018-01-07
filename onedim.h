@@ -1182,10 +1182,10 @@ Int rfft_create_impl(Int n, void* ptr)
     r->real_pass = &real_pass<V, cf::Split, DstCf, false>;
 
     Int m =  n / 2;
-    compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    compute_twiddle(m, r->twiddle, r->twiddle + m);
     copy(r->twiddle + 1, m - 1, r->twiddle);
     copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
-  
+
     r->state = fft_create<V, cf::Scal, cf::Split>(n / 2, ptr);
   }
 
@@ -1251,7 +1251,7 @@ Int irfft_create_impl(Int n, void* ptr)
     r->real_pass = &real_pass<V, SrcCf, cf::Split, true>;
 
     Int m =  n / 2;
-    compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+    compute_twiddle(m, r->twiddle, r->twiddle + m);
     copy(r->twiddle + 1, m - 1, r->twiddle);
     copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
 

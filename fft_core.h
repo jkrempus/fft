@@ -254,7 +254,7 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
       r->real_pass = &multi::real_pass<V, cf::Vec, false>;
   
       Int m =  r->outer_n / 2;
-      compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+      compute_twiddle(m, r->twiddle, r->twiddle + m);
     }
 
     mem = aligned_increment(
@@ -393,7 +393,7 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
       r->real_pass = &multi::real_pass<V, cf::Vec, true>;
 
       Int m =  r->outer_n / 2;
-      compute_twiddle(m, m, r->twiddle, r->twiddle + m);
+      compute_twiddle(m, r->twiddle, r->twiddle + m);
     }
 
     mem = aligned_increment( 

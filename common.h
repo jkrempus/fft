@@ -846,36 +846,25 @@ void compute_twiddle_step(
 }
 
 template<typename T>
-void compute_twiddle(
-  Int full_dst_size, Int dst_size,
-  T* dst_re, T* dst_im)
+void compute_twiddle(Int n, T* dst_re, T* dst_im)
 {
-  auto end_re = dst_re + dst_size;
-  auto end_im = dst_im + dst_size;
+  auto end_re = dst_re + n;
+  auto end_im = dst_im + n;
   end_re[-1] = T(1); 
   end_im[-1] = T(0); 
 
-  Int ratio = full_dst_size / dst_size;
-  for(Int size = 2; size <= dst_size; size *= 2)
+  for(Int size = 2; size <= n; size *= 2)
     compute_twiddle_step(
       end_re - size / 2, end_im - size / 2,
-      size * ratio,
-      size,
+      size, size,
       end_re - size, end_im - size);
 }
 
-template<typename V, typename NumPassesCallback>
-void init_twiddle(
-  const NumPassesCallback& num_passes_callback,
-  Int n,
-  typename V::T* working,
-  typename V::T* dst)
+template<typename T>
+void compute_twiddle_range(Int n, T* dst_re, T* dst_im)
 {
-  VEC_TYPEDEFS(V);
-  if(n <= 2) return;
-
-  auto end_re = working + n;
-  auto end_im = working + 2 * n;
+  auto end_re = dst_re + n;
+  auto end_im = dst_im + n;
 
   end_re[-1] = T(0);
   end_im[-1] = T(0);
@@ -888,62 +877,88 @@ void init_twiddle(
       size, size,
       end_re - 2 * size, end_im - 2 * size);
 
+}
+
+template<typename V>
+void twiddle_for_step_create(
+  const typename V::T* twiddle_range,
+  Int twiddle_range_n,
+  Int dft_size,
+  Int npasses,
+  typename V::T* dst)
+{
+  VEC_TYPEDEFS(V);
+
+  Int n = twiddle_range_n;
+  ASSERT(n >= (dft_size << npasses));
   using DstCf = cf::Vec;
   Int dst_idx_ratio = DstCf::idx_ratio;
   Int dst_stride = stride<V, DstCf>();
 
+  if(npasses == 3 && dft_size >= V::vec_size)
+  {
+    auto src_row0 = twiddle_range + (n - 4 * dft_size);
+    auto src_row1 = twiddle_range + (n - 8 * dft_size);
+    Int vdft_size = dft_size / V::vec_size;
+    BitReversed br(vdft_size);
+    for(; br.i < vdft_size; br.advance())
+    {
+      store_two_pass_twiddle<V>(
+        load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+        dst + 5 * br.br * dst_stride);
+
+      DstCf::store(
+        load<V, cf::Split>(src_row1 + br.i * V::vec_size, n),
+        dst + 5 * br.br * dst_stride + 3 * dst_stride, 0);
+
+      DstCf::store(
+        load<V, cf::Split>(src_row1 + br.i * V::vec_size + dft_size, n),
+        dst + 5 * br.br * dst_stride + 4 * dst_stride, 0);
+    }
+  }
+  else if(npasses == 2 && dft_size >= V::vec_size)
+  {
+    auto src_row0 = twiddle_range + (n - 4 * dft_size);
+    Int vdft_size = dft_size / V::vec_size;
+    BitReversed br(vdft_size);
+    for(; br.i < vdft_size; br.advance())
+    {
+      store_two_pass_twiddle<V>(
+        load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+        dst + 3 * br.br * dst_stride);
+    }
+  }
+  else if(npasses == 1 && dft_size >= V::vec_size)
+  {
+    auto src_row0 = twiddle_range + (n - 2 * dft_size);
+    Int vdft_size = dft_size / V::vec_size;
+    BitReversed br(vdft_size);
+    for(; br.i < vdft_size; br.advance())
+      DstCf::store(
+        load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+        dst + br.br * dst_stride,
+        0);
+  }
+}
+
+template<typename V, typename NumPassesCallback>
+void init_twiddle(
+  const NumPassesCallback& num_passes_callback,
+  Int n,
+  typename V::T* working,
+  typename V::T* dst)
+{
+  VEC_TYPEDEFS(V);
+  if(n <= 2) return;
+
+  compute_twiddle_range(n, working, working + n);
+
   for(Int dft_size = 1, s = 0; dft_size < n; s++)
   {
     Int npasses = num_passes_callback(s, dft_size);
-
-		if(npasses == 3 && dft_size >= V::vec_size)
-    {
-      auto src_row0 = working + (n - 4 * dft_size);
-      auto src_row1 = working + (n - 8 * dft_size);
-      auto dst_row1 = dst + (n - 8 * dft_size) * dst_idx_ratio;
-      Int vdft_size = dft_size / V::vec_size;
-      BitReversed br(vdft_size);
-      for(; br.i < vdft_size; br.advance())
-      {
-        store_two_pass_twiddle<V>(
-          load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
-          dst_row1 + 5 * br.br * dst_stride);
-
-        DstCf::store(
-          load<V, cf::Split>(src_row1 + br.i * V::vec_size, n),
-          dst_row1 + 5 * br.br * dst_stride + 3 * dst_stride, 0);
-
-        DstCf::store(
-          load<V, cf::Split>(src_row1 + br.i * V::vec_size + dft_size, n),
-          dst_row1 + 5 * br.br * dst_stride + 4 * dst_stride, 0);
-      }
-    }
-    else if(npasses == 2 && dft_size >= V::vec_size)
-    {
-      auto src_row0 = working + (n - 4 * dft_size);
-      auto dst_row0 = dst + (n - 4 * dft_size) * dst_idx_ratio;
-      Int vdft_size = dft_size / V::vec_size;
-      BitReversed br(vdft_size);
-      for(; br.i < vdft_size; br.advance())
-      {
-        store_two_pass_twiddle<V>(
-          load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
-          dst_row0 + 3 * br.br * dst_stride);
-      }
-    }
-    else if(npasses == 1 && dft_size >= V::vec_size)
-    {
-      auto src_row0 = working + (n - 2 * dft_size);
-      auto dst_row0 = dst + (n - 2 * dft_size) * dst_idx_ratio;
-      Int vdft_size = dft_size / V::vec_size;
-      BitReversed br(vdft_size);
-      for(; br.i < vdft_size; br.advance())
-        DstCf::store(
-          load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
-          dst_row0 + br.br * dst_stride,
-          0);
-    }
-
+    
+    auto dst_row = dst + (n - (dft_size << npasses)) * cf::Vec::idx_ratio;
+    twiddle_for_step_create<V>(working, n, dft_size, npasses, dst_row);
     dft_size <<= npasses;
   }
 }
