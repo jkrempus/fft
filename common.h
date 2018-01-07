@@ -200,7 +200,7 @@ namespace complex_format
     static const Int idx_ratio = 1;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
     {
       return {
         V::template load<flags>(ptr),
@@ -208,7 +208,8 @@ namespace complex_format
     }
 
     template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> unaligned_load(
+      const typename V::T* ptr, Int off)
     {
       return {
         V::unaligned_load(ptr),
@@ -236,7 +237,7 @@ namespace complex_format
     static const Int idx_ratio = 2;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
     {
       return {
         V::template load<flags>(ptr),
@@ -244,7 +245,8 @@ namespace complex_format
     }
 
     template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> unaligned_load(
+      const typename V::T* ptr, Int off)
     {
       return {V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
     }
@@ -270,7 +272,7 @@ namespace complex_format
     static const Int idx_ratio = 2;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
     {
       Complex<V> r;
       V::deinterleave(
@@ -282,7 +284,8 @@ namespace complex_format
     }
 
     template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> unaligned_load(
+      const typename V::T* ptr, Int off)
     {
       Complex<V> r;
       V::deinterleave(
@@ -316,14 +319,14 @@ namespace complex_format
     static const Int idx_ratio = InputCf::idx_ratio;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
     {
       auto a = InputCf::template load<V, flags>(ptr, off);
       return {a.im, a.re};
     }
 
     template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(typename V::T* ptr, Int off)
+    static FORCEINLINE Complex<V> unaligned_load(const typename V::T* ptr, Int off)
     {
       auto a = InputCf::template unaligned_load<V>(ptr, off);
       return {a.im, a.re};
@@ -345,7 +348,7 @@ namespace complex_format
 }
 
 template<typename V, typename Cf, Uint flags = 0>
-FORCEINLINE Complex<V> load(typename V::T* ptr, Int off)
+FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
 {
   return Cf::template load<V, flags>(ptr, off);
 }
