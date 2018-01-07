@@ -25,6 +25,7 @@ struct Step
   short npasses;
   bool is_recursive;
   pass_fun fun_ptr;
+  T* twiddle;
 };
 
 
@@ -34,7 +35,6 @@ struct Fft
   Int n;
   Int im_off;
   T* working;
-  T* twiddle;
   Step<T> steps[8 * sizeof(Int)];
   Int nsteps;
   typedef void (*tiny_transform_fun_type)(
@@ -235,7 +235,7 @@ void two_passes(const Arg<typename V::T>& arg)
   auto start = arg.start_offset * cf::Vec::idx_ratio;
   auto end = arg.end_offset * cf::Vec::idx_ratio;
 
-  auto tw = arg.twiddle + cf::Vec::idx_ratio * (n - 4 * dft_size);
+  auto tw = arg.twiddle;
   if(start != 0)
     tw += 3 * stride<V, cf::Vec>() * (start >> log2(off1 + off3));
 
@@ -823,6 +823,7 @@ void init_steps(Fft<typename V::T>& state)
   for(Int dft_size = 1; dft_size < state.n; step_index++)
   {
     Step<T> step;
+    step.twiddle = nullptr;
     step.is_recursive = false;
 
 		if(dft_size == 1 && V::vec_size == 8)
@@ -922,25 +923,37 @@ Int fft_create_impl(Int n, void* ptr)
   if(n <= V::vec_size && V::vec_size != 1)
     return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(n, ptr);
 
-  auto state = (Fft<T>*) ptr;
-  if(do_create) state->n = n;
-  if(do_create) state->im_off = n;
+  Fft<T> local_state;
+  auto state = do_create ? (Fft<T>*) ptr : &local_state;
+  state->n = n;
+  state->im_off = n;
 
   ptr = aligned_increment(ptr, sizeof(Fft<T>));
 
-  if(do_create) state->working = (T*) ptr;
+  state->working = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
 
-  if(do_create) state->twiddle = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
+  init_steps<V, SrcCf, DstCf>(*state);
 
-  if(do_create)
+  if(!state->tiny_transform_fun)
   {
-    init_steps<V, SrcCf, DstCf>(*state);
+    if(do_create)
+      compute_twiddle_range(n, state->working, state->working + n);
 
-    if(!state->tiny_transform_fun)
-      init_twiddle<V>([state](Int s, Int){ return state->steps[s].npasses; },
-        n, state->working, state->twiddle);
+    Int dft_size = 1;
+    for(Int i = 0; i < state->nsteps; i++)
+    {
+      T* tw = (T*) ptr;
+      state->steps[i].twiddle = tw;
+      Int npasses = state->steps[i].npasses;
+      ptr = aligned_increment(
+        ptr, twiddle_for_step_memsize<V>(dft_size, npasses));
+
+      if(do_create)
+        twiddle_for_step_create<V>(state->working, n, dft_size, npasses, tw);
+
+      dft_size <<= npasses;
+    }
   }
 
   return Int(ptr);
@@ -987,7 +1000,7 @@ NOINLINE void recursive_passes(
   arg.end_offset = end;
   arg.src = p;
   arg.dst = nullptr;
-  arg.twiddle = state->twiddle;
+  arg.twiddle = state->steps[step].twiddle;
   
   state->steps[step].fun_ptr(arg);
 
@@ -1023,7 +1036,6 @@ FORCEINLINE void fft_impl(
   arg.start_offset = 0;
   arg.end_offset = state->n;
   arg.src = src;
-  arg.twiddle = state->twiddle;
 
   auto w0 = state->working;
  
@@ -1043,6 +1055,7 @@ FORCEINLINE void fft_impl(
     }
     else
     {
+      arg.twiddle = state->steps[step].twiddle;
       state->steps[step].fun_ptr(arg);
       arg.dft_size <<= state->steps[step].npasses;
       step++;
@@ -1051,6 +1064,7 @@ FORCEINLINE void fft_impl(
 
   arg.dst = dst;
   arg.im_off = dst_im_off;
+  arg.twiddle = state->steps[state->nsteps - 1].twiddle;
   state->steps[state->nsteps - 1].fun_ptr(arg);
 }
 
