@@ -119,7 +119,7 @@ void two_passes(
 
   Int stride = end - start;
   ASSERT(stride * dft_size == n);
-  auto tw = twiddle + 2 * (n - 4 * dft_size) + 6 * (start >> log2(stride));
+  auto tw = twiddle + 6 * (start >> log2(stride));
 
   C tw0 = {V::vec(tw[0]), V::vec(tw[1])}; 
   C tw1 = {V::vec(tw[2]), V::vec(tw[3])}; 
@@ -161,7 +161,7 @@ struct Fft
   Int n;
   Int m;
   T* working;
-  T* twiddle;
+  T* twiddle[8 * sizeof(Int) / 2];
   void (*fun_ptr)(
     const Fft<T>* state,
     T* src,
@@ -212,43 +212,42 @@ void fft_recurse(
   Int start,
   Int end,
   Int dft_size,
-  typename Rows::V::T* twiddle,
+  typename Rows::V::T* const * twiddle,
   const Rows& rows)
 {
   if(4 * dft_size <= n)
   {
-    two_passes(n, dft_size, start, end, twiddle, rows);
+    two_passes(n, dft_size, start, end, *twiddle, rows);
 
     Int l = (end - start) / 4;
     if(4 * dft_size < n)
       for(Int i = start; i < end; i += l)
-        fft_recurse(n, i, i + l, dft_size * 4, twiddle, rows);
+        fft_recurse(n, i, i + l, dft_size * 4, twiddle + 1, rows);
   }
   else
-    last_pass(n, start, end, twiddle, rows);
+    last_pass(n, start, end, *twiddle, rows);
 }
 
 // The result is bit reversed
 template<typename SrcRows, typename DstRows>
 void fft_impl(
   Int n,
-  typename SrcRows::V::T* twiddle,
+  typename SrcRows::V::T* const * twiddle,
   const SrcRows& src,
   const DstRows& dst)
 {
   if(n == 1)
     complex_copy<typename SrcRows::V, typename SrcRows::Cf, typename DstRows::Cf>(
       src.row(0), src.im_off, src.m, dst.row(0), dst.im_off);
+  else if(n == 2)
+    first_pass(n, src, dst);
   else
   {
-    if(n == 2)
-      first_pass(n, src, dst);
-    else
-      first_two_passes(n, src, dst);
+    first_two_passes(n, src, dst);
 
     if(n > 4) 
       for(Int i = 0; i < n; i += n / 4)
-        fft_recurse(n, i, i + n / 4, 4, twiddle, dst);
+        fft_recurse(n, i, i + n / 4, 4, twiddle + 1, dst);
   }
 }
 
@@ -283,29 +282,36 @@ template<
 Int fft_create_impl(Int n, Int m, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  
-  auto r = (Fft<T>*) ptr;
+ 
+  Fft<T> local_fft;
+  auto r = do_create ? (Fft<T>*) ptr : &local_fft;
   ptr = aligned_increment(ptr, sizeof(Fft<T>));
   
-  if(do_create)
-  {
-    r->n = n;
-    r->m = m;
-    r->working = (T*) ptr;
-  }
-  
-  ptr = aligned_increment(ptr, 2 * n * sizeof(T));
-  
-  if(do_create)
-  {
-    r->twiddle = (T*) ptr;
+  r->n = n;
+  r->m = m;
 
-    init_twiddle<Scalar<T>>(
-      [n](Int s, Int dft_size){ return 4 * dft_size <= n ? 2 : 1; },
-      n, r->working, r->twiddle);
-  
-    r->fun_ptr = &fft<V, SrcCf, DstCf, br_dst_rows>;
+  r->working = (T*) ptr;
+  ptr = aligned_increment(ptr, 2 * n * sizeof(T));
+
+  if(do_create) compute_twiddle_range(n, r->working, r->working + n);
+
+  for(Int dft_size = 1, i = 0; dft_size < n; i++)
+  {
+    Int npasses = 4 * dft_size <= n ? 2 : 1;
+
+    using S = Scalar<T>;
+    T* tw = (T*) ptr;
+    r->twiddle[i] = tw;
+    ptr = aligned_increment(
+      ptr, twiddle_for_step_memsize<S>(dft_size, npasses));
+
+    if(do_create)
+      twiddle_for_step_create<S>(r->working, n, dft_size, npasses, tw);
+
+    dft_size <<= npasses;
   }
+
+  r->fun_ptr = &fft<V, SrcCf, DstCf, br_dst_rows>;
 
   ptr = aligned_increment(ptr, 2 * n * sizeof(T));
 

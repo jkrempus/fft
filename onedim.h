@@ -35,7 +35,7 @@ struct Fft
   Int n;
   Int im_off;
   T* working;
-  Step<T> steps[8 * sizeof(Int)];
+  Step<T> steps[8 * sizeof(Int) / 2];
   Int nsteps;
   typedef void (*tiny_transform_fun_type)(
     T* src, Int src_im_off, T* dst, Int dst_im_off);

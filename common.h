@@ -959,29 +959,6 @@ void twiddle_for_step_create(
   }
 }
 
-template<typename V, typename NumPassesCallback>
-void init_twiddle(
-  const NumPassesCallback& num_passes_callback,
-  Int n,
-  typename V::T* working,
-  typename V::T* dst)
-{
-  VEC_TYPEDEFS(V);
-  if(n <= 2) return;
-
-  compute_twiddle_range(n, working, working + n);
-
-  for(Int dft_size = 1, s = 0; dft_size < n; s++)
-  {
-    Int npasses = num_passes_callback(s, dft_size);
-
-    auto dst_row = dst + (n - (dft_size << npasses)) * cf::Vec::idx_ratio;
-    twiddle_for_step_create<V>(working, n, dft_size, npasses, dst_row);
-
-    dft_size <<= npasses;
-  }
-}
-
 Int product(const Int* b, const Int* e)
 {
   Int r = 1;
