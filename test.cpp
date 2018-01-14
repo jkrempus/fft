@@ -9,19 +9,27 @@
 #include <cstdio>
 #include <cstdarg>
 #include <iostream>
-#include <sys/time.h>
 #include <fstream>
 #include <unistd.h>
 #include <random>
 #include <cstdint>
 #include <unordered_set>
 #include <sstream>
+#include <chrono>
 
 #ifdef HAVE_FFTW
 #include "fftw3.h"
 #endif
 
 //#define INTERLEAVED 1;
+
+using std::chrono::high_resolution_clock;
+
+template<typename Rep, typename Period>
+double to_seconds(const std::chrono::duration<Rep, Period>& d)
+{
+  return std::chrono::duration<double>(d).count();
+}
 
 template<typename T> T sq(T a){ return a * a; }
 
@@ -53,13 +61,6 @@ struct IterateMultidim
 };
 
 extern "C" void* valloc(size_t);
-
-double get_time()
-{
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return tv.tv_sec + tv.tv_usec * 1e-6;
-}
 
 template<typename T_>
 void dump(T_* ptr, Int n, const char* name, ...)
@@ -834,7 +835,7 @@ TestResult bench(const std::vector<Int>& size, double requested_operations)
   auto iter = std::max<uint64_t>(requested_operations / (const_part * n * log2(n)), 1);
   auto operations = iter * (const_part * n * log2(n));
 
-  double t0 = get_time();
+  auto t0 = high_resolution_clock::now();
   for(int64_t i = 0; i < iter; i++)
   {
     fft.transform();
@@ -842,12 +843,12 @@ TestResult bench(const std::vector<Int>& size, double requested_operations)
     //if(j * (iter / 10) == i) { printf("%d ", j); fflush(stdout); }
   }
 
-  double t1 = get_time(); 
+  auto t1 = high_resolution_clock::now(); 
 
   TestResult r;
-  r.flops = operations / (t1 - t0);
+  r.flops = operations / to_seconds(t1 - t0);
   r.element_iterations = iter * uint64_t(n);
-  r.time_per_element = (t1 - t0) / iter / n;
+  r.time_per_element = to_seconds(t1 - t0) / iter / n;
   return r;
 }
 
