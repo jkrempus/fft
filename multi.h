@@ -293,7 +293,7 @@ Int fft_create_impl(Int n, Int m, void* ptr)
   r->working = (T*) ptr;
   ptr = aligned_increment(ptr, 2 * n * sizeof(T));
 
-  if(do_create) compute_twiddle_range(n, r->working, r->working + n);
+  if(do_create) compute_twiddle_range<V>(n, r->working, r->working + n);
 
   for(Int dft_size = 1, i = 0; dft_size < n; i++)
   {

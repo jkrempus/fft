@@ -938,7 +938,7 @@ Int fft_create_impl(Int n, void* ptr)
   if(!state->tiny_transform_fun)
   {
     if(do_create)
-      compute_twiddle_range(n, state->working, state->working + n);
+      compute_twiddle_range<V>(n, state->working, state->working + n);
 
     Int dft_size = 1;
     for(Int i = 0; i < state->nsteps; i++)
@@ -1196,7 +1196,7 @@ Int rfft_create_impl(Int n, void* ptr)
     r->real_pass = &real_pass<V, cf::Split, DstCf, false>;
 
     Int m =  n / 2;
-    compute_twiddle(m, r->twiddle, r->twiddle + m);
+    compute_twiddle<V>(m, r->twiddle, r->twiddle + m);
     copy(r->twiddle + 1, m - 1, r->twiddle);
     copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
 
@@ -1265,7 +1265,7 @@ Int irfft_create_impl(Int n, void* ptr)
     r->real_pass = &real_pass<V, SrcCf, cf::Split, true>;
 
     Int m =  n / 2;
-    compute_twiddle(m, r->twiddle, r->twiddle + m);
+    compute_twiddle<V>(m, r->twiddle, r->twiddle + m);
     copy(r->twiddle + 1, m - 1, r->twiddle);
     copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
 

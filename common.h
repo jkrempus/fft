@@ -823,46 +823,65 @@ void swap(T& a, T& b)
   b = tmpa;
 }
 
-template<typename T>
+template<typename V>
 void compute_twiddle_step(
-  T* src_re, T* src_im,
+  typename V::T* src_re, typename V::T* src_im,
   Int full_dst_size,
   Int dst_size,
-  T* dst_re, T* dst_im)
+  typename V::T* dst_re, typename V::T* dst_im)
 {
-  Int table_index = log2(full_dst_size);
-  auto c = SinCosTable<T>::cos[table_index];
-  auto s = SinCosTable<T>::sin[table_index];
+  VEC_TYPEDEFS(V);
 
-  for(Int j = 0; j < dst_size / 2; j++)
+  if(V::vec_size != 1 && dst_size / 2 < V::vec_size)
+    compute_twiddle_step<Scalar<T>>(
+      src_re, src_im, full_dst_size, dst_size, dst_re, dst_im);
+
+  Int table_index = log2(full_dst_size);
+  auto c = V::vec(SinCosTable<T>::cos[table_index]);
+  auto s = V::vec(SinCosTable<T>::sin[table_index]);
+
+  for(Int j = 0; j < dst_size / 2; j += V::vec_size)
   {
-    T re = src_re[j];
-    T im = src_im[j];
-    dst_re[2 * j] = re;
-    dst_im[2 * j] = im;
-    dst_re[2 * j + 1] = re * c + im * s;
-    dst_im[2 * j + 1] = im * c - re * s;
+    Vec a_re = V::unaligned_load(src_re + j);
+    Vec a_im = V::unaligned_load(src_im + j);
+    Vec b_re = a_re * c + a_im * s;
+    Vec b_im = a_im * c - a_re * s;
+
+    Vec c_re, d_re;
+    V::interleave(a_re, b_re, c_re, d_re);
+    V::unaligned_store(c_re, dst_re + 2 * j);
+    V::unaligned_store(c_re, dst_re + 2 * j + V::vec_size);
+
+    Vec c_im, d_im;
+    V::interleave(a_im, b_im, c_im, d_im);
+    V::unaligned_store(c_im, dst_im + 2 * j);
+    V::unaligned_store(c_im, dst_im + 2 * j + V::vec_size);
   }
 }
 
-template<typename T>
-void compute_twiddle(Int n, T* dst_re, T* dst_im)
+template<typename V>
+void compute_twiddle(Int n, typename V::T* dst_re, typename V::T* dst_im)
 {
+  VEC_TYPEDEFS(V);
+
   auto end_re = dst_re + n;
   auto end_im = dst_im + n;
   end_re[-1] = T(1); 
   end_im[-1] = T(0); 
 
   for(Int size = 2; size <= n; size *= 2)
-    compute_twiddle_step(
+    compute_twiddle_step<V>(
       end_re - size / 2, end_im - size / 2,
       size, size,
       end_re - size, end_im - size);
 }
 
-template<typename T>
-void compute_twiddle_range(Int n, T* dst_re, T* dst_im)
+template<typename V>
+void compute_twiddle_range(
+  Int n, typename V::T* dst_re, typename V::T* dst_im)
 {
+  VEC_TYPEDEFS(V);
+
   auto end_re = dst_re + n;
   auto end_im = dst_im + n;
 
@@ -872,11 +891,10 @@ void compute_twiddle_range(Int n, T* dst_re, T* dst_im)
   end_im[-2] = T(0);
 
   for(Int size = 2; size < n; size *= 2)
-    compute_twiddle_step(
+    compute_twiddle_step<V>(
       end_re - size, end_im - size,
       size, size,
       end_re - 2 * size, end_im - 2 * size);
-
 }
 
 template<typename V>
