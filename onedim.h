@@ -29,7 +29,7 @@ struct Fft
   Int n;
   transform_fun_type transform_fun;
   T* working;
-  T* twiddle[8 * sizeof(Int) / 2];
+  T** twiddle;
 };
 
 template<typename T> struct Ifft;
@@ -802,6 +802,8 @@ Int tiny_fft_create_impl(Int n, void* ptr)
 
   ptr = aligned_increment(ptr, sizeof(Fft<T>));
 
+  state->working = nullptr;
+  state->twiddle = nullptr;
   state->n = n;
   state->transform_fun = 
     n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
@@ -829,6 +831,14 @@ Int get_npasses(Int n, Int dft_size)
     return 3;
   else
     return 2;
+}
+
+template<typename V>
+Int total_num_steps(Int n)
+{
+  Int r = 0;
+  for(Int ds = 1; ds != n; ds <<= get_npasses<V>(n, ds)) r++;
+  return r;
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -879,44 +889,6 @@ void small_transform(
       arg.dft_size = next_dft_size;
     }
   }
-}
-
-template<bool do_create, typename V, typename SrcCf, typename DstCf>
-Int small_and_large_fft_create_impl(
-  Int n, void* ptr,
-  typename Fft<typename V::T>::transform_fun_type transform_fun)
-{
-  VEC_TYPEDEFS(V);
-  Fft<T> local_state;
-  
-  auto state = do_create ? (Fft<T>*) ptr : &local_state;
-  ptr = aligned_increment(ptr, sizeof(Fft<T>));
-
-  state->transform_fun = transform_fun;
-  state->n = n;
- 
-  state->working = (T*) ptr;
-  ptr = aligned_increment(ptr, n * sizeof(T) * 2 * n);
-
-  if(do_create)
-    compute_twiddle_range<V>(n, state->working, state->working + n);
-
-  for(Int i = 0, dft_size = 1; dft_size != n; i++)
-  {
-    Int npasses = get_npasses<V>(n, dft_size);
-
-    T* tw = (T*) ptr;
-    state->twiddle[i] = tw;
-    ptr = aligned_increment(
-      ptr, twiddle_for_step_memsize<V>(dft_size, npasses));
-
-    if(do_create)
-      twiddle_for_step_create<V>(state->working, n, dft_size, npasses, tw);
-
-    dft_size <<= npasses;
-  }
-
-  return Int(ptr);
 }
 
 template<typename V>
@@ -1016,6 +988,9 @@ Int fft_create_impl(Int n, void* ptr)
     state->working = (T*) ptr;
     ptr = aligned_increment(ptr, n * sizeof(T) * 2 * n);
 
+    state->twiddle = (T**) ptr;
+    ptr = aligned_increment(ptr, total_num_steps<V>(n) * sizeof(T*));
+
     if(do_create)
       compute_twiddle_range<V>(n, state->working, state->working + n);
 
@@ -1024,7 +999,7 @@ Int fft_create_impl(Int n, void* ptr)
       Int npasses = get_npasses<V>(n, dft_size);
 
       T* tw = (T*) ptr;
-      state->twiddle[i] = tw;
+      if(do_create) state->twiddle[i] = tw;
       ptr = aligned_increment(
         ptr, twiddle_for_step_memsize<V>(dft_size, npasses));
 
