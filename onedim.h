@@ -986,7 +986,7 @@ Int fft_create_impl(Int n, void* ptr)
       &large_transform<V, SrcCf, DstCf>;
    
     state->working = (T*) ptr;
-    ptr = aligned_increment(ptr, n * sizeof(T) * 2 * n);
+    ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
 
     state->twiddle = (T**) ptr;
     ptr = aligned_increment(ptr, total_num_steps<V>(n) * sizeof(T*));
