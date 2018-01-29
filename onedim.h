@@ -19,28 +19,32 @@ struct Arg
 };
 
 template<typename T>
-struct Step
-{
-  typedef void (*pass_fun)(const Arg<T>&);
-  short npasses;
-  bool is_recursive;
-  pass_fun fun_ptr;
-  T* twiddle;
-};
-
-
-template<typename T>
 struct Fft
 {
-  Int n;
-  Int im_off;
-  T* working;
-  Step<T> steps[8 * sizeof(Int) / 2];
-  Int nsteps;
-  typedef void (*tiny_transform_fun_type)(
-    T* src, Int src_im_off, T* dst, Int dst_im_off);
+  typedef void(*transform_fun_type)(
+    const Fft<T>* state,
+    const T* src_re, const T* src_im,
+    T* dst_re, T* dst_im);
 
-  tiny_transform_fun_type tiny_transform_fun;
+  Int n;
+  transform_fun_type transform_fun;
+};
+
+template<typename T>
+struct TinyFft : public Fft<T> { };
+
+template<typename T>
+struct SmallFft : public Fft<T>
+{
+  T* working;
+  T* twiddle[8 * sizeof(Int) / 2];
+  Int nsteps;
+};
+
+template<typename T>
+struct LargeFft : public Fft<T>
+{
+
 };
 
 template<typename T> struct Ifft;
@@ -760,14 +764,20 @@ template<typename Vec> struct Locals<Vec, 4>
 
 template<typename V, typename SrcCf, typename DstCf, Int n>
 void tiny_transform(
-  typename V::T* src, Int src_im_off,
-  typename V::T* dst, Int dst_im_off)
+  const Fft<typename V::T>* state,
+  const typename V::T* src_re,
+  const typename V::T* src_im,
+  typename V::T* dst_re, 
+  typename V::T* dst_im)
 {
   VEC_TYPEDEFS(V);
   constexpr Int vsz = V::vec_size;
 
   //Round up just to make it compile
   constexpr Int vn = (n + V::vec_size - 1) / V::vec_size;
+
+  Int src_im_off = src_im - src_re;
+  Int dst_im_off = dst_im - dst_re;
 
   Locals<Vec, vn> a_re;
   Locals<Vec, vn> a_im;
@@ -776,7 +786,7 @@ void tiny_transform(
 
   for(Int i = 0; i < vn; i++)
   {
-    auto c = load<V, SrcCf>(src + i * stride<V, SrcCf>(), src_im_off);
+    auto c = load<V, SrcCf>(src_re + i * stride<V, SrcCf>(), src_im_off);
     a_re[i] = c.re;
     a_im[i] = c.im;
   }
@@ -794,126 +804,142 @@ void tiny_transform(
     if(result_in_a) c = { a_re[i], a_im[i] };
     else c = { b_re[i], b_im[i] };
 
-    DstCf::store(c, dst + i * stride<V, DstCf>(), dst_im_off);
+    DstCf::store(c, dst_re + i * stride<V, DstCf>(), dst_im_off);
   }
 }
 
-template<typename V, typename SrcCf, typename DstCf>
-void init_steps(Fft<typename V::T>& state)
+template<bool do_create, typename V, typename SrcCf, typename DstCf>
+Int tiny_fft_create_impl(Int n, void* ptr)
 {
   VEC_TYPEDEFS(V);
-  Int step_index = 0;
+  TinyFft<T> local_state;
+  auto state = do_create ? (TinyFft<T>*) ptr : &local_state;
 
-  if(state.n <= 8 || state.n < V::vec_size * V::vec_size)
+  ptr = aligned_increment(ptr, sizeof(TinyFft<T>));
+
+  state->n = n;
+
+  state->transform_fun = 
+    n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
+    n ==  2 ?  &tiny_transform<V, SrcCf, DstCf,  2> :
+    n ==  4 ?  &tiny_transform<V, SrcCf, DstCf,  4> :
+    n ==  8 ?  &tiny_transform<V, SrcCf, DstCf,  8> :
+    n == 16 ?  &tiny_transform<V, SrcCf, DstCf, 16> :
+    n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> : nullptr;
+
+  return (Int) ptr;
+}
+
+template<typename V>
+Int small_fft_npasses(Int n, Int dft_size)
+{
+  VEC_TYPEDEFS(V);
+  if(dft_size == 1)
   {
-    state.nsteps = 0;
-    state.tiny_transform_fun = 
-      state.n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
-      state.n ==  2 ?  &tiny_transform<V, SrcCf, DstCf,  2> :
-      state.n ==  4 ?  &tiny_transform<V, SrcCf, DstCf,  4> :
-      state.n ==  8 ?  &tiny_transform<V, SrcCf, DstCf,  8> :
-      state.n == 16 ?  &tiny_transform<V, SrcCf, DstCf, 16> :
-      state.n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> : nullptr;
-
-    return;
+    if constexpr(V::vec_size == 8)
+      return 3;
+    else
+      return 2;
   }
+  else if((dft_size << 3) == n)
+    return 3;
   else
-    state.tiny_transform_fun = nullptr;
+    return 2;
+}
 
-  for(Int dft_size = 1; dft_size < state.n; step_index++)
+template<typename V, typename SrcCf, typename DstCf>
+void small_transform(
+  const Fft<typename V::T>* state_arg,
+  const typename V::T* src_re,
+  const typename V::T* src_im,
+  typename V::T* dst_re, 
+  typename V::T* dst_im)
+{
+  VEC_TYPEDEFS(V);
+
+  auto state = (SmallFft<T>*) state_arg;
+
+  Arg<T> arg;
+  arg.n = state->n;
+  arg.im_off = src_im - src_re;
+  arg.dft_size = 1;
+  arg.start_offset = 0;
+  arg.end_offset = state->n;
+  arg.src = (T*) src_re;
+  arg.dst = state->working;
+
+  Int first_npasses = small_fft_npasses<V>(arg.n, 1);
+  arg.twiddle = state->twiddle[0];
+  if(first_npasses == 2) first_two_passes<V, SrcCf>(arg);
+  else first_three_passes<V, SrcCf>(arg);
+
+  arg.dft_size <<= first_npasses;
+  arg.src = state->working;
+  arg.dst = state->working;
+
+  for(Int i = 1;; i++)
   {
-    Step<T> step;
-    step.twiddle = nullptr;
-    step.is_recursive = false;
+    Int npasses = small_fft_npasses<V>(arg.n, arg.dft_size);
+    Int next_dft_size = arg.dft_size << npasses; 
+    arg.twiddle = state->twiddle[i];
+    if(next_dft_size == arg.n)
+    {
+      arg.dst = dst_re;
+      arg.im_off = dst_im - dst_re;
+      if(npasses == 2) last_two_passes<V, DstCf>(arg);
+      else last_three_passes_vec<V, DstCf>(arg);
 
-		if(dft_size == 1 && V::vec_size == 8)
-    {
-      ASSERT(state.n >= 8 * V::vec_size);
-      step.fun_ptr = &first_three_passes<V, SrcCf>;
-      step.npasses = 3;
-    }
-    else if(dft_size == 1 && V::vec_size == 4)
-    {
-      ASSERT(state.n >= 4 * V::vec_size);
-      step.fun_ptr = &first_two_passes<V, SrcCf>;
-      step.npasses = 2;
-    }
-    else if(dft_size == 1 && V::vec_size == 1)
-    {
-      step.fun_ptr = &first_pass_scalar<V, SrcCf>;
-      step.npasses = 1;
+      break;
     }
     else
     {
-      ASSERT(dft_size >= V::vec_size);
-
-      if((state.n < large_fft_size) && dft_size * 8 == state.n)
-      {
-        if(state.n == V::vec_size * 8)
-          step.fun_ptr = &last_three_passes_vec_ct_size<V, DstCf, V::vec_size * 8>;
-        else
-          step.fun_ptr = &last_three_passes_vec<V, DstCf>;
-
-        step.npasses = 3;
-      }
-      else if(dft_size * 8 == state.n)
-      {
-        step.fun_ptr = &last_three_passes_in_place<V>;
-        step.npasses = 3;
-        step.is_recursive = true;
-      }
-      else if(state.n < large_fft_size && dft_size * 4 == state.n)
-      {
-        if(state.n == V::vec_size * 4)
-          step.fun_ptr = &last_two_passes<V, DstCf, V::vec_size * 4>;
-        else if(state.n == V::vec_size * 8)
-          step.fun_ptr = &last_two_passes<V, DstCf, V::vec_size * 8>;
-        else
-          step.fun_ptr = &last_two_passes<V, DstCf>;
-
-        step.npasses = 2;
-      }
-      else if(dft_size * 4 <= state.n)
-      {
-        step.fun_ptr = &two_passes<V>;
-        step.npasses = 2;
-        step.is_recursive = state.n >= large_fft_size;
-      }
-      else
-      {
-        if(state.n == 2 * V::vec_size)
-          step.fun_ptr = &last_pass<V, DstCf, 2 * V::vec_size>;
-        else if(state.n == 4 * V::vec_size)
-          step.fun_ptr = &last_pass<V, DstCf, 4 * V::vec_size>;
-        else if(state.n == 8 * V::vec_size)
-          step.fun_ptr = &last_pass<V, DstCf, 8 * V::vec_size>;
-        else
-          step.fun_ptr = &last_pass<V, DstCf>;
-
-        step.npasses = 1;
-      }
+      two_passes<V>(arg);
+      arg.dft_size = next_dft_size;
     }
-    
-    state.steps[step_index] = step;
-    dft_size <<= step.npasses;
   }
+}
 
-  if(state.n >= large_fft_size)
+template<bool do_create, typename V, typename SrcCf, typename DstCf>
+Int small_fft_create_impl(Int n, void* ptr)
+{
+  VEC_TYPEDEFS(V);
+  SmallFft<T> local_state;
+  
+  auto state = do_create ? (SmallFft<T>*) ptr : &local_state;
+  ptr = aligned_increment(ptr, sizeof(SmallFft<T>));
+
+  state->transform_fun = &small_transform<V, SrcCf, DstCf>;
+  state->n = n;
+ 
+  state->working = (T*) ptr;
+  ptr = aligned_increment(ptr, n * sizeof(T) * 2 * n);
+
+  if(do_create)
+    compute_twiddle_range<V>(n, state->working, state->working + n);
+
+  for(Int i = 0, dft_size = 1; dft_size != n; i++)
   {
-    Step<T> step;
-    step.npasses = 0;
-    step.is_recursive = false;
-    step.fun_ptr = &bit_reverse_pass<V, DstCf>;
-    state.steps[step_index] = step;
-    step_index++;
+    Int npasses = small_fft_npasses<V>(n, dft_size);
+
+    T* tw = (T*) ptr;
+    state->twiddle[i] = tw;
+    ptr = aligned_increment(
+      ptr, twiddle_for_step_memsize<V>(dft_size, npasses));
+
+    if(do_create)
+      twiddle_for_step_create<V>(state->working, n, dft_size, npasses, tw);
+
+    dft_size <<= npasses;
   }
 
-  state.nsteps = step_index;
+  return Int(ptr);
+}
 
-#ifdef DEBUG_OUTPUT
-  for(Int i = 0; i < state.nsteps; i++)
-    printf("npasses %d\n", state.steps[i].npasses);
-#endif
+template<bool do_create, typename V, typename SrcCf, typename DstCf>
+Int large_fft_create_impl(Int n, void* ptr)
+{
+  //TODO
+  return 0;
 }
 
 template<bool do_create, typename V, typename SrcCf, typename DstCf>
@@ -922,41 +948,12 @@ Int fft_create_impl(Int n, void* ptr)
   VEC_TYPEDEFS(V);
   if(n <= V::vec_size && V::vec_size != 1)
     return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(n, ptr);
-
-  Fft<T> local_state;
-  auto state = do_create ? (Fft<T>*) ptr : &local_state;
-  state->n = n;
-  state->im_off = n;
-
-  ptr = aligned_increment(ptr, sizeof(Fft<T>));
-
-  state->working = (T*) ptr;
-  ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
-
-  init_steps<V, SrcCf, DstCf>(*state);
-
-  if(!state->tiny_transform_fun)
-  {
-    if(do_create)
-      compute_twiddle_range<V>(n, state->working, state->working + n);
-
-    Int dft_size = 1;
-    for(Int i = 0; i < state->nsteps; i++)
-    {
-      T* tw = (T*) ptr;
-      state->steps[i].twiddle = tw;
-      Int npasses = state->steps[i].npasses;
-      ptr = aligned_increment(
-        ptr, twiddle_for_step_memsize<V>(dft_size, npasses));
-
-      if(do_create)
-        twiddle_for_step_create<V>(state->working, n, dft_size, npasses, tw);
-
-      dft_size <<= npasses;
-    }
-  }
-
-  return Int(ptr);
+  else if(n < max(V::vec_size * V::vec_size, Int(16)))
+    return tiny_fft_create_impl<do_create, V, SrcCf, DstCf>(n, ptr);
+  else if(n < large_fft_size)
+   return small_fft_create_impl<do_create, V, SrcCf, DstCf>(n, ptr);
+  else
+    return large_fft_create_impl<do_create, V, SrcCf, DstCf>(n, ptr);
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -985,6 +982,7 @@ Ifft<typename V::T>* ifft_create(Int n, void* ptr)
     V, cf::Swapped<SrcCf>, cf::Swapped<DstCf>>(n, ptr);
 }
 
+#if 0
 template<typename T>
 NOINLINE void recursive_passes(
   const Fft<T>* state, Int step, T* p, Int start, Int end)
@@ -1066,6 +1064,16 @@ FORCEINLINE void fft_impl(
   arg.im_off = dst_im_off;
   arg.twiddle = state->steps[state->nsteps - 1].twiddle;
   state->steps[state->nsteps - 1].fun_ptr(arg);
+}
+#endif
+
+template<typename T>
+FORCEINLINE void fft_impl(
+  const Fft<T>* state,
+  T* src, Int src_im_off,
+  T* dst, Int dst_im_off)
+{
+  state->transform_fun(state, src, src + src_im_off, dst, dst + dst_im_off);
 }
 
 template<typename T>
