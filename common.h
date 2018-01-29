@@ -850,12 +850,12 @@ void compute_twiddle_step(
     Vec c_re, d_re;
     V::interleave(a_re, b_re, c_re, d_re);
     V::unaligned_store(c_re, dst_re + 2 * j);
-    V::unaligned_store(c_re, dst_re + 2 * j + V::vec_size);
+    V::unaligned_store(d_re, dst_re + 2 * j + V::vec_size);
 
     Vec c_im, d_im;
     V::interleave(a_im, b_im, c_im, d_im);
     V::unaligned_store(c_im, dst_im + 2 * j);
-    V::unaligned_store(c_im, dst_im + 2 * j + V::vec_size);
+    V::unaligned_store(d_im, dst_im + 2 * j + V::vec_size);
   }
 }
 
