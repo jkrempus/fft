@@ -833,9 +833,8 @@ void compute_twiddle_step(
   typename V::T* dst_re, typename V::T* dst_im)
 {
   VEC_TYPEDEFS(V);
-
   if(V::vec_size != 1 && dst_size / 2 < V::vec_size)
-    compute_twiddle_step<Scalar<T>>(
+    return compute_twiddle_step<Scalar<T>>(
       src_re, src_im, full_dst_size, dst_size, dst_re, dst_im);
 
   Int table_index = log2(full_dst_size);
