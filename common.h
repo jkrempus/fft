@@ -197,6 +197,9 @@ struct Complex
 
 namespace complex_format
 {
+  //TODO: all the off parameters must be changed to Uint to avoid
+  //undefined behavior in case of overflow
+
   struct Split
   {
     static const Int idx_ratio = 1;
@@ -364,6 +367,8 @@ namespace cf = complex_format;
   typedef typename V::T T; \
   typedef typename V::Vec Vec; \
   typedef Complex<V> C;
+
+template<typename V> using ET = typename V::T;
 
 template<typename V, typename SrcCf, typename DstCf>
 FORCEINLINE void complex_copy(

@@ -35,22 +35,23 @@ struct Fft
 template<typename T> struct Ifft;
 
 template<typename V, typename SrcCf>
-void first_two_passes_impl(Int n, const Arg<typename V::T>& arg)
+void first_two_passes(
+  Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
 {
   VEC_TYPEDEFS(V);
   Int l = n * SrcCf::idx_ratio / 4;
-  T* src0 = arg.src;
-  T* src1 = arg.src + l;
-  T* src2 = arg.src + 2 * l;
-  T* src3 = arg.src + 3 * l;
-  T* dst = arg.dst;
+  Uint im_off = src_im - src_re;
+  const T* src0 = src_re;
+  const T* src1 = src_re + l;
+  const T* src2 = src_re + 2 * l;
+  const T* src3 = src_re + 3 * l;
 
-  for(T* end = src1; src0 < end;)
+  for(const T* end = src1; src0 < end;)
   {
-    C a0 = load<V, SrcCf>(src0, arg.im_off);
-    C a1 = load<V, SrcCf>(src1, arg.im_off);
-    C a2 = load<V, SrcCf>(src2, arg.im_off);
-    C a3 = load<V, SrcCf>(src3, arg.im_off);
+    C a0 = load<V, SrcCf>(src0, im_off);
+    C a1 = load<V, SrcCf>(src1, im_off);
+    C a2 = load<V, SrcCf>(src2, im_off);
+    C a3 = load<V, SrcCf>(src3, im_off);
     src0 += stride<V, SrcCf>();
     src1 += stride<V, SrcCf>();
     src2 += stride<V, SrcCf>();
@@ -96,31 +97,22 @@ void first_pass_scalar(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename SrcCf>
-void first_two_passes(const Arg<typename V::T>& arg)
-{
-  first_two_passes_impl<V, SrcCf>(arg.n, arg);
-}
-
-template<typename V, typename SrcCf>
-FORCEINLINE void first_three_passes_impl(
-  Int n,
-	Int dst_chunk_size,
-  Int im_off,
-  typename V::T* src,
-  typename V::T* dst)
+void first_three_passes(
+  Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
 {
   VEC_TYPEDEFS(V);
+  Uint im_off = src_im - src_re;
   Int l = n / 8 * SrcCf::idx_ratio;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
-  for(T* end = dst + dst_chunk_size * cf::Vec::idx_ratio; dst < end;)
+  for(T* end = dst + n * cf::Vec::idx_ratio; dst < end;)
   {
     C c0, c1, c2, c3;
     {
-      C a0 = load<V, SrcCf>(src + 0 * l, im_off);
-      C a1 = load<V, SrcCf>(src + 2 * l, im_off);
-      C a2 = load<V, SrcCf>(src + 4 * l, im_off);
-      C a3 = load<V, SrcCf>(src + 6 * l, im_off);
+      C a0 = load<V, SrcCf>(src_re + 0 * l, im_off);
+      C a1 = load<V, SrcCf>(src_re + 2 * l, im_off);
+      C a2 = load<V, SrcCf>(src_re + 4 * l, im_off);
+      C a3 = load<V, SrcCf>(src_re + 6 * l, im_off);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3;
@@ -133,10 +125,10 @@ FORCEINLINE void first_three_passes_impl(
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = load<V, SrcCf>(src + 1 * l, im_off);
-      C a1 = load<V, SrcCf>(src + 3 * l, im_off);
-      C a2 = load<V, SrcCf>(src + 5 * l, im_off);
-      C a3 = load<V, SrcCf>(src + 7 * l, im_off);
+      C a0 = load<V, SrcCf>(src_re + 1 * l, im_off);
+      C a1 = load<V, SrcCf>(src_re + 3 * l, im_off);
+      C a2 = load<V, SrcCf>(src_re + 5 * l, im_off);
+      C a3 = load<V, SrcCf>(src_re + 7 * l, im_off);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3;
@@ -152,7 +144,7 @@ FORCEINLINE void first_three_passes_impl(
       mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
     }
 
-    src += stride<V, SrcCf>();
+    src_re += stride<V, SrcCf>();
 
     {
       Vec d[8];
@@ -176,14 +168,7 @@ FORCEINLINE void first_three_passes_impl(
     }
 
     dst += 8 * stride<V, cf::Vec>();
-    if(src == end) break;
   }
-}
-
-template<typename V, typename SrcCf>
-void first_three_passes(const Arg<typename V::T>& arg)
-{
-  first_three_passes_impl<V, SrcCf>(arg.n, arg.n, arg.im_off, arg.src, arg.dst);
 }
 
 template<typename V>
@@ -851,6 +836,9 @@ void small_transform(
 {
   VEC_TYPEDEFS(V);
 
+  Int n = state->n;
+  T* w = state->working;
+
   Arg<T> arg;
   arg.n = state->n;
   arg.im_off = src_im - src_re;
@@ -862,8 +850,8 @@ void small_transform(
 
   Int first_npasses = get_npasses<V>(arg.n, 1);
   arg.twiddle = state->twiddle[0];
-  if(first_npasses == 2) first_two_passes<V, SrcCf>(arg);
-  else first_three_passes<V, SrcCf>(arg);
+  if(first_npasses == 2) first_two_passes<V, SrcCf>(n, src_re, src_im, w);
+  else first_three_passes<V, SrcCf>(n, src_re, src_im, w);
 
   arg.dft_size <<= first_npasses;
   arg.src = state->working;
@@ -942,6 +930,9 @@ void large_transform(
 
   Int first_npasses = get_npasses<V>(state->n, 1);
 
+  Int n = state->n;
+  T* w = state->working;
+
   Arg<T> arg;
   arg.n = state->n;
   arg.im_off = src_im - src_re;
@@ -952,8 +943,8 @@ void large_transform(
   arg.dst = state->working;
 
   arg.twiddle = state->twiddle[0];
-  if(first_npasses == 2) first_two_passes<V, SrcCf>(arg);
-  else first_three_passes<V, SrcCf>(arg);
+  if(first_npasses == 2) first_two_passes<V, SrcCf>(arg.n, src_re, src_im, w);
+  else first_three_passes<V, SrcCf>(arg.n, src_re, src_im, w);
 
   recursive_passes<V>(state, 1, state->working, 0, state->n);
 
