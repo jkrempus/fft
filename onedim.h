@@ -40,7 +40,7 @@ void first_two_passes(
 {
   VEC_TYPEDEFS(V);
   Int l = n * SrcCf::idx_ratio / 4;
-  Uint im_off = src_im - src_re;
+  Int im_off = src_im - src_re;
   const T* src0 = src_re;
   const T* src1 = src_re + l;
   const T* src2 = src_re + 2 * l;
@@ -101,7 +101,7 @@ void first_three_passes(
   Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
 {
   VEC_TYPEDEFS(V);
-  Uint im_off = src_im - src_re;
+  Int im_off = src_im - src_re;
   Int l = n / 8 * SrcCf::idx_ratio;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
@@ -245,15 +245,14 @@ void two_passes(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename DstCf>
-void last_two_passes_impl(Int n, const Arg<typename V::T>& arg)
+void last_two_passes(
+  Int n, const ET<V>* src, const ET<V>* tw, ET<V>* dst_re, ET<V>* dst_im)
 {
   VEC_TYPEDEFS(V);
   Int vn = n / V::vec_size;
-  auto tw = arg.twiddle;
+  Int im_off = dst_im - dst_re;
 
-  auto src = arg.src;
-  
-  auto dst0 = arg.dst; 
+  auto dst0 = dst_re; 
   auto dst1 = dst0 + vn / 4 * stride<V, DstCf>(); 
   auto dst2 = dst1 + vn / 4 * stride<V, DstCf>(); 
   auto dst3 = dst2 + vn / 4 * stride<V, DstCf>(); 
@@ -276,23 +275,11 @@ void last_two_passes_impl(Int n, const Arg<typename V::T>& arg)
     src += 4 * stride<V, cf::Vec>();
 
     Int d = br.br * stride<V, DstCf>();
-    DstCf::store(d0, dst0 + d, arg.im_off);
-    DstCf::store(d1, dst1 + d, arg.im_off);
-    DstCf::store(d2, dst2 + d, arg.im_off);
-    DstCf::store(d3, dst3 + d, arg.im_off);
+    DstCf::store(d0, dst0 + d, im_off);
+    DstCf::store(d1, dst1 + d, im_off);
+    DstCf::store(d2, dst2 + d, im_off);
+    DstCf::store(d3, dst3 + d, im_off);
   }
-}
-
-template<typename V, typename DstCf>
-void last_two_passes(const Arg<typename V::T>& arg)
-{
-  last_two_passes_impl<V, DstCf>(arg.n, arg);
-}
-
-template<typename V, typename DstCf, Int n>
-void last_two_passes(const Arg<typename V::T>& arg)
-{
-  last_two_passes_impl<V, DstCf>(n, arg);
 }
 
 template<typename V, typename DstCf>
@@ -386,14 +373,13 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
 }
 
 template<typename V, typename DstCf>
-FORCEINLINE void last_three_passes_impl(
-  Int n,
-  Int im_off,
-  typename V::T* src,
-  typename V::T* twiddle,
-  typename V::T* dst)
+void last_three_passes(
+  Int n, const ET<V>* src, const ET<V>* tw, ET<V>* dst_re, ET<V>* dst_im)
 {
   VEC_TYPEDEFS(V);
+
+  Int im_off = dst_im - dst_re;
+
   Int l1 = n / 8 / V::vec_size;
   Int l2 = 2 * l1;
   Int l3 = 3 * l1;
@@ -404,15 +390,15 @@ FORCEINLINE void last_three_passes_impl(
 
   for(BitReversed br(l1); br.i < l1; br.advance())
   {
-    auto d = dst + br.br * stride<V, DstCf>();
+    auto d = dst_re + br.br * stride<V, DstCf>();
     auto s = src + 8 * stride<V, cf::Vec>() * br.i;
-    auto tw = twiddle + 5 * stride<V, cf::Vec>() * br.i;
+    auto this_tw = tw + 5 * stride<V, cf::Vec>() * br.i;
 
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
-      C tw0 = load<V, cf::Vec>(tw, 0);
-      C tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
-      C tw2 = load<V, cf::Vec>(tw + 2 * stride<V, cf::Vec>(), 0);
+      C tw0 = load<V, cf::Vec>(this_tw, 0);
+      C tw1 = load<V, cf::Vec>(this_tw + stride<V, cf::Vec>(), 0);
+      C tw2 = load<V, cf::Vec>(this_tw + 2 * stride<V, cf::Vec>(), 0);
 
       {
         C mul0 =       load<V, cf::Vec>(s, 0);
@@ -450,7 +436,7 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw3 = load<V, cf::Vec>(tw + 3 * stride<V, cf::Vec>(), 0);
+      C tw3 = load<V, cf::Vec>(this_tw + 3 * stride<V, cf::Vec>(), 0);
       {
         auto mul = tw3 * a4;
         DstCf::store(a0 + mul, d + 0, im_off);
@@ -465,7 +451,7 @@ FORCEINLINE void last_three_passes_impl(
     }
 
     {
-      C tw4 = load<V, cf::Vec>(tw + 4 * stride<V, cf::Vec>(), 0);
+      C tw4 = load<V, cf::Vec>(this_tw + 4 * stride<V, cf::Vec>(), 0);
       {
         auto mul = tw4 * a5;
         DstCf::store(a1 + mul, d + l1 * stride<V, DstCf>(), im_off);
@@ -479,20 +465,6 @@ FORCEINLINE void last_three_passes_impl(
       }
     }
   }
-}
-
-template<typename V, typename DstCf>
-void last_three_passes_vec(const Arg<typename V::T>& arg)
-{
-  last_three_passes_impl<V, DstCf>(
-    arg.n, arg.im_off, arg.src, arg.twiddle, arg.dst);
-}
-
-template<typename V, typename DstCf, Int n>
-void last_three_passes_vec_ct_size(const Arg<typename V::T>& arg)
-{
-  last_three_passes_impl<V, DstCf>(
-    n, arg.im_off, arg.src, arg.twiddle, arg.dst);
 }
 
 template<typename V>
@@ -866,8 +838,10 @@ void small_transform(
     {
       arg.dst = dst_re;
       arg.im_off = dst_im - dst_re;
-      if(npasses == 2) last_two_passes<V, DstCf>(arg);
-      else last_three_passes_vec<V, DstCf>(arg);
+      if(npasses == 2)
+        last_two_passes<V, DstCf>(n, w, state->twiddle[i], dst_re, dst_im);
+      else
+        last_three_passes<V, DstCf>(n, w, state->twiddle[i], dst_re, dst_im);
 
       break;
     }
