@@ -6,19 +6,6 @@
 namespace onedim
 {
 template<typename T>
-struct Arg
-{
-  Int n;
-  Int im_off;
-  Int dft_size;
-  Int start_offset;
-  Int end_offset;
-  T* src;
-  T* twiddle;
-  T* dst;
-};
-
-template<typename T>
 struct Fft
 {
   typedef void(*transform_fun_type)(
@@ -76,23 +63,6 @@ void first_two_passes(
     cf::Vec::store(d2, dst + 2 * stride<V, cf::Vec>(), 0); 
     cf::Vec::store(d3, dst + 3 * stride<V, cf::Vec>(), 0); 
     dst += 4 * stride<V, cf::Vec>();
-  }
-}
-
-template<typename V, typename SrcCf>
-void first_pass_scalar(const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  auto src = arg.src;
-  auto dst = arg.dst;
-  auto n = arg.n;
-  for(Int i0 = 0; i0 < n / 2; i0++)
-  {
-    Int i1 = i0 + n / 2;
-    auto a0 = load<V, SrcCf>(src + i0 * stride<V, SrcCf>(), arg.im_off);
-    auto a1 = load<V, SrcCf>(src + i1 * stride<V, SrcCf>(), arg.im_off);
-    cf::Vec::store(a0 + a1, dst + i0 * stride<V, cf::Vec>(), 0);
-    cf::Vec::store(a0 - a1, dst + i1 * stride<V, cf::Vec>(), 0);
   }
 }
 
@@ -195,25 +165,23 @@ FORCEINLINE void two_passes_inner(
 }
 
 template<typename V>
-void two_passes(const Arg<typename V::T>& arg)
+void two_passes(
+  Int n, Int start_offset, Int end_offset, Int dft_size,
+  ET<V>* ptr_arg, const ET<V>* tw)
 {
   VEC_TYPEDEFS(V);
-  Int n = arg.n;
-  Int dft_size = arg.dft_size;
-  auto src = arg.src;
 
-  auto off1 = (arg.n >> log2(dft_size)) / 4 * stride<V, cf::Vec>();
+  auto off1 = (n >> log2(dft_size)) / 4 * stride<V, cf::Vec>();
   auto off2 = off1 + off1;
   auto off3 = off2 + off1;
   
-  auto start = arg.start_offset * cf::Vec::idx_ratio;
-  auto end = arg.end_offset * cf::Vec::idx_ratio;
+  auto start = start_offset * cf::Vec::idx_ratio;
+  auto end = end_offset * cf::Vec::idx_ratio;
 
-  auto tw = arg.twiddle;
   if(start != 0)
     tw += 3 * stride<V, cf::Vec>() * (start >> log2(off1 + off3));
 
-  for(auto p = src + start; p < src + end;)
+  for(auto p = ptr_arg + start; p < ptr_arg + end;)
   {
     auto tw0 = load<V, cf::Vec>(tw, 0);
     auto tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
@@ -222,8 +190,8 @@ void two_passes(const Arg<typename V::T>& arg)
 
     for(auto end1 = p + off1;;)
     {
-      ASSERT(p >= arg.src);
-      ASSERT(p + off3 < arg.src + arg.n * cf::Vec::idx_ratio);
+      ASSERT(p >= ptr_arg);
+      ASSERT(p + off3 < ptr_arg + n * cf::Vec::idx_ratio);
 
       C d0, d1, d2, d3;
       two_passes_inner(
@@ -281,49 +249,6 @@ void last_two_passes(
     DstCf::store(d3, dst3 + d, im_off);
   }
 }
-
-template<typename V, typename DstCf>
-FORCEINLINE void last_pass_impl(Int n, const Arg<typename V::T>& arg)
-{
-  VEC_TYPEDEFS(V);
-  Int vn = n / V::vec_size;
-  auto tw = arg.twiddle;
-
-  auto src = arg.src;
-  auto dst0 = arg.dst; 
-  auto dst1 = dst0 + vn / 2 * stride<V, DstCf>(); 
-
-  for(BitReversed br(vn / 2); br.i < vn / 2; br.advance())
-  {
-    C a0 = load<V, cf::Vec>(src, 0);
-    C mul = load<V, cf::Vec>(src + stride<V, cf::Vec>(), 0) * load<V, cf::Vec>(tw, 0);
-    tw += stride<V, cf::Vec>();
-    src += 2 * stride<V, cf::Vec>();
-
-    Int d = br.br * stride<V, DstCf>();
-    DstCf::store(a0 + mul, dst0 + d, arg.im_off);
-    DstCf::store(a0 - mul, dst1 + d, arg.im_off);
-  }
-}
-
-template<typename V, typename DstCf>
-void last_pass(const Arg<typename V::T>& arg)
-{
-  last_pass_impl<V, DstCf>(arg.n, arg);
-}
-
-template<typename V, typename DstCf, Int n>
-void last_pass(const Arg<typename V::T>& arg)
-{
-  last_pass_impl<V, DstCf>(n, arg);
-}
-
-template<Int sz, Int alignment>
-struct AlignedMemory
-{
-  char mem[sz + (alignment - 1)];
-  void* get() { return (void*)((Uint(mem) + alignment - 1) & ~(alignment - 1)); }
-};
 
 template<typename V, typename DstCf>
 void bit_reverse_pass(
@@ -809,34 +734,20 @@ void small_transform(
 
   Int n = state->n;
   T* w = state->working;
+  Int dft_size = 1;
 
-  Arg<T> arg;
-  arg.n = state->n;
-  arg.im_off = src_im - src_re;
-  arg.dft_size = 1;
-  arg.start_offset = 0;
-  arg.end_offset = state->n;
-  arg.src = (T*) src_re;
-  arg.dst = state->working;
-
-  Int first_npasses = get_npasses<V>(arg.n, 1);
-  arg.twiddle = state->twiddle[0];
+  Int first_npasses = get_npasses<V>(n, 1);
   if(first_npasses == 2) first_two_passes<V, SrcCf>(n, src_re, src_im, w);
   else first_three_passes<V, SrcCf>(n, src_re, src_im, w);
 
-  arg.dft_size <<= first_npasses;
-  arg.src = state->working;
-  arg.dst = state->working;
+  dft_size <<= first_npasses;
 
   for(Int i = 1;; i++)
   {
-    Int npasses = get_npasses<V>(arg.n, arg.dft_size);
-    Int next_dft_size = arg.dft_size << npasses; 
-    arg.twiddle = state->twiddle[i];
-    if(next_dft_size == arg.n)
+    Int npasses = get_npasses<V>(n, dft_size);
+    Int next_dft_size = dft_size << npasses; 
+    if(next_dft_size == n)
     {
-      arg.dst = dst_re;
-      arg.im_off = dst_im - dst_re;
       if(npasses == 2)
         last_two_passes<V, DstCf>(n, w, state->twiddle[i], dst_re, dst_im);
       else
@@ -846,8 +757,8 @@ void small_transform(
     }
     else
     {
-      two_passes<V>(arg);
-      arg.dft_size = next_dft_size;
+      two_passes<V>(n, 0, n, dft_size, w, state->twiddle[i]);
+      dft_size = next_dft_size;
     }
   }
 }
@@ -865,19 +776,11 @@ NOINLINE void recursive_passes(
   Int npasses = get_npasses<V>(state->n, dft_size);
 
   Int n = state->n;
-  Arg<T> arg;
-  arg.n = state->n;
-  arg.im_off = 0;
-  arg.dft_size = dft_size;
-  arg.start_offset = start;
-  arg.end_offset = end;
-  arg.src = p;
-  arg.dst = nullptr;
-  arg.twiddle = state->twiddle[step];
 
   if(npasses == 3) 
     last_three_passes_in_place<V>(n, start, end, p, state->twiddle[step]);
-  else two_passes<V>(arg);
+  else
+    two_passes<V>(n, start, end, dft_size, p, state->twiddle[step]);
 
   if((dft_size << npasses) < state->n)
   {
@@ -991,91 +894,6 @@ Ifft<typename V::T>* ifft_create(Int n, void* ptr)
   return (Ifft<typename V::T>*) fft_create<
     V, cf::Swapped<SrcCf>, cf::Swapped<DstCf>>(n, ptr);
 }
-
-#if 0
-template<typename T>
-NOINLINE void recursive_passes(
-  const Fft<T>* state, Int step, T* p, Int start, Int end)
-{
-  Int dft_size = 1;
-  for(Int i = 0; i < step; i++) dft_size <<= state->steps[i].npasses;
-
-  Arg<T> arg;
-  arg.n = state->n;
-  arg.im_off = 0;
-  arg.dft_size = dft_size;
-  arg.start_offset = start;
-  arg.end_offset = end;
-  arg.src = p;
-  arg.dst = nullptr;
-  arg.twiddle = state->steps[step].twiddle;
-  
-  state->steps[step].fun_ptr(arg);
-
-  if(step + 1 < state->nsteps && state->steps[step + 1].is_recursive)
-  {
-    if(end - start > optimal_size)
-    {
-      Int next_sz = (end - start) >> state->steps[step].npasses;
-      for(Int s = start; s < end; s += next_sz)
-        recursive_passes(state, step + 1, p, s, s + next_sz);
-    }
-    else
-      recursive_passes(state, step + 1, p, start, end);
-  }
-}
-
-template<typename T>
-FORCEINLINE void fft_impl(
-  const Fft<T>* state,
-  T* src, Int src_im_off,
-  T* dst, Int dst_im_off)
-{
-  if(state->tiny_transform_fun)
-  {
-    state->tiny_transform_fun(src, src_im_off, dst, dst_im_off);
-    return;
-  }
-
-  Arg<T> arg;
-  arg.n = state->n;
-  arg.im_off = src_im_off;
-  arg.dft_size = 1;
-  arg.start_offset = 0;
-  arg.end_offset = state->n;
-  arg.src = src;
-
-  auto w0 = state->working;
- 
-  arg.src = src;
-  arg.dst = w0;
-  state->steps[0].fun_ptr(arg);
-  arg.dft_size <<= state->steps[0].npasses;
-
-  arg.src = w0;
-  arg.dst = w0;
-  for(Int step = 1; step < state->nsteps - 1; )
-  {
-    if(state->steps[step].is_recursive)
-    {
-      recursive_passes(state, step, arg.src, 0, state->n);
-      while(step < state->nsteps && state->steps[step].is_recursive) step++;
-    }
-    else
-    {
-      arg.twiddle = state->steps[step].twiddle;
-      state->steps[step].fun_ptr(arg);
-      arg.dft_size <<= state->steps[step].npasses;
-      step++;
-    }
-  }
-
-  arg.dst = dst;
-  arg.im_off = dst_im_off;
-  arg.twiddle = state->steps[state->nsteps - 1].twiddle;
-  state->steps[state->nsteps - 1].fun_ptr(arg);
-}
-#endif
 
 template<typename T>
 FORCEINLINE void fft_impl(
