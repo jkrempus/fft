@@ -326,12 +326,13 @@ struct AlignedMemory
 };
 
 template<typename V, typename DstCf>
-void bit_reverse_pass(const Arg<typename V::T>& arg)
+void bit_reverse_pass(
+  Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
 {
   VEC_TYPEDEFS(V);
 
-  Int vn = arg.n / V::vec_size;
-  Int im_off = arg.im_off;
+  Int vn = n / V::vec_size;
+  Int im_off = dst_im - dst_re;
   //const Int br_table[] = {0, 2, 1, 3};
   constexpr Int br_table[] = {0, 4, 2, 6, 1, 5, 3, 7};
   //constexpr Int br_table[] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
@@ -341,8 +342,8 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
   {
     for(BitReversed br(vn); br.i < vn; br.advance())
       DstCf::template store<stream_flag>(
-        load<V, cf::Vec>(arg.src + br.i * stride<V, cf::Vec>(), 0),
-        arg.dst + br.br * stride<V, DstCf>(),
+        load<V, cf::Vec>(src + br.i * stride<V, cf::Vec>(), 0),
+        dst_re + br.br * stride<V, DstCf>(),
         im_off);
   }
   else
@@ -351,13 +352,13 @@ void bit_reverse_pass(const Arg<typename V::T>& arg)
 
     for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
     {
-      T* src = arg.src + br.i * m * stride<V, cf::Vec>();
-      T* dst = arg.dst + br.br * m * stride<V, DstCf>();
+      const T* s_outer = src + br.i * m * stride<V, cf::Vec>();
+      T* d_outer = dst_re + br.br * m * stride<V, DstCf>();
 
       for(Int i0 = 0; i0 < m; i0++)
       {
-        T* s = src + br_table[i0] * stride<V, cf::Vec>();
-        T* d = dst + i0 * stride_ * stride<V, DstCf>();
+        const T* s = s_outer + br_table[i0] * stride<V, cf::Vec>();
+        T* d = d_outer + i0 * stride_ * stride<V, DstCf>();
         for(Int i1 = 0; i1 < m; i1++)
         {
           auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
@@ -468,25 +469,23 @@ void last_three_passes(
 }
 
 template<typename V>
-void last_three_passes_in_place(const Arg<typename V::T>& arg)
+void last_three_passes_in_place(
+  Int n, Int start_offset, Int end_offset, ET<V>* ptr_arg, const ET<V>* tw_arg)
 {
   VEC_TYPEDEFS(V);
-  Int n = arg.n;
-  Int im_off = arg.im_off;
   
-  auto start = arg.start_offset * cf::Vec::idx_ratio;
-  auto end = arg.end_offset * cf::Vec::idx_ratio;
+  auto start = start_offset * cf::Vec::idx_ratio;
+  auto end = end_offset * cf::Vec::idx_ratio;
   
-  auto src = arg.src;
-  T* twiddle = arg.twiddle + start * 5 / 8;
+  const T* tw = tw_arg + start * 5 / 8;
 
-  for(auto p = src + start; p < src + end;)
+  for(auto p = ptr_arg + start; p < ptr_arg + end;)
   {
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
-      C tw0 = load<V, cf::Vec>(twiddle, 0);
-      C tw1 = load<V, cf::Vec>(twiddle + stride<V, cf::Vec>(), 0);
-      C tw2 = load<V, cf::Vec>(twiddle + 2 * stride<V, cf::Vec>(), 0);
+      C tw0 = load<V, cf::Vec>(tw, 0);
+      C tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
+      C tw2 = load<V, cf::Vec>(tw + 2 * stride<V, cf::Vec>(), 0);
 
       {
         C mul0 =       load<V, cf::Vec>(p, 0);
@@ -524,7 +523,7 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
     }
 
     {
-      C tw3 = load<V, cf::Vec>(twiddle + 3 * stride<V, cf::Vec>(), 0);
+      C tw3 = load<V, cf::Vec>(tw + 3 * stride<V, cf::Vec>(), 0);
       {
         auto mul = tw3 * a4;
         cf::Vec::store(a0 + mul, p + 0, 0);
@@ -539,7 +538,7 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
     }
 
     {
-      C tw4 = load<V, cf::Vec>(twiddle + 4 * stride<V, cf::Vec>(), 0);
+      C tw4 = load<V, cf::Vec>(tw + 4 * stride<V, cf::Vec>(), 0);
       {
         auto mul = tw4 * a5;
         cf::Vec::store(a1 + mul, p + 4 * stride<V, cf::Vec>(), 0);
@@ -554,7 +553,7 @@ void last_three_passes_in_place(const Arg<typename V::T>& arg)
     }
 
     p += 8 * stride<V, cf::Vec>();
-    twiddle += 5 * stride<V, cf::Vec>();
+    tw += 5 * stride<V, cf::Vec>();
   }
 }
 
@@ -865,6 +864,7 @@ NOINLINE void recursive_passes(
 
   Int npasses = get_npasses<V>(state->n, dft_size);
 
+  Int n = state->n;
   Arg<T> arg;
   arg.n = state->n;
   arg.im_off = 0;
@@ -875,7 +875,8 @@ NOINLINE void recursive_passes(
   arg.dst = nullptr;
   arg.twiddle = state->twiddle[step];
 
-  if(npasses == 3) last_three_passes_in_place<V>(arg);
+  if(npasses == 3) 
+    last_three_passes_in_place<V>(n, start, end, p, state->twiddle[step]);
   else two_passes<V>(arg);
 
   if((dft_size << npasses) < state->n)
@@ -907,25 +908,12 @@ void large_transform(
   Int n = state->n;
   T* w = state->working;
 
-  Arg<T> arg;
-  arg.n = state->n;
-  arg.im_off = src_im - src_re;
-  arg.dft_size = 1;
-  arg.start_offset = 0;
-  arg.end_offset = state->n;
-  arg.src = (T*) src_re;
-  arg.dst = state->working;
+  if(first_npasses == 2) first_two_passes<V, SrcCf>(n, src_re, src_im, w);
+  else first_three_passes<V, SrcCf>(n, src_re, src_im, w);
 
-  arg.twiddle = state->twiddle[0];
-  if(first_npasses == 2) first_two_passes<V, SrcCf>(arg.n, src_re, src_im, w);
-  else first_three_passes<V, SrcCf>(arg.n, src_re, src_im, w);
+  recursive_passes<V>(state, 1, w, 0, n);
 
-  recursive_passes<V>(state, 1, state->working, 0, state->n);
-
-  arg.src = state->working;
-  arg.dst = dst_re;
-  arg.im_off = dst_im - dst_re;
-  bit_reverse_pass<V, DstCf>(arg);
+  bit_reverse_pass<V, DstCf>(n, w, dst_re, dst_im);
 }
 
 
