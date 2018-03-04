@@ -58,10 +58,10 @@ void first_two_passes(
     V::transpose(c0.re, c1.re, c2.re, c3.re, d0.re, d1.re, d2.re, d3.re);
     V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
 
-    cf::Vec::store(d0, dst, 0); 
-    cf::Vec::store(d1, dst + stride<V, cf::Vec>(), 0); 
-    cf::Vec::store(d2, dst + 2 * stride<V, cf::Vec>(), 0); 
-    cf::Vec::store(d3, dst + 3 * stride<V, cf::Vec>(), 0); 
+    d0.store(dst); 
+    d1.store(dst + stride<V, cf::Vec>()); 
+    d2.store(dst + 2 * stride<V, cf::Vec>()); 
+    d3.store(dst + 3 * stride<V, cf::Vec>()); 
     dst += 4 * stride<V, cf::Vec>();
   }
 }
@@ -183,9 +183,9 @@ void two_passes(
 
   for(auto p = ptr_arg + start; p < ptr_arg + end;)
   {
-    auto tw0 = load<V, cf::Vec>(tw, 0);
-    auto tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
-    auto tw2 = load<V, cf::Vec>(tw + 2 * stride<V, cf::Vec>(), 0);
+    auto tw0 = C::load(tw);
+    auto tw1 = C::load(tw + stride<V, cf::Vec>());
+    auto tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
     tw += 3 * stride<V, cf::Vec>();
 
     for(auto end1 = p + off1;;)
@@ -195,14 +195,14 @@ void two_passes(
 
       C d0, d1, d2, d3;
       two_passes_inner(
-        load<V, cf::Vec>(p, 0), load<V, cf::Vec>(p + off1, 0),
-        load<V, cf::Vec>(p + off2, 0), load<V, cf::Vec>(p + off3, 0),
+        C::load(p), C::load(p + off1),
+        C::load(p + off2), C::load(p + off3),
         d0, d1, d2, d3, tw0, tw1, tw2);
 
-      cf::Vec::store(d0, p, 0);
-      cf::Vec::store(d2, p + off1, 0);
-      cf::Vec::store(d1, p + off2, 0);
-      cf::Vec::store(d3, p + off3, 0);
+      d0.store(p);
+      d2.store(p + off1);
+      d1.store(p + off2);
+      d3.store(p + off3);
 
       p += stride<V, cf::Vec>();
       if(!(p < end1)) break;
@@ -227,17 +227,17 @@ void last_two_passes(
 
   for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
   {
-    auto tw0 = load<V, cf::Vec>(tw, 0);
-    auto tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
-    auto tw2 = load<V, cf::Vec>(tw + 2 * stride<V, cf::Vec>(), 0);
+    auto tw0 = C::load(tw);
+    auto tw1 = C::load(tw + stride<V, cf::Vec>());
+    auto tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
     tw += 3 * stride<V, cf::Vec>();
 
     C d0, d1, d2, d3;
     two_passes_inner(
-      load<V, cf::Vec>(src, 0),
-      load<V, cf::Vec>(src + stride<V, cf::Vec>(), 0),
-      load<V, cf::Vec>(src + 2 * stride<V, cf::Vec>(), 0),
-      load<V, cf::Vec>(src + 3 * stride<V, cf::Vec>(), 0),
+      C::load(src),
+      C::load(src + stride<V, cf::Vec>()),
+      C::load(src + 2 * stride<V, cf::Vec>()),
+      C::load(src + 3 * stride<V, cf::Vec>()),
       d0, d1, d2, d3, tw0, tw1, tw2);
 
     src += 4 * stride<V, cf::Vec>();
@@ -267,7 +267,7 @@ void bit_reverse_pass(
   {
     for(BitReversed br(vn); br.i < vn; br.advance())
       DstCf::template store<stream_flag>(
-        load<V, cf::Vec>(src + br.i * stride<V, cf::Vec>(), 0),
+        C::load(src + br.i * stride<V, cf::Vec>()),
         dst_re + br.br * stride<V, DstCf>(),
         im_off);
   }
@@ -288,7 +288,7 @@ void bit_reverse_pass(
         {
           auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
           DstCf::template store<stream_flag>(
-            load<V, cf::Vec>(this_s, 0),
+            C::load(this_s),
             d + i1 * stride<V, DstCf>(), im_off);
         }
       }
@@ -322,15 +322,15 @@ void last_three_passes(
 
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
-      C tw0 = load<V, cf::Vec>(this_tw, 0);
-      C tw1 = load<V, cf::Vec>(this_tw + stride<V, cf::Vec>(), 0);
-      C tw2 = load<V, cf::Vec>(this_tw + 2 * stride<V, cf::Vec>(), 0);
+      C tw0 = C::load(this_tw);
+      C tw1 = C::load(this_tw + stride<V, cf::Vec>());
+      C tw2 = C::load(this_tw + 2 * stride<V, cf::Vec>());
 
       {
-        C mul0 =       load<V, cf::Vec>(s, 0);
-        C mul1 = tw0 * load<V, cf::Vec>(s + 2 * stride<V, cf::Vec>(), 0);
-        C mul2 = tw1 * load<V, cf::Vec>(s + 4 * stride<V, cf::Vec>(), 0);
-        C mul3 = tw2 * load<V, cf::Vec>(s + 6 * stride<V, cf::Vec>(), 0);
+        C mul0 =       C::load(s);
+        C mul1 = tw0 * C::load(s + 2 * stride<V, cf::Vec>());
+        C mul2 = tw1 * C::load(s + 4 * stride<V, cf::Vec>());
+        C mul3 = tw2 * C::load(s + 6 * stride<V, cf::Vec>());
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -344,10 +344,10 @@ void last_three_passes(
       }
 
       {
-        C mul0 =       load<V, cf::Vec>(s + 1 * stride<V, cf::Vec>(), 0);
-        C mul1 = tw0 * load<V, cf::Vec>(s + 3 * stride<V, cf::Vec>(), 0);
-        C mul2 = tw1 * load<V, cf::Vec>(s + 5 * stride<V, cf::Vec>(), 0);
-        C mul3 = tw2 * load<V, cf::Vec>(s + 7 * stride<V, cf::Vec>(), 0);
+        C mul0 =       C::load(s + 1 * stride<V, cf::Vec>());
+        C mul1 = tw0 * C::load(s + 3 * stride<V, cf::Vec>());
+        C mul2 = tw1 * C::load(s + 5 * stride<V, cf::Vec>());
+        C mul3 = tw2 * C::load(s + 7 * stride<V, cf::Vec>());
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -362,7 +362,7 @@ void last_three_passes(
     }
 
     {
-      C tw3 = load<V, cf::Vec>(this_tw + 3 * stride<V, cf::Vec>(), 0);
+      C tw3 = C::load(this_tw + 3 * stride<V, cf::Vec>());
       {
         auto mul = tw3 * a4;
         DstCf::store(a0 + mul, d + 0, im_off);
@@ -377,7 +377,7 @@ void last_three_passes(
     }
 
     {
-      C tw4 = load<V, cf::Vec>(this_tw + 4 * stride<V, cf::Vec>(), 0);
+      C tw4 = C::load(this_tw + 4 * stride<V, cf::Vec>());
       {
         auto mul = tw4 * a5;
         DstCf::store(a1 + mul, d + l1 * stride<V, DstCf>(), im_off);
@@ -408,15 +408,15 @@ void last_three_passes_in_place(
   {
     C a0, a1, a2, a3, a4, a5, a6, a7;
     {
-      C tw0 = load<V, cf::Vec>(tw, 0);
-      C tw1 = load<V, cf::Vec>(tw + stride<V, cf::Vec>(), 0);
-      C tw2 = load<V, cf::Vec>(tw + 2 * stride<V, cf::Vec>(), 0);
+      C tw0 = C::load(tw);
+      C tw1 = C::load(tw + stride<V, cf::Vec>());
+      C tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
 
       {
-        C mul0 =       load<V, cf::Vec>(p, 0);
-        C mul1 = tw0 * load<V, cf::Vec>(p + 2 * stride<V, cf::Vec>(), 0);
-        C mul2 = tw1 * load<V, cf::Vec>(p + 4 * stride<V, cf::Vec>(), 0);
-        C mul3 = tw2 * load<V, cf::Vec>(p + 6 * stride<V, cf::Vec>(), 0);
+        C mul0 =       C::load(p);
+        C mul1 = tw0 * C::load(p + 2 * stride<V, cf::Vec>());
+        C mul2 = tw1 * C::load(p + 4 * stride<V, cf::Vec>());
+        C mul3 = tw2 * C::load(p + 6 * stride<V, cf::Vec>());
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -430,10 +430,10 @@ void last_three_passes_in_place(
       }
 
       {
-        C mul0 =       load<V, cf::Vec>(p + 1 * stride<V, cf::Vec>(), 0);
-        C mul1 = tw0 * load<V, cf::Vec>(p + 3 * stride<V, cf::Vec>(), 0);
-        C mul2 = tw1 * load<V, cf::Vec>(p + 5 * stride<V, cf::Vec>(), 0);
-        C mul3 = tw2 * load<V, cf::Vec>(p + 7 * stride<V, cf::Vec>(), 0);
+        C mul0 =       C::load(p + 1 * stride<V, cf::Vec>());
+        C mul1 = tw0 * C::load(p + 3 * stride<V, cf::Vec>());
+        C mul2 = tw1 * C::load(p + 5 * stride<V, cf::Vec>());
+        C mul3 = tw2 * C::load(p + 7 * stride<V, cf::Vec>());
 
         C sum02 = mul0 + mul2;
         C dif02 = mul0 - mul2;
@@ -448,32 +448,32 @@ void last_three_passes_in_place(
     }
 
     {
-      C tw3 = load<V, cf::Vec>(tw + 3 * stride<V, cf::Vec>(), 0);
+      C tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
       {
         auto mul = tw3 * a4;
-        cf::Vec::store(a0 + mul, p + 0, 0);
-        cf::Vec::store(a0 - mul, p + 1 * stride<V, cf::Vec>(), 0);
+        (a0 + mul).store(p + 0);
+        (a0 - mul).store(p + 1 * stride<V, cf::Vec>());
       }
 
       {
         auto mul = tw3.mul_neg_i() * a6;
-        cf::Vec::store(a2 + mul, p + 2 * stride<V, cf::Vec>(), 0);
-        cf::Vec::store(a2 - mul, p + 3 * stride<V, cf::Vec>(), 0);
+        (a2 + mul).store(p + 2 * stride<V, cf::Vec>());
+        (a2 - mul).store(p + 3 * stride<V, cf::Vec>());
       }
     }
 
     {
-      C tw4 = load<V, cf::Vec>(tw + 4 * stride<V, cf::Vec>(), 0);
+      C tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
       {
         auto mul = tw4 * a5;
-        cf::Vec::store(a1 + mul, p + 4 * stride<V, cf::Vec>(), 0);
-        cf::Vec::store(a1 - mul, p + 5 * stride<V, cf::Vec>(), 0);
+        (a1 + mul).store(p + 4 * stride<V, cf::Vec>());
+        (a1 - mul).store(p + 5 * stride<V, cf::Vec>());
       }
 
       {
         auto mul = tw4.mul_neg_i() * a7;
-        cf::Vec::store(a3 + mul, p + 6 * stride<V, cf::Vec>(), 0);
-        cf::Vec::store(a3 - mul, p + 7 * stride<V, cf::Vec>(), 0);
+        (a3 + mul).store(p + 6 * stride<V, cf::Vec>());
+        (a3 - mul).store(p + 7 * stride<V, cf::Vec>());
       }
     }
 

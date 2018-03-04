@@ -750,8 +750,8 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
             auto a = load<S, CF>(&working[0] + src_i * stride<S, CF>(), 0);
             auto b = load<S, CF>(&working[0] + (src_i + n / 2) * stride<S, CF>(), 0);
             auto mul = twiddle[twiddle_i] * b;
-            CF::store(a + mul, dst + dst_i * stride<S, CF>(), 0);
-            CF::store(a - mul, dst + (dst_i + dft_size) * stride<S, CF>(), 0);
+            CF::store(a + mul, dst + dst_i * stride<S, CF>(), Int(0));
+            CF::store(a - mul, dst + (dst_i + dft_size) * stride<S, CF>(), Int(0));
             src_i++;
             dst_i++;
             twiddle_i += twiddle_stride;
