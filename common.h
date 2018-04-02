@@ -505,6 +505,13 @@ FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
   return Cf::template load<V, flags>(ptr, off);
 }
 
+template<typename V, typename Cf, Uint flags = 0>
+FORCEINLINE Complex<V> load(
+  const typename V::T* re, const typename V::T* im)
+{
+  return Cf::template load<V, flags>(re, im);
+}
+
 template<typename V, typename Cf>
 FORCEINLINE constexpr Int stride() { return Cf::idx_ratio * V::vec_size; }
 

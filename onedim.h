@@ -27,22 +27,15 @@ void first_two_passes(
 {
   VEC_TYPEDEFS(V);
   Int l = n * SrcCf::idx_ratio / 4;
-  Int im_off = src_im - src_re;
-  const T* src0 = src_re;
-  const T* src1 = src_re + l;
-  const T* src2 = src_re + 2 * l;
-  const T* src3 = src_re + 3 * l;
 
-  for(const T* end = src1; src0 < end;)
+  for(const T* end = src_re + l; src_re < end;)
   {
-    C a0 = load<V, SrcCf>(src0, im_off);
-    C a1 = load<V, SrcCf>(src1, im_off);
-    C a2 = load<V, SrcCf>(src2, im_off);
-    C a3 = load<V, SrcCf>(src3, im_off);
-    src0 += stride<V, SrcCf>();
-    src1 += stride<V, SrcCf>();
-    src2 += stride<V, SrcCf>();
-    src3 += stride<V, SrcCf>();
+    C a0 = load<V, SrcCf>(src_re,         src_im);
+    C a1 = load<V, SrcCf>(src_re + l,     src_im + l);
+    C a2 = load<V, SrcCf>(src_re + 2 * l, src_im + 2 * l);
+    C a3 = load<V, SrcCf>(src_re + 3 * l, src_im + 3 * l);
+    src_re += stride<V, SrcCf>();
+    src_im += stride<V, SrcCf>();
 
     C b0 = a0 + a2;
     C b1 = a0 - a2;
@@ -71,7 +64,6 @@ void first_three_passes(
   Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
 {
   VEC_TYPEDEFS(V);
-  Int im_off = src_im - src_re;
   Int l = n / 8 * SrcCf::idx_ratio;
   Vec invsqrt2 = V::vec(SinCosTable<T>::cos[2]);
 
@@ -79,10 +71,10 @@ void first_three_passes(
   {
     C c0, c1, c2, c3;
     {
-      C a0 = load<V, SrcCf>(src_re + 0 * l, im_off);
-      C a1 = load<V, SrcCf>(src_re + 2 * l, im_off);
-      C a2 = load<V, SrcCf>(src_re + 4 * l, im_off);
-      C a3 = load<V, SrcCf>(src_re + 6 * l, im_off);
+      C a0 = load<V, SrcCf>(src_re + 0 * l, src_im + 0 * l);
+      C a1 = load<V, SrcCf>(src_re + 2 * l, src_im + 2 * l);
+      C a2 = load<V, SrcCf>(src_re + 4 * l, src_im + 4 * l);
+      C a3 = load<V, SrcCf>(src_re + 6 * l, src_im + 6 * l);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3;
@@ -95,10 +87,10 @@ void first_three_passes(
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = load<V, SrcCf>(src_re + 1 * l, im_off);
-      C a1 = load<V, SrcCf>(src_re + 3 * l, im_off);
-      C a2 = load<V, SrcCf>(src_re + 5 * l, im_off);
-      C a3 = load<V, SrcCf>(src_re + 7 * l, im_off);
+      C a0 = load<V, SrcCf>(src_re + 1 * l, src_im + 1 * l);
+      C a1 = load<V, SrcCf>(src_re + 3 * l, src_im + 3 * l);
+      C a2 = load<V, SrcCf>(src_re + 5 * l, src_im + 5 * l);
+      C a3 = load<V, SrcCf>(src_re + 7 * l, src_im + 7 * l);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3;
@@ -115,6 +107,7 @@ void first_three_passes(
     }
 
     src_re += stride<V, SrcCf>();
+    src_im += stride<V, SrcCf>();
 
     {
       Vec d[8];
@@ -218,12 +211,16 @@ void last_two_passes(
 {
   VEC_TYPEDEFS(V);
   Int vn = n / V::vec_size;
-  Int im_off = dst_im - dst_re;
 
-  auto dst0 = dst_re; 
-  auto dst1 = dst0 + vn / 4 * stride<V, DstCf>(); 
-  auto dst2 = dst1 + vn / 4 * stride<V, DstCf>(); 
-  auto dst3 = dst2 + vn / 4 * stride<V, DstCf>(); 
+  auto dst0_re = dst_re; 
+  auto dst1_re = dst0_re + vn / 4 * stride<V, DstCf>(); 
+  auto dst2_re = dst1_re + vn / 4 * stride<V, DstCf>(); 
+  auto dst3_re = dst2_re + vn / 4 * stride<V, DstCf>(); 
+  
+  auto dst0_im = dst_im; 
+  auto dst1_im = dst0_im + vn / 4 * stride<V, DstCf>(); 
+  auto dst2_im = dst1_im + vn / 4 * stride<V, DstCf>(); 
+  auto dst3_im = dst2_im + vn / 4 * stride<V, DstCf>(); 
 
   for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
   {
@@ -243,10 +240,10 @@ void last_two_passes(
     src += 4 * stride<V, cf::Vec>();
 
     Int d = br.br * stride<V, DstCf>();
-    DstCf::store(d0, dst0 + d, im_off);
-    DstCf::store(d1, dst1 + d, im_off);
-    DstCf::store(d2, dst2 + d, im_off);
-    DstCf::store(d3, dst3 + d, im_off);
+    DstCf::store(d0, dst0_re + d, dst0_im + d);
+    DstCf::store(d1, dst1_re + d, dst1_im + d);
+    DstCf::store(d2, dst2_re + d, dst2_im + d);
+    DstCf::store(d3, dst3_re + d, dst3_im + d);
   }
 }
 
