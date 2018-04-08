@@ -30,10 +30,10 @@ void first_two_passes(
 
   for(const T* end = src_re + l; src_re < end;)
   {
-    C a0 = load<V, SrcCf>(src_re,         src_im);
-    C a1 = load<V, SrcCf>(src_re + l,     src_im + l);
-    C a2 = load<V, SrcCf>(src_re + 2 * l, src_im + 2 * l);
-    C a3 = load<V, SrcCf>(src_re + 3 * l, src_im + 3 * l);
+    C a0 = load<V, SrcCf>(src_re, src_im, 0 * l);
+    C a1 = load<V, SrcCf>(src_re, src_im, 1 * l);
+    C a2 = load<V, SrcCf>(src_re, src_im, 2 * l);
+    C a3 = load<V, SrcCf>(src_re, src_im, 3 * l);
     src_re += stride<V, SrcCf>();
     src_im += stride<V, SrcCf>();
 
@@ -71,10 +71,10 @@ void first_three_passes(
   {
     C c0, c1, c2, c3;
     {
-      C a0 = load<V, SrcCf>(src_re + 0 * l, src_im + 0 * l);
-      C a1 = load<V, SrcCf>(src_re + 2 * l, src_im + 2 * l);
-      C a2 = load<V, SrcCf>(src_re + 4 * l, src_im + 4 * l);
-      C a3 = load<V, SrcCf>(src_re + 6 * l, src_im + 6 * l);
+      C a0 = load<V, SrcCf>(src_re, src_im, 0 * l);
+      C a1 = load<V, SrcCf>(src_re, src_im, 2 * l);
+      C a2 = load<V, SrcCf>(src_re, src_im, 4 * l);
+      C a3 = load<V, SrcCf>(src_re, src_im, 6 * l);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3;
@@ -87,10 +87,10 @@ void first_three_passes(
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = load<V, SrcCf>(src_re + 1 * l, src_im + 1 * l);
-      C a1 = load<V, SrcCf>(src_re + 3 * l, src_im + 3 * l);
-      C a2 = load<V, SrcCf>(src_re + 5 * l, src_im + 5 * l);
-      C a3 = load<V, SrcCf>(src_re + 7 * l, src_im + 7 * l);
+      C a0 = load<V, SrcCf>(src_re, src_im, 1 * l);
+      C a1 = load<V, SrcCf>(src_re, src_im, 3 * l);
+      C a2 = load<V, SrcCf>(src_re, src_im, 5 * l);
+      C a3 = load<V, SrcCf>(src_re, src_im, 7 * l);
       C b0 = a0 + a2;
       C b1 = a0 - a2;
       C b2 = a1 + a3;
@@ -240,10 +240,10 @@ void last_two_passes(
     src += 4 * stride<V, cf::Vec>();
 
     Int d = br.br * stride<V, DstCf>();
-    DstCf::store(d0, dst0_re + d, dst0_im + d);
-    DstCf::store(d1, dst1_re + d, dst1_im + d);
-    DstCf::store(d2, dst2_re + d, dst2_im + d);
-    DstCf::store(d3, dst3_re + d, dst3_im + d);
+    store<DstCf>(d0, dst0_re, dst0_im, d);
+    store<DstCf>(d1, dst1_re, dst1_im, d);
+    store<DstCf>(d2, dst2_re, dst2_im, d);
+    store<DstCf>(d3, dst3_re, dst3_im, d);
   }
 }
 
@@ -262,10 +262,10 @@ void bit_reverse_pass(
   if(vn < m * m)
   {
     for(BitReversed br(vn); br.i < vn; br.advance())
-      DstCf::template store<stream_flag>(
+      store<DstCf, stream_flag>(
         C::load(src + br.i * stride<V, cf::Vec>()),
-        dst_re + br.br * stride<V, DstCf>(),
-        dst_im + br.br * stride<V, DstCf>());
+        dst_re, dst_im, 
+        br.br * stride<V, DstCf>());
   }
   else
   {
@@ -285,10 +285,10 @@ void bit_reverse_pass(
         for(Int i1 = 0; i1 < m; i1++)
         {
           auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
-          DstCf::template store<stream_flag>(
+          store<DstCf, stream_flag>(
             C::load(this_s),
-            d_re + i1 * stride<V, DstCf>(),
-            d_im + i1 * stride<V, DstCf>());
+            d_re, d_im,
+            i1 * stride<V, DstCf>());
         }
       }
     }
