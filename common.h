@@ -507,13 +507,34 @@ FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
 
 template<typename V, typename Cf, Uint flags = 0>
 FORCEINLINE Complex<V> load(
-  const typename V::T* re, const typename V::T* im)
+  const typename V::T* re, const typename V::T* im, Int offset = 0)
 {
-  return Cf::template load<V, flags>(re, im);
+  return Cf::template load<V, flags>(re + offset, im + offset);
+}
+
+template<typename V, typename Cf>
+FORCEINLINE Complex<V> unaligned_load(
+  const typename V::T* re, const typename V::T* im, Int offset = 0)
+{
+  return Cf::template unaligned_load<V>(re + offset, im + offset);
 }
 
 template<typename V, typename Cf>
 FORCEINLINE constexpr Int stride() { return Cf::idx_ratio * V::vec_size; }
+
+template<typename CF, Uint flags = 0, typename V>
+FORCEINLINE void store(
+  Complex<V> val, ET<V>* dst_re, ET<V>* dst_im, Int offset = 0)
+{
+  CF::template store<flags>(val, dst_re + offset, dst_im + offset);
+}
+
+template<typename CF, typename V>
+FORCEINLINE void unaligned_store(
+  Complex<V> val, ET<V>* dst_re, ET<V>* dst_im, Int offset = 0)
+{
+  CF::unaligned_store(val, dst_re + offset, dst_im + offset);
+}
 
 namespace cf = complex_format;
 
