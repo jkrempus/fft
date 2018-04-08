@@ -112,7 +112,7 @@ void fft_impl(
 {
   ASSERT(idim < s->ndim);
   if(idim == s->ndim - 1)
-    onedim::fft_impl(s->last_transform, src, src + im_off, dst, dst + im_off);
+    onedim::fft(s->last_transform, src, src + im_off, dst, dst + im_off);
   else
   {
     s->transforms[idim]->fun_ptr(
@@ -280,7 +280,8 @@ Rfft<typename V::T>* rfft_create(Int ndim_in, const Int* dim_in, void* mem)
 template<typename T>
 void rfft(Rfft<T>* s, T* src, T* dst)
 {
-  if(s->onedim_transform) return onedim::rfft(s->onedim_transform, src, dst);
+  if(s->onedim_transform)
+    return onedim::rfft(s->onedim_transform, src, dst);
 
   s->first_transform->fun_ptr(
     s->first_transform,

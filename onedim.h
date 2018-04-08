@@ -891,25 +891,17 @@ Ifft<typename V::T>* ifft_create(Int n, void* ptr)
 }
 
 template<typename T>
-FORCEINLINE void fft_impl(
-  const Fft<T>* state,
-  const T* src_re, const T* src_im,
-  T* dst_re, T* dst_im)
+void fft(
+  const Fft<T>* state, const T* src_re, const T* src_im, T* dst_re, T* dst_im)
 {
   state->transform_fun(state, src_re, src_im, dst_re, dst_im);
 }
 
 template<typename T>
-void fft(const Fft<T>* state, T* src, T* dst)
+void ifft(
+  const Ifft<T>* state, const T* src_re, const T* src_im, T* dst_re, T* dst_im)
 {
-  fft_impl(state, src, src + state->n, dst, dst + state->n);
-}
-
-template<typename T>
-void ifft(const Ifft<T>* state, T* src, T* dst)
-{
-  Int n = ((Fft<T>*) state)->n;
-  fft_impl((Fft<T>*) state, src, src + n, dst, dst + n);
+  fft((const Fft<T>*) state, src_re, src_im, dst_re, dst_im);
 }
 
 template<
@@ -919,9 +911,9 @@ template<
   bool inverse>
 void real_pass(
   Int n,
-  typename V::T* src_re,
-  typename V::T* src_im,
-  typename V::T* twiddle,
+  const ET<V>* src_re,
+  const ET<V>* src_im,
+  const ET<V>* twiddle,
   typename V::T* dst_re,
   typename V::T* dst_im)
 {
@@ -996,7 +988,7 @@ struct Rfft
   Fft<T>* state;
   T* working;
   T* twiddle;
-  void (*real_pass)(Int, T*, T*, T*, T*, T*);
+  void (*real_pass)(Int, const T*, const T*, const T*, T*, T*);
 };
 
 template<bool do_create, typename V, typename DstCf>
@@ -1053,21 +1045,27 @@ Rfft<typename V::T>* rfft_create(Int n, void* ptr)
 }
 
 template<typename T>
-void rfft(const Rfft<T>* state, T* src, T* dst)
+void rfft(const Rfft<T>* state, const T* src, T* dst_re, T* dst_im)
 {
   Int n = state->state->n;
-  Int dst_im_off = align_size<T>(n + 1);
+  T* w_re = state->working ? state->working : dst_re;
+  T* w_im = state->working ? state->working + n : dst_im;
 
-  T* w = state->working ? state->working : dst;
-  Int w_im_off = state->working ? n : dst_im_off;
-
-  fft_impl(state->state, src, src + n, w, w + w_im_off);
+  fft(state->state, src, src + n, w_re, w_im);
 
   state->real_pass(
     n * 2,
-    w, w + w_im_off, 
+    w_re, w_im,
     state->twiddle,
-    dst, dst + dst_im_off);
+    dst_re, dst_im);
+}
+
+//Just for compatibility with the current version of fft_core.h, should be
+//removed after we change the API there.
+template<typename T>
+void rfft(const Rfft<T>* state, T* src, T* dst)
+{
+  rfft(state, src, dst, dst + align_size<T>(state->state->n + 1));
 }
 
 template<typename T>
@@ -1075,7 +1073,7 @@ struct Irfft
 {
   Ifft<T>* state;
   T* twiddle;
-  void (*real_pass)(Int, T*, T*, T*, T*, T*);
+  void (*real_pass)(Int, const T*, const T*, const T*, T*, T*);
 };
 
 template<bool do_create, typename V, typename SrcCf>
@@ -1121,20 +1119,28 @@ Irfft<typename V::T>* irfft_create(Int n, void* ptr)
   return (Irfft<typename V::T>*) ptr;
 }
 
-
 template<typename T>
-void irfft(const Irfft<T>* state, T* src, T* dst)
+void irfft(const Irfft<T>* state, const T* src_re, const T* src_im, T* dst)
 {
   auto complex_state = ((Fft<T>*) state->state);
   state->real_pass(
     complex_state->n * 2,
-    src,
-    src + align_size<T>(complex_state->n + 1),
+    src_re, src_im,
     state->twiddle,
     dst,
     dst + complex_state->n);
 
-  ifft(state->state, dst, dst);
+  ifft(state->state, dst, dst + complex_state->n, dst, dst + complex_state->n);
 }
+
+//Just for compatibility with the current version of fft_core.h, should be
+//removed after we change the API there.
+template<typename T>
+void irfft(const Irfft<T>* state, T* src, T* dst)
+{
+  auto complex_state = ((Fft<T>*) state->state);
+  irfft(state, src, src + align_size<T>(complex_state->n + 1), dst);
+}
+
 }
 #endif
