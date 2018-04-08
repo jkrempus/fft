@@ -112,7 +112,7 @@ void fft_impl(
 {
   ASSERT(idim < s->ndim);
   if(idim == s->ndim - 1)
-    onedim::fft_impl(s->last_transform, src, im_off, dst, im_off);
+    onedim::fft_impl(s->last_transform, src, src + im_off, dst, dst + im_off);
   else
   {
     s->transforms[idim]->fun_ptr(
