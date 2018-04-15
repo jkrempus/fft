@@ -14,6 +14,7 @@
 #include <random>
 #include <cstdint>
 #include <unordered_set>
+#include <unordered_map>
 #include <sstream>
 #include <chrono>
 
@@ -818,10 +819,12 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
 
 struct TestResult
 {
-  double flops;
-  double error;
-  double time_per_element;
-  uint64_t element_iterations;
+  double flops = 0.0;
+  double error = 0.0;
+  double error_factor = 0.0;
+  double time_per_element = 0.0;
+  uint64_t element_iterations = 0;
+  bool success = true;
 };
 
 template<typename Fft>
@@ -932,6 +935,7 @@ TestResult compare(const std::vector<Int>& size)
 
   TestResult r;
   r.error = std::sqrt(diff_sumsq / sum_sumsq);
+  r.error_factor = std::sqrt(log2(n));
   return r;
 }
 
@@ -955,9 +959,20 @@ typedef complex_format::Scal Cf;
 typedef complex_format::Split Cf;
 #endif
 
+template<typename... Args>
+void fail(const Args&... args)
+{
+  std::cerr << "Failure: ";
+  (std::cerr << ... << args);
+  std::cerr << std::endl;
+  exit(1);
+}
+
+using Flags = std::unordered_map<std::string, std::string>;
+
 struct Options
 {
-  std::unordered_set<std::string> flags;
+  Flags flags;
   std::vector<std::string> positional;
 };
 
@@ -966,7 +981,15 @@ Options parse_options(int argc, char** argv)
   Options r;
   for(Int i = 1; i < argc; i++)
     if(argv[i][0] == '-')
-      r.flags.emplace(argv[i]);
+    {
+      const char* begin = argv[i] + 1;
+      const char* end = begin + strlen(begin);
+      const char* eq = std::find(begin, end, '=');
+      if(eq != end)
+        r.flags.emplace(std::string(begin, eq), std::string(eq + 1, end));
+      else
+        r.flags.emplace(std::string(begin, end), "");
+    }
     else
       r.positional.emplace_back(argv[i]);
 
@@ -1000,12 +1023,12 @@ template<typename Fft>
 TestResult test_or_bench3(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const std::unordered_set<std::string>& flags)
+  const Flags& flags)
 {
   std::vector<Int> size;
   for(auto e : lsz) size.push_back(1 << e);
 
-  if(flags.count("-b"))
+  if(flags.count("b"))
     return bench<Fft>(size, 1e11);
   else
     //TODO: Use long double for ReferenceFft
@@ -1017,7 +1040,7 @@ template<bool is_real, bool is_inverse>
 TestResult test_or_bench2(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const std::unordered_set<std::string>& flags)
+  const Flags& flags)
 {
   if(impl == "fft")
     return test_or_bench3<TestWrapper<V, Cf, is_real, is_inverse>>(impl, lsz, flags);
@@ -1034,9 +1057,9 @@ template<bool is_real>
 TestResult test_or_bench1(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const std::unordered_set<std::string>& flags)
+  const Flags& flags)
 {
-  if(flags.count("-i"))
+  if(flags.count("i"))
     return test_or_bench2<is_real, true>(impl, lsz, flags);
   else
     return test_or_bench2<is_real, false>(impl, lsz, flags);
@@ -1045,9 +1068,9 @@ TestResult test_or_bench1(
 TestResult test_or_bench0(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const std::unordered_set<std::string>& flags)
+  const Flags& flags)
 {
-  if(flags.count("-r"))
+  if(flags.count("r"))
     return test_or_bench1<true>(impl, lsz, flags);
   else
     return test_or_bench1<false>(impl, lsz, flags);
@@ -1065,13 +1088,30 @@ int main(int argc, char** argv)
   {
     for(auto e : sz) printf("%2d ", e);
     fflush(stdout);
-    if(opt.flags.count("-b") > 0)
+    if(opt.flags.count("b") > 0)
     {
       auto r = test_or_bench0(opt.positional[0], sz, opt.flags);
       printf("%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
     }
     else
-      printf("%g\n", test_or_bench0(opt.positional[0], sz, opt.flags).error);
+    {
+      TestResult test_result = test_or_bench0(opt.positional[0], sz, opt.flags);
+      printf("%g\n", test_result.error);
+
+      auto precision_it = opt.flags.find("p");
+      if(precision_it != opt.flags.end())
+      {
+        const char* precision_str = precision_it->second.c_str();
+        char* str_end;
+        double precision = std::strtod(precision_str, &str_end);
+        if(str_end == precision_str)
+          fail("Precision parameter \"", precision_str, "\" is not a number.");
+
+        double max_error = precision * test_result.error_factor;
+        if(test_result.error > max_error)
+          fail("Error exceeds maximal allowed value, which is ", max_error, ".");
+      }
+    }
 
     bool break_outer = true;
     for(Int i = sz.size() - 1; i >= 0; i--)
