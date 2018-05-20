@@ -545,14 +545,15 @@ namespace cf = complex_format;
 
 template<typename V, typename SrcCf, typename DstCf>
 FORCEINLINE void complex_copy(
-  typename V::T* src, Int src_off, Int n,
-  typename V::T* dst, Int dst_off)
+  typename V::T* src_re, typename V::T* src_im, Int n,
+  typename V::T* dst_re, typename V::T* dst_im)
 {
-  for(auto* end = src + n * SrcCf::idx_ratio; src < end;)
+  for(Int s = 0, d = 0; s < n * SrcCf::idx_ratio;
+      s += stride<V, SrcCf>(), d += stride<V, DstCf>())
   {
-    DstCf::store(load<V, SrcCf>(src, src_off), dst, dst_off);
-    src += stride<V, SrcCf>();
-    dst += stride<V, DstCf>();
+    store<DstCf>(
+      load<V, SrcCf>(src_re, src_im, s),
+      dst_re, dst_im, d);
   }
 }
 
