@@ -116,7 +116,9 @@ void fft_impl(
   else
   {
     s->transforms[idim]->fun_ptr(
-      s->transforms[idim], src, working, im_off, interleaved_src_rows, false);
+      s->transforms[idim],
+      src, src + im_off, working, working + im_off,
+      interleaved_src_rows, false);
 
     Int m = s->transforms[idim]->m;
     Int n = s->transforms[idim]->n;
@@ -176,7 +178,7 @@ struct Rfft
   onedim::Rfft<T>* onedim_transform;
   Fft<T>* multidim_transform;
   multi::Fft<T>* first_transform;
-  void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
+  void (*real_pass)(Int n, Int m, T* twiddle, T* dst_re, T* dst_im);
 };
 
 template<typename T>
@@ -285,12 +287,11 @@ void rfft(Rfft<T>* s, T* src, T* dst)
 
   s->first_transform->fun_ptr(
     s->first_transform,
-    src,
-    s->working0, s->outer_n / 2 * s->inner_n,
-    true,
-    false);
+    src, nullptr,
+    s->working0, s->working0 + s->outer_n / 2 * s->inner_n,
+    true, false);
 
-  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, 0);
+  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, nullptr);
 
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   const Int nbits = log2(s->outer_n / 2);
@@ -318,7 +319,7 @@ struct Irfft
   onedim::Irfft<T>* onedim_transform;
   Fft<T>* multidim_transform;
   multi::Fft<T>* last_transform;
-  void (*real_pass)(Int n, Int m, T* twiddle, T* dst, Int dst_im_off);
+  void (*real_pass)(Int n, Int m, T* twiddle, T* dst_re, T* dst_im);
 };
 
 template<bool do_create, typename V, typename SrcCf>
@@ -372,7 +373,6 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
     
     if(do_create) r->working0 = (T*) mem;
     mem = aligned_increment(mem, 2 * sizeof(T) * im_off);
-
 
     using SwSrc = cf::Swapped<SrcCf>;
     using SwVec = cf::Swapped<cf::Vec>;
@@ -435,10 +435,12 @@ void irfft(Irfft<T>* s, T* src, T* dst)
       s->working0 + i * s->inner_n * working_idx_ratio,
       false);
 
-  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, 0);
+  s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, nullptr);
 
   s->last_transform->fun_ptr(
-    s->last_transform, s->working0, dst, s->outer_n / 2 * s->inner_n,
+    s->last_transform,
+    s->working0, s->working0 + s->outer_n / 2 * s->inner_n,
+    dst, nullptr,
     false, true);
 }
 

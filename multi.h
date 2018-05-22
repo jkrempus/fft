@@ -166,9 +166,8 @@ struct Fft
   T* twiddle[8 * sizeof(Int) / 2];
   void (*fun_ptr)(
     const Fft<T>* state,
-    T* src,
-    T* dst,
-    Int im_off,
+    T* src_re, T* src_im_arg,
+    T* dst_re, T* dst_im_arg,
     bool interleaved_src_rows,
     bool interleaved_dst_rows);
 };
@@ -194,20 +193,14 @@ struct BrRows
 {
   typedef V_ V;
   typedef Cf_ Cf;
-  Int log2n;
+  Int nbits;
   ET<V>* re_ptr_;
   ET<V>* im_ptr_;
   Int m;
   Int row_stride;
-
-  BrRows(Int n, typename V::T* ptr, Int m, Int row_stride, Int im_off)
-  : log2n(log2(n)),
-    re_ptr_(ptr), im_ptr_(ptr + im_off),
-    m(m), row_stride(row_stride) {}
-
   ComplexPointers<ET<V>> row(Int i) const
   {
-    Int off = reverse_bits(i, log2n) * row_stride * Cf::idx_ratio;
+    Int off = reverse_bits(i, nbits) * row_stride * Cf::idx_ratio;
     return {re_ptr_ + off, im_ptr_ + off};
   }
 };
@@ -261,30 +254,32 @@ void fft_impl(
   }
 }
 
+//If interleaved_src_rows is true, then src_im_arg is ignored
+//Same goes for interleaved_dst_rows and dst_im_arg.
 template<typename V, typename SrcCf, typename DstCf, bool br_dst_rows>
 void fft(
   const Fft<typename V::T>* s,
-  typename V::T* src,
-  typename V::T* dst,
-  Int im_off,
+  ET<V>* src_re, ET<V>* src_im_arg,
+  ET<V>* dst_re, ET<V>* dst_im_arg,
   bool interleaved_src_rows,
   bool interleaved_dst_rows)
 {
-  auto src_rows = interleaved_src_rows
-    ? Rows<V, SrcCf>({src, src + s->m, s->m, 2 * s->m})
-    : Rows<V, SrcCf>({src, src + im_off, s->m, s->m});
+  auto src_im = interleaved_src_rows ? src_re + s->m : src_im_arg;
+  Int src_stride = interleaved_src_rows ? 2 * s->m : s->m;
 
-  Int dst_off = interleaved_dst_rows ? s->m : im_off;
+  Rows<V, SrcCf> src_rows{src_re, src_im, s->m, src_stride};
+
+  auto dst_im = interleaved_dst_rows ? dst_re + s->m : dst_im_arg;
   Int dst_stride = interleaved_dst_rows ? 2 * s->m : s->m;
 
   if(br_dst_rows)
     fft_impl(
       s->n, s->twiddle, src_rows,
-      Rows<V, DstCf>({dst, dst + dst_off, s->m, dst_stride}));
+      Rows<V, DstCf>({dst_re, dst_im, s->m, dst_stride}));
   else
     fft_impl(
       s->n, s->twiddle, src_rows, 
-      BrRows<V, DstCf>({s->n, dst, s->m, dst_stride, dst_off}));
+      BrRows<V, DstCf>{log2(s->n), dst_re, dst_im, s->m, dst_stride});
 }
 
 template<
@@ -341,10 +336,8 @@ Fft<typename V::T>* fft_create(Int n, Int m, void* ptr)
   return (Fft<typename V::T>*) ptr;
 }
 
-// src and dst must not be the same
 template<typename V, typename DstCf, bool inverse>
-void real_pass(
-  Int n, Int m, typename V::T* twiddle, typename V::T* dst, Int dst_im_off)
+void real_pass(Int n, Int m, ET<V>* twiddle, ET<V>* dst_re, ET<V>* dst_im)
 {
   VEC_TYPEDEFS(V);
 
@@ -355,13 +348,15 @@ void real_pass(
   {
     C w = { V::vec(twiddle[i]), V::vec(twiddle[i + n / 2]) };
 
-    auto d0 = dst + i * m * DstCf::idx_ratio; 
-    auto d1 = dst + (n / 2 - i) * m * DstCf::idx_ratio; 
+    auto re0 = dst_re + i * m * DstCf::idx_ratio; 
+    auto im0 = dst_im + i * m * DstCf::idx_ratio; 
+    auto re1 = dst_re + (n / 2 - i) * m * DstCf::idx_ratio; 
+    auto im1 = dst_im + (n / 2 - i) * m * DstCf::idx_ratio; 
 
-    for(auto end = d0 + m * DstCf::idx_ratio; d0 < end;)
+    for(Int off = 0; off < m * DstCf::idx_ratio; off += stride<V, DstCf>())
     {
-      C sval0 = load<V, DstCf>(d0, dst_im_off);
-      C sval1 = load<V, DstCf>(d1, dst_im_off);
+      C sval0 = load<V, DstCf>(re0, im0, off);
+      C sval1 = load<V, DstCf>(re1, im1, off);
 
       C a, b;
 
@@ -379,46 +374,37 @@ void real_pass(
       C dval0 = a + b.mul_neg_i();
       C dval1 = a.adj() + b.adj().mul_neg_i();
 
-      DstCf::store(dval0, d0, dst_im_off);
-      DstCf::store(dval1, d1, dst_im_off);
-
-      d0 += stride<V, DstCf>();
-      d1 += stride<V, DstCf>();
+      store<DstCf>(dval0, re0, im0, off);
+      store<DstCf>(dval1, re1, im1, off);
     }
   }
 
   if(inverse)
   {
-    auto s0 = dst; 
-    auto s1 = dst + n / 2 * m * DstCf::idx_ratio; 
-    auto d = dst; 
+    auto re0 = dst_re;
+    auto im0 = dst_im;
+    auto re1 = dst_re + n / 2 * m * DstCf::idx_ratio; 
+    auto im1 = dst_im + n / 2 * m * DstCf::idx_ratio; 
 
-    for(auto end = s0 + m * DstCf::idx_ratio; s0 < end;)
+    for(Int off = 0; off < m * DstCf::idx_ratio; off += stride<V, DstCf>())
     {
-      Vec r0 = load<V, DstCf>(s0, dst_im_off).re;
-      Vec r1 = load<V, DstCf>(s1, dst_im_off).re;
-      DstCf::template store<0, V>({r0 + r1, r0 - r1}, d, dst_im_off);
-
-      s0 += stride<V, DstCf>();
-      s1 += stride<V, DstCf>();
-      d += stride<V, DstCf>();
+      Vec r0 = load<V, DstCf>(re0, im0, off).re;
+      Vec r1 = load<V, DstCf>(re1, im1, off).re;
+      store<DstCf>(C{r0 + r1, r0 - r1}, re0, im0, off);
     }
   }
   else
   {
-    auto d0 = dst; 
-    auto d1 = dst + n / 2 * m * DstCf::idx_ratio; 
-    auto s = dst; 
+    auto re0 = dst_re; 
+    auto im0 = dst_im; 
+    auto re1 = dst_re + n / 2 * m * DstCf::idx_ratio;
+    auto im1 = dst_im + n / 2 * m * DstCf::idx_ratio;
 
-    for(auto end = s + m * DstCf::idx_ratio; s < end;)
+    for(Int off = 0; off < m * DstCf::idx_ratio; off += stride<V, DstCf>())
     {
-      C r0 = load<V, DstCf>(s, dst_im_off);
-      DstCf::template store<0, V>({r0.re + r0.im, V::vec(0)}, d0, dst_im_off);
-      DstCf::template store<0, V>({r0.re - r0.im, V::vec(0)}, d1, dst_im_off);
-      
-      s += stride<V, DstCf>();
-      d0 += stride<V, DstCf>();
-      d1 += stride<V, DstCf>();
+      C r0 = load<V, DstCf>(re0, im0, off);
+      store<DstCf>(C{r0.re + r0.im, V::vec(0)}, re0, im0, off);
+      store<DstCf>(C{r0.re - r0.im, V::vec(0)}, re1, im1, off);
     }
   }
 }
