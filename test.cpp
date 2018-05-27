@@ -22,7 +22,7 @@
 #include "fftw3.h"
 #endif
 
-//#define INTERLEAVED 1;
+//#define INTERLEAVED 1
 
 using std::chrono::high_resolution_clock;
 
@@ -455,8 +455,10 @@ struct InterleavedWrapperBase<T, true, false>
   std::vector<Int> symmetric_size;
   T* src;
   T* dst;
-  
-  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0) : size(size)
+  Int im_off;
+
+  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0)
+    : size(size), im_off(im_off)
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
@@ -496,17 +498,17 @@ struct InterleavedWrapperBase<T, true, true>
 {
   std::vector<Int> size;
   std::vector<Int> symmetric_size;
-  Int im_offset;
+  Int im_off;
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
-    size(size),
-    im_offset(align_size<T>(product(size) / 2 + 1))
+  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0)
+  : size(size), im_off(0)
   {
     symmetric_size = size;
     symmetric_size.back() = symmetric_size.back() / 2 + 1;
-    src = (T*) alloc(2 * sizeof(T) * im_offset);
+    Int src_n = product(size) / 2 + 1;
+    src = (T*) alloc(2 * sizeof(T) * src_n);
     dst = (T*) alloc(sizeof(T) * product(size));
   }
 
