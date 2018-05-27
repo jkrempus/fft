@@ -139,13 +139,13 @@ void fft_impl(
 }
 
 template<typename T>
-void fft(Fft<T>* state, T* src, T* dst)
+void fft(Fft<T>* state, T* src_re, T* src_im, T* dst_re, T* dst_im)
 {
   fft_impl<T>(
     0, state,
-    src, src + state->num_elements,
+    src_re, src_im,
     state->working,
-    dst, dst + state->num_elements,
+    dst_re, dst_im,
     false);
 }
 
@@ -156,14 +156,14 @@ struct Ifft
 };
 
 template<typename T>
-void ifft(Ifft<T>* state, T* src, T* dst)
+void ifft(Ifft<T>* state, T* src_re, T* src_im, T* dst_re, T* dst_im)
 {
   auto s = &state->state;
   fft_impl<T>(
     0, s,
-    src, src + s->num_elements,
+    src_re, src_im,
     s->working,
-    dst, dst + s->num_elements,
+    dst_re, dst_im,
     false);
 }
 
@@ -296,10 +296,10 @@ Rfft<typename V::T>* rfft_create(Int ndim_in, const Int* dim_in, void* mem)
 }
 
 template<typename T>
-void rfft(Rfft<T>* s, T* src, T* dst)
+void rfft(Rfft<T>* s, T* src, T* dst_re, T* dst_im)
 {
   if(s->onedim_transform)
-    return onedim::rfft(s->onedim_transform, src, dst);
+    return onedim::rfft(s->onedim_transform, src, dst_re, dst_im);
 
   s->first_transform->fun_ptr(
     s->first_transform,
@@ -318,7 +318,7 @@ void rfft(Rfft<T>* s, T* src, T* dst)
       0, s->multidim_transform,
       s->working0 + i * s->inner_n * working_idx_ratio, (T*) nullptr,
       s->multidim_transform->working,
-      dst + dst_off, dst + s->im_off + dst_off,
+      dst_re + dst_off, dst_im + dst_off,
       false);
   }
 }
@@ -436,9 +436,10 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
 
 
 template<typename T>
-void irfft(Irfft<T>* s, T* src, T* dst)
+void irfft(Irfft<T>* s, T* src_re, T* src_im, T* dst)
 {
-  if(s->onedim_transform) return onedim::irfft(s->onedim_transform, src, dst);
+  if(s->onedim_transform)
+    return onedim::irfft(s->onedim_transform, src_re, src_im, dst);
   
   const Int working_idx_ratio = 2; // because we have cf::Vec in working
   const Int nbits = log2(s->outer_n / 2);
@@ -447,7 +448,7 @@ void irfft(Irfft<T>* s, T* src, T* dst)
     Int src_off = i * s->inner_n * s->src_idx_ratio;
     fft_impl(
       0, s->multidim_transform,
-      src + src_off, src + s->im_off + src_off,
+      src_re + src_off, src_im + src_off,
       s->multidim_transform->working,
       s->working0 + i * s->inner_n * working_idx_ratio, (T*) nullptr,
       false);

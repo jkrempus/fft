@@ -319,7 +319,7 @@ struct SplitWrapperBase<T, true, false>
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
+  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
     im_off(im_off),
     size(size),
     src(alloc_array<T>(product(size))),
@@ -370,7 +370,7 @@ struct SplitWrapperBase<T, true, true>
   T* src;
   T* dst;
 
-  SplitWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
+  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
     im_off(im_off),
     size(size),
     dst(alloc_array<T>(product(size))),
@@ -561,7 +561,11 @@ struct TestWrapper<V, Cf, false, false>
       alloc(fft_memsize<V, Cf, Cf>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
-  void transform() { fft<T>(state, this->src, this->dst); }
+  void transform()
+  {
+    Int n = product(this->size);
+    fft<T>(state, this->src, this->src + n, this->dst, this->dst + n);
+  }
 };
 
 template<typename V, typename Cf>
@@ -581,7 +585,11 @@ struct TestWrapper<V, Cf, false, true>
       alloc(ifft_memsize<V, Cf, Cf>(size.size(), &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
-  void transform() { ifft<T>(state, this->src, this->dst); }
+  void transform()
+  {
+    Int n = product(this->size);
+    ifft<T>(state, this->src, this->src + n, this->dst, this->dst + n);
+  }
 };
 
 template<typename V, typename Cf>
@@ -610,7 +618,10 @@ struct TestWrapper<V, Cf, true, false>
 
   ~TestWrapper() { dealloc(state); }
 
-  void transform() { rfft(state, this->src, this->dst); }
+  void transform()
+  {
+    rfft(state, this->src, this->dst, this->dst + this->im_off);
+  }
 };
 
 template<typename V, typename Cf>
@@ -636,7 +647,10 @@ struct TestWrapper<V, Cf, true, true>
 
   ~TestWrapper() { dealloc(state); }
 
-  void transform() { irfft(state, this->src, this->dst); }
+  void transform()
+  {
+    irfft(state, this->src, this->src + this->im_off, this->dst);
+  }
 };
 
 #ifdef HAVE_FFTW

@@ -1060,14 +1060,6 @@ void rfft(const Rfft<T>* state, const T* src, T* dst_re, T* dst_im)
     dst_re, dst_im);
 }
 
-//Just for compatibility with the current version of fft_core.h, should be
-//removed after we change the API there.
-template<typename T>
-void rfft(const Rfft<T>* state, T* src, T* dst)
-{
-  rfft(state, src, dst, dst + align_size<T>(state->state->n + 1));
-}
-
 template<typename T>
 struct Irfft
 {
@@ -1131,15 +1123,6 @@ void irfft(const Irfft<T>* state, const T* src_re, const T* src_im, T* dst)
     dst + complex_state->n);
 
   ifft(state->state, dst, dst + complex_state->n, dst, dst + complex_state->n);
-}
-
-//Just for compatibility with the current version of fft_core.h, should be
-//removed after we change the API there.
-template<typename T>
-void irfft(const Irfft<T>* state, T* src, T* dst)
-{
-  auto complex_state = ((Fft<T>*) state->state);
-  irfft(state, src, src + align_size<T>(complex_state->n + 1), dst);
 }
 
 }
