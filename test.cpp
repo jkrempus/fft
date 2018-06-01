@@ -273,17 +273,19 @@ T product(const std::vector<T>& v)
   return r;
 }
 
-template<typename T, bool is_real, bool is_inverse>
+template<
+  typename T, typename ImOff, typename HalvedDim,
+  bool is_real, bool is_inverse>
 struct SplitWrapperBase { };
 
-template<typename T, bool is_inverse_>
-struct SplitWrapperBase<T, false, is_inverse_>
+template<typename T, typename ImOff, typename HalvedDim, bool is_inverse_>
+struct SplitWrapperBase<T, ImOff, HalvedDim, false, is_inverse_>
 {
   std::vector<Int> size;
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int> size, Int im_off = 0) :
+  SplitWrapperBase(const std::vector<Int> size) :
     size(size),
     src((T*) alloc(2 * sizeof(T) * product(size))),
     dst((T*) alloc(2 * sizeof(T) * product(size))) { }
@@ -311,21 +313,19 @@ struct SplitWrapperBase<T, false, is_inverse_>
   }
 };
 
-template<typename T>
-struct SplitWrapperBase<T, true, false>
+template<typename T, typename ImOff, typename HalvedDim>
+struct SplitWrapperBase<T, ImOff, HalvedDim, true, false>
 {
   Int im_off;
   std::vector<Int> size;
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
-    im_off(im_off),
+  SplitWrapperBase(const std::vector<Int>& size) :
+    im_off(ImOff::template get<T>(size)),
     size(size),
     src(alloc_array<T>(product(size))),
-    dst(alloc_array<T>(2 * im_off))
-  {
-  }
+    dst(alloc_array<T>(2 * im_off)) { }
 
   ~SplitWrapperBase()
   {
@@ -344,25 +344,22 @@ struct SplitWrapperBase<T, true, false>
   {
     Int n = product(size);
 
-    auto it = std::find_if(size.begin(), size.end(),
-      [](Int e){ return e > 1; });
-
-    auto size_ = std::vector<Int>(it, size.end());
-    auto symmetric_size = size_;
-    symmetric_size.front() = size_.front() / 2 + 1;
+    Int hd = HalvedDim::get(size);
+    auto symmetric_size = size;
+    symmetric_size[hd] = size[hd] / 2 + 1;
 
     copy_symmetric_view<false>(
       create_view(dst, symmetric_size, 0),
-      create_view(p, size_, 0));
+      create_view(p, size, 0));
   
     copy_symmetric_view<true>(
       create_view(dst + im_off, symmetric_size, 0),
-      create_view(p + n, size_, 0));
+      create_view(p + n, size, 0));
   }
 };
 
-template<typename T>
-struct SplitWrapperBase<T, true, true>
+template<typename T, typename ImOff, typename HalvedDim>
+struct SplitWrapperBase<T, ImOff, HalvedDim, true, true>
 {
   Int im_off;
   std::vector<Int> size;
@@ -370,14 +367,15 @@ struct SplitWrapperBase<T, true, true>
   T* src;
   T* dst;
 
-  SplitWrapperBase(const std::vector<Int>& size, Int im_off) :
-    im_off(im_off),
+  SplitWrapperBase(const std::vector<Int>& size) :
+    im_off(ImOff::template get<T>(size)),
     size(size),
     dst(alloc_array<T>(product(size))),
     src(alloc_array<T>(2 * im_off))
   {
+    Int hd = HalvedDim::get(size);
     symmetric_size = size;
-    symmetric_size.front() = symmetric_size.front() / 2 + 1;
+    symmetric_size[hd] = size[hd] / 2 + 1;
   }
 
   ~SplitWrapperBase()
@@ -409,18 +407,17 @@ struct SplitWrapperBase<T, true, true>
   }
 };
 
-
-template<typename T, bool is_real, bool is_inverse>
+template<typename T, typename HalvedDim, bool is_real, bool is_inverse>
 struct InterleavedWrapperBase { };
 
-template<typename T, bool is_inverse_>
-struct InterleavedWrapperBase<T, false, is_inverse_>
+template<typename T, typename HalvedDim, bool is_inverse_>
+struct InterleavedWrapperBase<T, HalvedDim, false, is_inverse_>
 {
   std::vector<Int> size;
   T* src;
   T* dst;
-  
-  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0) :
+
+  InterleavedWrapperBase(const std::vector<Int>& size) :
     size(size),
     src((T*) alloc(2 * sizeof(T) * product(size))),
     dst((T*) alloc(2 * sizeof(T) * product(size))) { }
@@ -448,20 +445,19 @@ struct InterleavedWrapperBase<T, false, is_inverse_>
   }
 };
 
-template<typename T>
-struct InterleavedWrapperBase<T, true, false>
+template<typename T, typename HalvedDim>
+struct InterleavedWrapperBase<T, HalvedDim, true, false>
 {
   std::vector<Int> size;
   std::vector<Int> symmetric_size;
   T* src;
   T* dst;
-  Int im_off;
 
-  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0)
-    : size(size), im_off(im_off)
+  InterleavedWrapperBase(const std::vector<Int>& size) : size(size)
   {
+    Int hd = HalvedDim::get(size);
     symmetric_size = size;
-    symmetric_size.back() = symmetric_size.back() / 2 + 1;
+    symmetric_size[hd] = size[hd] / 2 + 1;
     dst = (T*) alloc(2 * sizeof(T) * product(symmetric_size));
     src = (T*) alloc(sizeof(T) * product(size));
   }
@@ -486,28 +482,28 @@ struct InterleavedWrapperBase<T, true, false>
     copy_symmetric_view<false>(
       create_view(dst, symmetric_size, 1),
       create_view(p, size, 0));
-    
+
     copy_symmetric_view<true>(
       create_view(dst + 1, symmetric_size, 1),
       create_view(p + n, size, 0));
   }
 };
 
-template<typename T>
-struct InterleavedWrapperBase<T, true, true>
+template<typename T, typename HalvedDim>
+struct InterleavedWrapperBase<T, HalvedDim, true, true>
 {
   std::vector<Int> size;
   std::vector<Int> symmetric_size;
-  Int im_off;
   T* src;
   T* dst;
   
-  InterleavedWrapperBase(const std::vector<Int>& size, Int im_off = 0)
-  : size(size), im_off(0)
+  InterleavedWrapperBase(const std::vector<Int>& size) : size(size)
   {
+    Int hd = HalvedDim::get(size);
     symmetric_size = size;
-    symmetric_size.back() = symmetric_size.back() / 2 + 1;
-    Int src_n = product(size) / 2 + 1;
+    symmetric_size[hd] = size[hd] / 2 + 1;
+
+    Int src_n = product(symmetric_size);
     src = (T*) alloc(2 * sizeof(T) * src_n);
     dst = (T*) alloc(sizeof(T) * product(size));
   }
@@ -535,12 +531,45 @@ struct InterleavedWrapperBase<T, true, true>
   }
 };
 
+struct HalvedDimFirst
+{
+  static Int get(const std::vector<Int>& size)
+  {
+    auto it = std::find_if(size.begin(), size.end(),
+      [](Int e){ return e > 1; });
+
+    return it - size.begin();
+  }
+};
+
+struct HalvedDimLast
+{
+  static Int get(const std::vector<Int>& size)
+  {
+    return size.size() - 1;
+  }
+};
+
+struct AlignedImOff
+{
+  template<typename T>
+  static Int get(const std::vector<Int>& size)
+  {
+    auto it = std::find_if(size.begin(), size.end(),
+      [](Int e){ return e > 1; });
+
+    Int inner = product(&it[1], &size[0] + size.size());
+    return align_size<T>((it[0] / 2 + 1) * inner);
+  }
+};
+
 #ifdef INTERLEAVED
 template<typename T, bool is_real, bool is_inverse>
-using Base = InterleavedWrapperBase<T, is_real, is_inverse>;
+using Base = InterleavedWrapperBase<T, HalvedDimFirst, is_real, is_inverse>;
 #else
 template<typename T, bool is_real, bool is_inverse>
-using Base = SplitWrapperBase<T, is_real, is_inverse>;
+using Base = SplitWrapperBase<
+  T, AlignedImOff, HalvedDimFirst, is_real, is_inverse>;
 #endif
 
 template<typename V, typename Cf, bool is_real, bool is_inverse>
@@ -604,17 +633,8 @@ struct TestWrapper<V, Cf, true, false>
   typedef typename V::T value_type;
   Rfft<T>* state;
 
-  static Int im_offset(const std::vector<Int>& size)
-  {
-    auto it = std::find_if(size.begin(), size.end(),
-      [](Int e){ return e > 1; });
-
-    Int inner = product(&it[1], &size[0] + size.size());
-    return align_size<T>((it[0] / 2 + 1) * inner);
-  }
-
   TestWrapper(const std::vector<Int>& size) :
-    Base<T, true, false>(size, im_offset(size)),
+    Base<T, true, false>(size),
     state(rfft_create<V, Cf>(size.size(), &size[0], 
       alloc(rfft_memsize<V, Cf>(size.size(), &size[0])))) {}
 
@@ -622,7 +642,9 @@ struct TestWrapper<V, Cf, true, false>
 
   void transform()
   {
-    rfft(state, this->src, this->dst, this->dst + this->im_off);
+    Int im_off = AlignedImOff::get<T>(this->size);
+
+    rfft(state, this->src, this->dst, this->dst + im_off);
   }
 };
 
@@ -636,14 +658,8 @@ struct TestWrapper<V, Cf, true, true>
   typedef typename V::T value_type;
   Irfft<T>* state;
 
-  static Int im_offset(const std::vector<Int>& size)
-  {
-    Int inner = product(&size[1], size.size() - 1);
-    return align_size<T>((size[0] / 2 + 1) * inner);
-  }
-
   TestWrapper(const std::vector<Int>& size) :
-    Base<T, true, true>(size, im_offset(size)),
+    Base<T, true, true>(size),
     state(irfft_create<V, Cf>(size.size(), &size[0], 
       alloc(irfft_memsize<V, Cf>(size.size(), &size[0])))) {}
 
@@ -651,7 +667,9 @@ struct TestWrapper<V, Cf, true, true>
 
   void transform()
   {
-    irfft(state, this->src, this->src + this->im_off, this->dst);
+    Int im_off = AlignedImOff::get<T>(this->size);
+
+    irfft(state, this->src, this->src + im_off, this->dst);
   }
 };
 
@@ -706,7 +724,8 @@ template<> fftwf_plan make_plan<true, true, float>(
 }
 
 template<typename T, bool is_real_, bool is_inverse_>
-struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
+struct FftwTestWrapper :
+  public InterleavedWrapperBase<T, HalvedDimLast, is_real_, is_inverse_>
 {
   static const bool is_real = is_real_;
   static const bool is_inverse = is_inverse_;
@@ -730,7 +749,8 @@ struct FftwTestWrapper : public InterleavedWrapperBase<T, is_real_, is_inverse_>
 #endif
 
 template<typename T, bool is_inverse_>
-struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
+struct ReferenceFft :
+  public InterleavedWrapperBase<T, void, false, is_inverse_>
 {
   struct Onedim
   {
@@ -789,7 +809,7 @@ struct ReferenceFft : public InterleavedWrapperBase<T, false, is_inverse_>
   std::vector<T> working;
 
   ReferenceFft(const std::vector<Int>& size)
-    : InterleavedWrapperBase<T, false, is_inverse_>(size)
+    : InterleavedWrapperBase<T, void, false, is_inverse_>(size)
   {
     for(auto e : size) onedim.emplace_back(e);
   }
