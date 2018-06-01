@@ -388,11 +388,11 @@ struct SplitWrapperBase<T, ImOff, HalvedDim, true, true>
   void set_input(U* p)
   {
     copy_view(
-      create_view(p, symmetric_size, 0),
+      create_view(p, size, 0),
       create_view(src, symmetric_size, 0));
 
     copy_view(
-      create_view(p + product(size), symmetric_size, 0),
+      create_view(p + product(size), size, 0),
       create_view(src + im_off, symmetric_size, 0));
   }
 
