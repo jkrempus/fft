@@ -733,7 +733,7 @@ struct FftwTestWrapper :
   fftwf_plan plan;
 
   FftwTestWrapper(const std::vector<Int>& size)
-    : InterleavedWrapperBase<T, is_real, is_inverse_>(size)
+    : InterleavedWrapperBase<T, HalvedDimLast, is_real, is_inverse_>(size)
   {
     plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
   }
