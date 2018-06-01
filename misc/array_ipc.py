@@ -76,7 +76,7 @@ def store_callback(name, arr):
     received[name] = received.get(name, [])
     received[name].append(arr)
 
-def listen(address, callback = store_callback):
+def listen(address="/tmp/array_ipc", callback = store_callback):
     server = create_server(address) 
     threading.Thread(target=listen_loop, args=(server, callback)).start()
     return server
