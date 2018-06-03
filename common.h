@@ -545,7 +545,7 @@ namespace cf = complex_format;
 
 template<typename V, typename SrcCf, typename DstCf>
 FORCEINLINE void complex_copy(
-  typename V::T* src_re, typename V::T* src_im, Int n,
+  const ET<V>* src_re, const ET<V>* src_im, Int n,
   typename V::T* dst_re, typename V::T* dst_im)
 {
   for(Int s = 0, d = 0; s < n * SrcCf::idx_ratio;

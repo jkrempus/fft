@@ -166,22 +166,22 @@ struct Fft
   T* twiddle[8 * sizeof(Int) / 2];
   void (*fun_ptr)(
     const Fft<T>* state,
-    T* src_re, T* src_im_arg,
+    const T* src_re, const T* src_im_arg,
     T* dst_re, T* dst_im_arg,
     bool interleaved_src_rows,
     bool interleaved_dst_rows);
 };
 
-template<typename V_, typename Cf_>
+template<typename V_, typename T, typename Cf_>
 struct Rows
 {
   typedef Cf_ Cf;
   typedef V_ V;
-  ET<V>* re_ptr_;
-  ET<V>* im_ptr_;
+  T* re_ptr_;
+  T* im_ptr_;
   Int m;
   Int row_stride;
-  ComplexPointers<ET<V>> row(Int i) const
+  ComplexPointers<T> row(Int i) const
   {
     Int off = i * row_stride * Cf::idx_ratio;;
     return {re_ptr_ + off, im_ptr_ + off};
@@ -259,7 +259,7 @@ void fft_impl(
 template<typename V, typename SrcCf, typename DstCf, bool br_dst_rows>
 void fft(
   const Fft<typename V::T>* s,
-  ET<V>* src_re, ET<V>* src_im_arg,
+  const ET<V>* src_re, const ET<V>* src_im_arg,
   ET<V>* dst_re, ET<V>* dst_im_arg,
   bool interleaved_src_rows,
   bool interleaved_dst_rows)
@@ -267,7 +267,7 @@ void fft(
   auto src_im = interleaved_src_rows ? src_re + s->m : src_im_arg;
   Int src_stride = interleaved_src_rows ? 2 * s->m : s->m;
 
-  Rows<V, SrcCf> src_rows{src_re, src_im, s->m, src_stride};
+  Rows<V, const ET<V>, SrcCf> src_rows{src_re, src_im, s->m, src_stride};
 
   auto dst_im = interleaved_dst_rows ? dst_re + s->m : dst_im_arg;
   Int dst_stride = interleaved_dst_rows ? 2 * s->m : s->m;
@@ -275,7 +275,7 @@ void fft(
   if(br_dst_rows)
     fft_impl(
       s->n, s->twiddle, src_rows,
-      Rows<V, DstCf>({dst_re, dst_im, s->m, dst_stride}));
+      Rows<V, ET<V>, DstCf>({dst_re, dst_im, s->m, dst_stride}));
   else
     fft_impl(
       s->n, s->twiddle, src_rows, 
