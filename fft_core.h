@@ -108,7 +108,7 @@ Fft<typename V::T>* fft_create(Int ndim_in, const Int* dim_in, void* mem)
 template<typename T>
 void fft_impl(
   Int idim, Fft<T>* s,
-  T* src_re, T* src_im,
+  const T* src_re, const T* src_im,
   T* working,
   T* dst_re, T* dst_im,
   bool interleaved_src_rows)
@@ -139,7 +139,8 @@ void fft_impl(
 }
 
 template<typename T>
-void fft(Fft<T>* state, T* src_re, T* src_im, T* dst_re, T* dst_im)
+void fft(
+  Fft<T>* state, const T* src_re, const T* src_im, T* dst_re, T* dst_im)
 {
   fft_impl<T>(
     0, state,
@@ -156,7 +157,8 @@ struct Ifft
 };
 
 template<typename T>
-void ifft(Ifft<T>* state, T* src_re, T* src_im, T* dst_re, T* dst_im)
+void ifft(
+  Ifft<T>* state, const T* src_re, const T* src_im, T* dst_re, T* dst_im)
 {
   auto s = &state->state;
   fft_impl<T>(
@@ -296,7 +298,7 @@ Rfft<typename V::T>* rfft_create(Int ndim_in, const Int* dim_in, void* mem)
 }
 
 template<typename T>
-void rfft(Rfft<T>* s, T* src, T* dst_re, T* dst_im)
+void rfft(Rfft<T>* s, const T* src, T* dst_re, T* dst_im)
 {
   if(s->onedim_transform)
     return onedim::rfft(s->onedim_transform, src, dst_re, dst_im);
@@ -436,7 +438,7 @@ Irfft<typename V::T>* irfft_create(Int ndim_in, const Int* dim_in, void* mem)
 
 
 template<typename T>
-void irfft(Irfft<T>* s, T* src_re, T* src_im, T* dst)
+void irfft(Irfft<T>* s, const T* src_re, const T* src_im, T* dst)
 {
   if(s->onedim_transform)
     return onedim::irfft(s->onedim_transform, src_re, src_im, dst);
