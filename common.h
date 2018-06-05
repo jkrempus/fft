@@ -1,14 +1,13 @@
 #ifndef FFT_COMMON_H
 #define FFT_COMMON_H
 
-#if defined __arm__
-typedef int Int;
-typedef unsigned Uint;
-#define WORD_SIZE 32
+#ifndef AFFT_NO_STDLIB
+#include <cstddef>
+typedef size_t Uint;
+typedef ptrdiff_t Int;
 #else
 typedef long Int;
 typedef unsigned long Uint;
-#define WORD_SIZE 64
 #endif
 
 const Int max_int = Int(Uint(-1) >> 1);
@@ -41,6 +40,10 @@ Int large_fft_size = 1 << 13;
 Int optimal_size = 1 << 11;
 Int max_vec_size = 8;
 const Int align_bytes = 64;
+
+//TODO: We need to remove many overloads of load and store
+//TODO: We need to move the code for specific combinations
+//of instruction set and element type to other (new) files.
 
 template<typename V> using ET = typename V::T;
 
@@ -92,39 +95,39 @@ void remove_redundant_dimensions(
   }
 }
 
-#if WORD_SIZE == 64
 Int reverse_bits(Int a_in, Int nbits)
 {
-  Uint a = a_in;
-  Uint c1 =  0x5555555555555555ULL;
-  Uint c2 =  0x3333333333333333ULL;
-  Uint c4 =  0x0f0f0f0f0f0f0f0fULL;
-  Uint c8 =  0x00ff00ff00ff00ffULL;
-  Uint c16 = 0x0000ffff0000ffffULL;
-  a = ((a >> 1) & c1) | ((a & c1) << 1);
-  a = ((a >> 2) & c2) | ((a & c2) << 2);
-  a = ((a >> 4) & c4) | ((a & c4) << 4);
-  a = ((a >> 8) & c8) | ((a & c8) << 8);
-  a = ((a >> 16) & c16) | ((a & c16) << 16);
-  a = (a >> 32) | (a << 32);
-  return Int(a >> (64 - nbits));
+  if constexpr(sizeof(Int) == 8)
+  {
+    Uint a = a_in;
+    Uint c1 =  0x5555555555555555ULL;
+    Uint c2 =  0x3333333333333333ULL;
+    Uint c4 =  0x0f0f0f0f0f0f0f0fULL;
+    Uint c8 =  0x00ff00ff00ff00ffULL;
+    Uint c16 = 0x0000ffff0000ffffULL;
+    a = ((a >> 1) & c1) | ((a & c1) << 1);
+    a = ((a >> 2) & c2) | ((a & c2) << 2);
+    a = ((a >> 4) & c4) | ((a & c4) << 4);
+    a = ((a >> 8) & c8) | ((a & c8) << 8);
+    a = ((a >> 16) & c16) | ((a & c16) << 16);
+    a = (a >> 32) | (a << 32);
+    return Int(a >> (64 - nbits));
+  }
+  else
+  {
+    Uint a = a_in;
+    Uint c1 =  0x55555555ULL;
+    Uint c2 =  0x33333333ULL;
+    Uint c4 =  0x0f0f0f0fULL;
+    Uint c8 =  0x00ff00ffULL;
+    a = ((a >> 1) & c1) | ((a & c1) << 1);
+    a = ((a >> 2) & c2) | ((a & c2) << 2);
+    a = ((a >> 4) & c4) | ((a & c4) << 4);
+    a = ((a >> 8) & c8) | ((a & c8) << 8);
+    a = (a >> 16) | (a << 16);
+    return Int(a >> (32 - nbits));
+  }
 }
-#else
-Int reverse_bits(Int a_in, Int nbits)
-{
-  Uint a = a_in;
-  Uint c1 =  0x55555555ULL;
-  Uint c2 =  0x33333333ULL;
-  Uint c4 =  0x0f0f0f0fULL;
-  Uint c8 =  0x00ff00ffULL;
-  a = ((a >> 1) & c1) | ((a & c1) << 1);
-  a = ((a >> 2) & c2) | ((a & c2) << 2);
-  a = ((a >> 4) & c4) | ((a & c4) << 4);
-  a = ((a >> 8) & c8) | ((a & c8) << 8);
-  a = (a >> 16) | (a << 16);
-  return Int(a >> (32 - nbits));
-}
-#endif
 
 struct BitReversed
 {

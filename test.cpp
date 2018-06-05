@@ -1,8 +1,9 @@
 #include "misc/array_ipc.h"
 
-#include "fft_core.h"
+#include "fft.h"
 
 #include <string>
+#include <cassert>
 #include <cstring>
 #include <algorithm>
 #include <cstdlib>
@@ -17,12 +18,19 @@
 #include <unordered_map>
 #include <sstream>
 #include <chrono>
+#include <type_traits>
 
 #ifdef HAVE_FFTW
 #include "fftw3.h"
 #endif
 
 //#define INTERLEAVED 1
+
+using Int = ptrdiff_t;
+using Uint = size_t;
+static constexpr Int maxdim = 64;
+static constexpr Int chunk_size = 0;
+using ElementType = float;
 
 using std::chrono::high_resolution_clock;
 
@@ -42,7 +50,7 @@ struct IterateMultidim
 
   IterateMultidim(Int ndim, const Int* size) : ndim(ndim), size(size)
   {
-    ASSERT(ndim < sizeof(idx) / sizeof(idx[0]));
+    assert(ndim < sizeof(idx) / sizeof(idx[0]));
     for(Int i = 0; i < ndim; i++) idx[i] = 0;
   }
 
@@ -222,18 +230,9 @@ void copy_symmetric_view(const View<T>& src, const View<U>& dst)
   }
 }
 
-template<typename V, typename Cf>
-constexpr Int chunk_size()
+static constexpr Int get_im_offset(Int split_im_offset)
 {
-  return
-    SameType<cf::Scal, Cf>::value ? 1 :
-    SameType<cf::Vec, Cf>::value ? V::vec_size : 0;
-}
-
-template<typename V, typename Cf>
-constexpr Int get_im_offset(Int split_im_offset)
-{
-  return chunk_size<V, Cf>() ? chunk_size<V, Cf>() : split_im_offset;
+  return chunk_size ? chunk_size : split_im_offset;
 }
 
 template<typename T>
@@ -262,6 +261,14 @@ View<T> create_view(T* ptr, const std::vector<Int>& size, Int chunk_size)
   r.data = ptr;
   r.chunk_size = chunk_size;
   //printf("create_view "); print_view(r);
+  return r;
+}
+
+template<typename T>
+T product(const T* begin, const T* end)
+{
+  T r(1);
+  for(const T* p = begin; p != end; p++) r *= *p;
   return r;
 }
 
@@ -559,7 +566,7 @@ struct AlignedImOff
       [](Int e){ return e > 1; });
 
     Int inner = product(&it[1], &size[0] + size.size());
-    return align_size<T>((it[0] / 2 + 1) * inner);
+    return afft32_align_size((it[0] / 2 + 1) * inner);
   }
 };
 
@@ -572,71 +579,70 @@ using Base = SplitWrapperBase<
   T, AlignedImOff, HalvedDimFirst, is_real, is_inverse>;
 #endif
 
-template<typename V, typename Cf, bool is_real, bool is_inverse>
+template<typename T, bool is_real, bool is_inverse>
 struct TestWrapper { };
 
-template<typename V, typename Cf>
-struct TestWrapper<V, Cf, false, false>
-: public Base<typename V::T, false, false>
+template<typename T>
+struct TestWrapper<T, false, false>
+: public Base<T, false, false>
 {
   static const bool is_real = false;
   static const bool is_inverse = false;
-  VEC_TYPEDEFS(V);
   typedef T value_type;
-  Fft<T>* state;
+  Afft32C* state;
   TestWrapper(const std::vector<Int>& size) :
     Base<T, false, false>(size),
-    state(fft_create<V, Cf, Cf>(
+    state(afft32_c_create(
       size.size(),
-      &size[0],
-      alloc(fft_memsize<V, Cf, Cf>(size.size(), &size[0])))) {}
+      (const Uint*) &size[0],
+      alloc(afft32_c_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
   void transform()
   {
     Int n = product(this->size);
-    fft<T>(state, this->src, this->src + n, this->dst, this->dst + n);
+    afft32_c_transform(
+      state, this->src, this->src + n, this->dst, this->dst + n);
   }
 };
 
-template<typename V, typename Cf>
-struct TestWrapper<V, Cf, false, true>
-: public Base<typename V::T, false, true>
+template<typename T>
+struct TestWrapper<T, false, true>
+: public Base<T, false, true>
 {
   static const bool is_real = false;
   static const bool is_inverse = true;
-  VEC_TYPEDEFS(V);
   typedef T value_type;
-  Ifft<T>* state;
+  Afft32CI* state;
   TestWrapper(const std::vector<Int>& size) :
     Base<T, false, true>(size),
-    state(ifft_create<V, Cf, Cf>(
+    state(afft32_ci_create(
       size.size(),
-      &size[0],
-      alloc(ifft_memsize<V, Cf, Cf>(size.size(), &size[0])))) {}
+      (const Uint*) &size[0],
+      alloc(afft32_ci_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
   void transform()
   {
     Int n = product(this->size);
-    ifft<T>(state, this->src, this->src + n, this->dst, this->dst + n);
+    afft32_ci_transform(
+      state, this->src, this->src + n, this->dst, this->dst + n);
   }
 };
 
-template<typename V, typename Cf>
-struct TestWrapper<V, Cf, true, false>
-: public Base<typename V::T, true, false>
+template<typename T>
+struct TestWrapper<T, true, false>
+: public Base<T, true, false>
 {
   static const bool is_real = true;
   static const bool is_inverse = false;
-  VEC_TYPEDEFS(V);
-  typedef typename V::T value_type;
-  Rfft<T>* state;
+  typedef T value_type;
+  Afft32R* state;
 
   TestWrapper(const std::vector<Int>& size) :
     Base<T, true, false>(size),
-    state(rfft_create<V, Cf>(size.size(), &size[0], 
-      alloc(rfft_memsize<V, Cf>(size.size(), &size[0])))) {}
+    state(afft32_r_create(size.size(), (const Uint*) &size[0], 
+      alloc(afft32_r_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
@@ -644,24 +650,23 @@ struct TestWrapper<V, Cf, true, false>
   {
     Int im_off = AlignedImOff::get<T>(this->size);
 
-    rfft(state, this->src, this->dst, this->dst + im_off);
+    afft32_r_transform(state, this->src, this->dst, this->dst + im_off);
   }
 };
 
-template<typename V, typename Cf>
-struct TestWrapper<V, Cf, true, true>
-: public Base<typename V::T, true, true>
+template<typename T>
+struct TestWrapper<T, true, true>
+: public Base<T, true, true>
 {
   static const bool is_real = true;
   static const bool is_inverse = true;
-  VEC_TYPEDEFS(V);
-  typedef typename V::T value_type;
-  Irfft<T>* state;
+  typedef T value_type;
+  Afft32RI* state;
 
   TestWrapper(const std::vector<Int>& size) :
     Base<T, true, true>(size),
-    state(irfft_create<V, Cf>(size.size(), &size[0], 
-      alloc(irfft_memsize<V, Cf>(size.size(), &size[0])))) {}
+    state(afft32_ri_create(size.size(), (const Uint*) &size[0], 
+      alloc(afft32_ri_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
@@ -669,7 +674,7 @@ struct TestWrapper<V, Cf, true, true>
   {
     Int im_off = AlignedImOff::get<T>(this->size);
 
-    irfft(state, this->src, this->src + im_off, this->dst);
+    afft32_ri_transform(state, this->src, this->src + im_off, this->dst);
   }
 };
 
@@ -752,12 +757,44 @@ template<typename T, bool is_inverse_>
 struct ReferenceFft :
   public InterleavedWrapperBase<T, void, false, is_inverse_>
 {
+  struct Complex
+  {
+    T re;
+    T im;
+    Complex mul_neg_i() { return {im, -re}; }
+    Complex adj() { return {re, -im}; }
+    Complex operator+(Complex other)
+    {
+      return {re + other.re, im + other.im};
+    }
+
+    Complex operator-(Complex other)
+    {
+      return {re - other.re, im - other.im};
+    }
+
+    Complex operator*(Complex other)
+    {
+      return {
+        re * other.re - im * other.im,
+        re * other.im + im * other.re};
+    }
+
+    Complex operator*(T other)
+    {
+      return {re * other, im * other};
+    }
+  };
+
+  static Complex load(const T* ptr) { return { ptr[0], ptr[1] }; }
+  static void store(Complex val, T* ptr) { ptr[0] = val.re; ptr[1] = val.im; }
+
   struct Onedim
   {
-    std::vector<Complex<Scalar<T>>> twiddle;
+    std::vector<Complex> twiddle;
     std::vector<T> working;
     Int n;
-    
+
     Onedim(Int n) : n(n), working(2 * n), twiddle(n / 2)
     {
       auto pi = std::acos(T(-1));
@@ -770,12 +807,12 @@ struct ReferenceFft :
 
     void transform(T* src, T* dst)
     {
-      copy(src, 2 * n, dst);
+      std::copy_n(src, 2 * n, dst);
       for(Int dft_size = 1; dft_size < n; dft_size *= 2)
       {
-        copy(dst, 2 * n, &working[0]);
-        typedef Scalar<T> S;
-        typedef complex_format::Scal CF;
+        static constexpr Int stride = 2;
+
+        std::copy_n(dst, 2 * n, &working[0]);
         Int twiddle_stride = n / 2 / dft_size;
         for(Int i = 0; i < n / 2; i += dft_size)
         {
@@ -784,15 +821,12 @@ struct ReferenceFft :
           Int twiddle_i = 0;
           for(; src_i < i + dft_size;)
           {
-            auto a = load<S, CF>(
-              &working[0] + src_i * stride<S, CF>(), Int(0));
-
-            auto b = load<S, CF>(
-              &working[0] + (src_i + n / 2) * stride<S, CF>(), Int(0));
+            auto a = load(&working[0] + src_i * stride);
+            auto b = load(&working[0] + (src_i + n / 2) * stride);
 
             auto mul = twiddle[twiddle_i] * b;
-            CF::store(a + mul, dst + dst_i * stride<S, CF>(), Int(0));
-            CF::store(a - mul, dst + (dst_i + dft_size) * stride<S, CF>(), Int(0));
+            store(a + mul, dst + dst_i * stride);
+            store(a - mul, dst + (dst_i + dft_size) * stride);
             src_i++;
             dst_i++;
             twiddle_i += twiddle_stride;
@@ -816,11 +850,11 @@ struct ReferenceFft :
 
   void transform()
   {
-    copy(this->src, 2 * product(this->size), this->dst);
+    std::copy_n(this->src, 2 * product(this->size), this->dst);
     for(Int dim = 0; dim < this->size.size(); dim++)
     {
       Int s[maxdim];
-      copy(&this->size[0], this->size.size(), s);
+      std::copy_n(&this->size[0], this->size.size(), s);
       s[dim] = 1;
       auto dst_view = create_view(this->dst, this->size, 1);
       for(IterateMultidim it(this->size.size(), s); !it.empty(); it.advance())
@@ -977,24 +1011,6 @@ TestResult compare(const std::vector<Int>& size)
 
 extern "C" void* aligned_alloc(size_t, size_t);
 
-#ifdef NO_SIMD
-typedef Scalar<float> V;
-#elif defined __ARM_NEON__
-typedef Neon V;
-#elif defined __AVX__
-typedef AvxFloat V;
-#elif defined __SSE2__
-typedef SseFloat V;
-#else
-typedef Scalar<float> V;
-#endif
-
-#ifdef INTERLEAVED
-typedef complex_format::Scal Cf;
-#else
-typedef complex_format::Split Cf;
-#endif
-
 template<typename... Args>
 void fail(const Args&... args)
 {
@@ -1079,7 +1095,8 @@ TestResult test_or_bench2(
   const Flags& flags)
 {
   if(impl == "fft")
-    return test_or_bench3<TestWrapper<V, Cf, is_real, is_inverse>>(impl, lsz, flags);
+    return test_or_bench3<TestWrapper<ElementType, is_real, is_inverse>>(
+      impl, lsz, flags);
 #ifdef HAVE_FFTW
   else if(impl == "fftw")
     return
