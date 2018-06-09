@@ -566,7 +566,7 @@ struct AlignedImOff
       [](Int e){ return e > 1; });
 
     Int inner = product(&it[1], &size[0] + size.size());
-    return afft32_align_size((it[0] / 2 + 1) * inner);
+    return afft_32_align_size((it[0] / 2 + 1) * inner);
   }
 };
 
@@ -589,19 +589,19 @@ struct TestWrapper<T, false, false>
   static const bool is_real = false;
   static const bool is_inverse = false;
   typedef T value_type;
-  Afft32C* state;
+  afft_32_c_type* state;
   TestWrapper(const std::vector<Int>& size) :
     Base<T, false, false>(size),
-    state(afft32_c_create(
+    state(afft_32_c_create(
       size.size(),
       (const Uint*) &size[0],
-      alloc(afft32_c_memsize(size.size(), (const Uint*) &size[0])))) {}
+      alloc(afft_32_c_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
   void transform()
   {
     Int n = product(this->size);
-    afft32_c_transform(
+    afft_32_c_transform(
       state, this->src, this->src + n, this->dst, this->dst + n);
   }
 };
@@ -613,19 +613,19 @@ struct TestWrapper<T, false, true>
   static const bool is_real = false;
   static const bool is_inverse = true;
   typedef T value_type;
-  Afft32CI* state;
+  afft_32_ci_type* state;
   TestWrapper(const std::vector<Int>& size) :
     Base<T, false, true>(size),
-    state(afft32_ci_create(
+    state(afft_32_ci_create(
       size.size(),
       (const Uint*) &size[0],
-      alloc(afft32_ci_memsize(size.size(), (const Uint*) &size[0])))) {}
+      alloc(afft_32_ci_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
   void transform()
   {
     Int n = product(this->size);
-    afft32_ci_transform(
+    afft_32_ci_transform(
       state, this->src, this->src + n, this->dst, this->dst + n);
   }
 };
@@ -637,12 +637,12 @@ struct TestWrapper<T, true, false>
   static const bool is_real = true;
   static const bool is_inverse = false;
   typedef T value_type;
-  Afft32R* state;
+  afft_32_r_type* state;
 
   TestWrapper(const std::vector<Int>& size) :
     Base<T, true, false>(size),
-    state(afft32_r_create(size.size(), (const Uint*) &size[0], 
-      alloc(afft32_r_memsize(size.size(), (const Uint*) &size[0])))) {}
+    state(afft_32_r_create(size.size(), (const Uint*) &size[0], 
+      alloc(afft_32_r_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
@@ -650,7 +650,7 @@ struct TestWrapper<T, true, false>
   {
     Int im_off = AlignedImOff::get<T>(this->size);
 
-    afft32_r_transform(state, this->src, this->dst, this->dst + im_off);
+    afft_32_r_transform(state, this->src, this->dst, this->dst + im_off);
   }
 };
 
@@ -661,12 +661,12 @@ struct TestWrapper<T, true, true>
   static const bool is_real = true;
   static const bool is_inverse = true;
   typedef T value_type;
-  Afft32RI* state;
+  afft_32_ri_type* state;
 
   TestWrapper(const std::vector<Int>& size) :
     Base<T, true, true>(size),
-    state(afft32_ri_create(size.size(), (const Uint*) &size[0], 
-      alloc(afft32_ri_memsize(size.size(), (const Uint*) &size[0])))) {}
+    state(afft_32_ri_create(size.size(), (const Uint*) &size[0], 
+      alloc(afft_32_ri_memsize(size.size(), (const Uint*) &size[0])))) {}
 
   ~TestWrapper() { dealloc(state); }
 
@@ -674,7 +674,7 @@ struct TestWrapper<T, true, true>
   {
     Int im_off = AlignedImOff::get<T>(this->size);
 
-    afft32_ri_transform(state, this->src, this->src + im_off, this->dst);
+    afft_32_ri_transform(state, this->src, this->src + im_off, this->dst);
   }
 };
 
