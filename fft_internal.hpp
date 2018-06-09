@@ -1,9 +1,8 @@
 #ifndef FFT_CORE_H
 #define FFT_CORE_H
 
-#include "common.h"
-#include "onedim.h"
-#include "multi.h"
+#include "onedim.hpp"
+#include "multi.hpp"
 
 namespace
 {

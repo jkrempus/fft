@@ -1,7 +1,7 @@
 #ifndef FFT_ONEDIM_H
 #define FFT_ONEDIM_H
 
-#include "common.h"
+#include "common.hpp"
 
 namespace
 {
