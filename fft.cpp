@@ -74,4 +74,6 @@ void afft_32_ri_transform(afft_32_ri_type* state,
 
 size_t afft_32_align_size(size_t sz) { return align_size<float>(sz); }
 
+const size_t afft_alignment = 64;
+
 }
