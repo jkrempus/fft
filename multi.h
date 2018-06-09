@@ -1,6 +1,8 @@
 #ifndef FFT_MULTI_H
 #define FFT_MULTI_H
 
+namespace
+{
 namespace multi
 {
 
@@ -407,6 +409,7 @@ void real_pass(Int n, Int m, ET<V>* twiddle, ET<V>* dst_re, ET<V>* dst_im)
       store<DstCf>(C{r0.re - r0.im, V::vec(0)}, re1, im1, off);
     }
   }
+}
 }
 }
 

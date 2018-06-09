@@ -5,7 +5,9 @@
 #include "onedim.h"
 #include "multi.h"
 
-const Int maxdim = 64;
+namespace
+{
+constexpr Int maxdim = 64;
 
 template<typename T>
 struct Fft
@@ -463,6 +465,8 @@ void irfft(Irfft<T>* s, const T* src_re, const T* src_im, T* dst)
     s->working0, s->working0 + s->outer_n / 2 * s->inner_n,
     dst, nullptr,
     false, true);
+}
+
 }
 
 #endif

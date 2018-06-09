@@ -1,6 +1,10 @@
 #ifndef FFT_COMMON_H
 #define FFT_COMMON_H
 
+#ifdef __SSE2__
+#include <immintrin.h>
+#endif
+
 #ifndef AFFT_NO_STDLIB
 #include <cstddef>
 typedef size_t Uint;
@@ -10,36 +14,20 @@ typedef long Int;
 typedef unsigned long Uint;
 #endif
 
-const Int max_int = Int(Uint(-1) >> 1);
-
 #define FORCEINLINE __attribute__((always_inline)) inline
-//#define FORCEINLINE
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
 
 #define ASSERT(condition) ((condition) || *((volatile int*) 0))
 
-#if 0
-
-#define DEBUG_OUTPUT
-
-#include <cstdio>
-template<typename T_> void dump(T_* ptr, Int n, const char* name, ...);
-
-template<typename T>
-void print_vec(T a)
+namespace
 {
-  for(Int i = 0; i < sizeof(T) / sizeof(float); i++)
-    printf("%f ", ((float*)&a)[i]);
+constexpr Int max_int = Int(Uint(-1) >> 1);
 
-  printf("\n"); 
-}
-#endif
-
-Int large_fft_size = 1 << 13;
-Int optimal_size = 1 << 11;
-Int max_vec_size = 8;
-const Int align_bytes = 64;
+constexpr Int large_fft_size = 1 << 13;
+constexpr Int optimal_size = 1 << 11;
+constexpr Int max_vec_size = 8;
+constexpr const Int align_bytes = 64;
 
 //TODO: We need to remove many overloads of load and store
 //TODO: We need to move the code for specific combinations
@@ -772,7 +760,6 @@ struct Neon
 #endif
 
 #ifdef __SSE2__
-#include <immintrin.h>
 
 struct SseFloat
 {
@@ -1163,5 +1150,7 @@ Int product(const Int* b, const Int* e)
 }
 
 Int product(const Int* p, Int n) { return product(p, p + n); }
+
+}
 
 #endif

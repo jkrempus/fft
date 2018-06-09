@@ -3,6 +3,8 @@
 
 #include "common.h"
 
+namespace
+{
 namespace onedim
 {
 template<typename T>
@@ -1125,5 +1127,6 @@ void irfft(const Irfft<T>* state, const T* src_re, const T* src_im, T* dst)
   ifft(state->state, dst, dst + complex_state->n, dst, dst + complex_state->n);
 }
 
+}
 }
 #endif
