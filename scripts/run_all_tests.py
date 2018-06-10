@@ -15,7 +15,8 @@ m = 22 #maximal log2n
 
 def run_single(sizes, is_real, is_inverse):
     cmd = [executable, "fft"] + [str(i) for i in sizes]
-    cmd.append("-p={}".format(precision))
+    cmd.append("-p")
+    cmd.append("{}".format(precision))
     if is_real: cmd.append("-r")
     if is_inverse: cmd.append("-i")
     print(cmd, file=sys.stderr)

@@ -19,6 +19,8 @@
 #include <sstream>
 #include <chrono>
 #include <type_traits>
+#include <optional>
+#include <functional>
 
 #ifdef HAVE_FFTW
 #include "fftw3.h"
@@ -960,75 +962,277 @@ TestResult compare(const std::vector<Int>& size)
 
 extern "C" void* aligned_alloc(size_t, size_t);
 
-template<typename... Args>
-void fail(std::ostream& out, const Args&... args)
+template<typename Map>
+typename Map::mapped_type* map_element_ptr(
+  Map& map, const typename Map::key_type& key)
 {
-  out << "Failure: ";
-  (out << ... << args);
-  out << std::endl;
+  auto it = map.find(key);
+  return it == map.end() ? NULL : &it->second;
 }
 
-using Flags = std::unordered_map<std::string, std::string>;
+template<typename T>
+T dereference_or(const T* ptr, const T& default_val)
+{
+  return ptr ? *ptr : default_val;
+}
+
+//TODO add --help flag handling
+struct OptionParser
+{
+  struct Result
+  {
+    bool data_valid;
+    bool error;
+    std::string message;
+    operator bool() const { return data_valid; }
+  };
+
+  struct Switch
+  {
+    std::string description;
+    bool* dst;
+  };
+
+  struct Option
+  {
+    std::string name;
+    std::string description;
+    std::function<bool(const char*)> handler;
+    Int min_num = 0;
+    Int max_num = 1;
+    Int num = 0;
+  };
+
+  std::unordered_map<std::string, Switch> switches;
+
+  std::unordered_map<std::string, Option> flags;
+
+  std::vector<Option> positional;
+
+  void add_switch(
+    const std::string_view& name, const std::string_view& description,
+    bool* dst)
+  {
+    switches.emplace(std::string(name), Switch{std::string(description), dst});
+  }
+
+  template<typename T>
+  void add_optional_flag(
+    const std::string_view& name, const std::string_view& description,
+    std::optional<T>* dst)
+  {
+    Option option;
+    option.name = std::string(name);
+    option.description = std::string(description);
+    option.handler = [dst](const char* val)
+    {
+      std::stringstream s(val);
+      T converted;
+      s >> converted;
+      if(s.fail()) return false;
+      *dst = converted;
+      return true;
+    };
+
+    flags.emplace(std::string(name), std::move(option));
+  }
+
+  template<typename T>
+  void add_positional(
+    const std::string_view& name, const std::string_view& description,
+    T* dst)
+  {
+    Option option;
+    option.name = std::string(name);
+    option.description = std::string(description);
+    option.min_num = 1;
+    option.handler = [dst](const char* val)
+    {
+      std::stringstream s(val);
+      T converted;
+      s >> converted;
+      if(s.fail()) return false;
+      *dst = converted;
+      return true;
+    };
+
+    positional.push_back(std::move(option));
+  }
+
+  template<typename T>
+  void add_multi_positional(
+    const std::string_view& name, const std::string_view& description,
+    Int min_num, Int max_num,
+    std::vector<T>* dst)
+  {
+    Option option;
+    option.name = std::string(name);
+    option.description = std::string(description);
+    option.min_num = min_num;
+    option.max_num = max_num;
+    option.handler = [dst](const char* val)
+    {
+      std::stringstream s(val);
+      T converted;
+      s >> converted;
+      if(s.fail()) return false;
+      dst->push_back(converted);
+      return true;
+    };
+
+    positional.push_back(std::move(option));
+  }
+
+  template<typename... Args>
+  static Result fail(const Args&... args)
+  {
+    Result r;
+    r.data_valid = false;
+    r.error = true;
+    std::stringstream s;
+    s << "Failed to parse command line arguments: ";
+    (s << ... << args);
+    r.message = s.str();
+    return r;
+  }
+
+  Result parse(int argc, char** argv)
+  {
+    for(auto& [name, switch_] : switches) *switch_.dst = false;
+
+    auto positional_it = positional.begin();
+
+    for(int i = 1; i < argc; i++)
+    {
+      if(argv[i][0] == '-')
+      {
+        if(auto switch_ = map_element_ptr(switches, argv[i]))
+          *switch_->dst = true;
+        else if(auto flag = map_element_ptr(flags, argv[i]))
+        {
+          std::string name = argv[i];
+          if(++i == argc) return fail(name, " requires an argument");
+
+          if(++flag->num > flag->max_num)
+            return fail(
+              "Too many ", name, " flags. There can be at most ",
+              flag->max_num);
+
+          if(!flag->handler(argv[i]))
+            return fail(argv[i], " is not a valid value for ", name);
+        }
+        else
+          return fail("Flag ", argv[i], " is not supported.");
+      }
+      else if(positional_it < positional.end())
+      {
+        if(!positional_it->handler(argv[i]))
+          return fail(
+            argv[i], " is not a valid value "
+            "for the positional argument ", positional_it->name);
+
+        if(++positional_it->num == positional_it->max_num) positional_it++;
+      }
+      else
+        return fail("Too many positional arguments.");
+    }
+
+    for(auto& [name, option] : flags)
+      if(option.num < option.min_num)
+        return fail(
+          "There should be at least ", option.min_num, " flags ",
+          name, ", but there are only ", option.num, ".");
+
+    for(auto& option : positional)
+      if(option.num < option.min_num)
+        return fail(
+          "There should be at least ", option.min_num,
+          " positional arguments ", option.name, ", but there are only ",
+          option.num, ".");
+
+    return Result{true, false, ""};
+  }
+};
+
+struct SizeRange
+{
+  Int begin;
+  Int end;
+};
+
+std::istream& operator>>(std::istream& stream, SizeRange& size_range)
+{
+  std::string s(std::istreambuf_iterator<char>(stream), {});
+  const char* p = s.c_str();
+
+  char* next_p;
+  size_range.begin = strtol(p, &next_p, 0);
+
+  if(next_p == p)
+  {
+    stream.setstate(std::ios_base::failbit);
+    return stream;
+  }
+
+  p = next_p;
+
+  if(*p == 0) return stream;
+
+  if(*p != '-')
+  {
+    stream.setstate(std::ios_base::failbit);
+    return stream;
+  }
+
+  p++;
+
+  size_range.end = strtol(p, &next_p, 0);
+
+  if(next_p == p || *next_p != 0)
+  {
+    stream.setstate(std::ios_base::failbit);
+    return stream;
+  }
+
+  return stream;
+}
 
 struct Options
 {
-  Flags flags;
-  std::vector<std::string> positional;
+  bool is_bench;
+  bool is_real;
+  bool is_inverse;
+  std::optional<double> precision;
+  std::string implementation;
+  std::vector<SizeRange> size;
 };
 
-Options parse_options(int argc, char** argv)
+OptionParser::Result parse_options(int argc, char** argv, Options* dst)
 {
-  Options r;
-  for(Int i = 1; i < argc; i++)
-    if(argv[i][0] == '-')
-    {
-      const char* begin = argv[i] + 1;
-      const char* end = begin + strlen(begin);
-      const char* eq = std::find(begin, end, '=');
-      if(eq != end)
-        r.flags.emplace(std::string(begin, eq), std::string(eq + 1, end));
-      else
-        r.flags.emplace(std::string(begin, end), "");
-    }
-    else
-      r.positional.emplace_back(argv[i]);
+  OptionParser parser;
+  parser.add_switch("-r", "Test real transform.", &dst->is_real);
+  parser.add_switch("-i", "Test inverse transform.", &dst->is_inverse);
+  parser.add_switch("-b", "Perform a benchmark.", &dst->is_bench);
+  parser.add_optional_flag(
+    "-p", "Required relative precision", &dst->precision);
 
-  return r;
-}
+  parser.add_positional(
+    "implementation", "Fft implementation to test.", &dst->implementation);
 
-std::pair<std::vector<Int>, std::vector<Int>>
-parse_sizes(const std::vector<std::string>& positional)
-{
-  std::pair<std::vector<Int>, std::vector<Int>> r;
-  for(Int i = 1; i < positional.size(); i++)
-  {
-    auto dot_pos = positional[i].find("-");
-    if(dot_pos == std::string::npos)
-    {
-      Int sz = std::stoi(positional[i]);
-      r.first.push_back(sz);
-      r.second.push_back(sz + 1);
-    }
-    else
-    {
-      r.first.push_back(std::stoi(positional[i].substr(0, dot_pos)));
-      r.second.push_back(std::stoi(positional[i].substr(dot_pos + 1)));
-    }
-  }
-
-  return r;
+  parser.add_multi_positional("size", "Data size.", 1, 64, &dst->size);
+  return parser.parse(argc, argv);
 }
 
 template<typename Fft>
 TestResult test_or_bench3(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const Flags& flags)
+  bool is_bench)
 {
   std::vector<Int> size;
   for(auto e : lsz) size.push_back(1 << e);
 
-  if(flags.count("b"))
+  if(is_bench)
     return bench<Fft>(size, 1e11);
   else
     //TODO: Use long double for ReferenceFft
@@ -1040,15 +1244,16 @@ template<bool is_real, bool is_inverse>
 TestResult test_or_bench2(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const Flags& flags)
+  bool is_bench)
 {
   if(impl == "fft")
     return test_or_bench3<TestWrapper<ElementType, is_real, is_inverse>>(
-      impl, lsz, flags);
+      impl, lsz, is_bench);
 #ifdef HAVE_FFTW
   else if(impl == "fftw")
     return
-      test_or_bench3<FftwTestWrapper<float, is_real, is_inverse>>(impl, lsz, flags);
+      test_or_bench3<FftwTestWrapper<float, is_real, is_inverse>>(
+        impl, lsz, is_bench);
 #endif
   else
     abort();
@@ -1058,23 +1263,26 @@ template<bool is_real>
 TestResult test_or_bench1(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const Flags& flags)
+  bool is_inverse,
+  bool is_bench)
 {
-  if(flags.count("i"))
-    return test_or_bench2<is_real, true>(impl, lsz, flags);
+  if(is_inverse)
+    return test_or_bench2<is_real, true>(impl, lsz, is_bench);
   else
-    return test_or_bench2<is_real, false>(impl, lsz, flags);
+    return test_or_bench2<is_real, false>(impl, lsz, is_bench);
 }
 
 TestResult test_or_bench0(
   const std::string& impl,
   const std::vector<Int>& lsz,
-  const Flags& flags)
+  bool is_real,
+  bool is_inverse,
+  bool is_bench)
 {
-  if(flags.count("r"))
-    return test_or_bench1<true>(impl, lsz, flags);
+  if(is_real)
+    return test_or_bench1<true>(impl, lsz, is_inverse, is_bench);
   else
-    return test_or_bench1<false>(impl, lsz, flags);
+    return test_or_bench1<false>(impl, lsz, is_inverse, is_bench);
 }
 
 
@@ -1092,47 +1300,32 @@ void stream_printf(std::ostream& out, const char* format, ...)
 
 bool run_test(const Options& opt, std::ostream& out)
 {
-  if(opt.positional.size() < 2)
-  {
-    stream_printf(out, "There must be at least two positional arguments.");
-    return false;
-  }
+  std::vector<Int> sz;
+  for(auto& e : opt.size) sz.push_back(e.begin);
 
-  auto size_range = parse_sizes(opt.positional);
-
-  auto sz = size_range.first;
   while(true)
   {
     for(auto e : sz) stream_printf(out, "%2d ", e);
     out.flush();
 
-    if(opt.flags.count("b") > 0)
+    if(opt.is_bench)
     {
-      auto r = test_or_bench0(opt.positional[0], sz, opt.flags);
+      auto r = test_or_bench0(
+        opt.implementation, sz, opt.is_real, opt.is_inverse, opt.is_bench);
+
       stream_printf(
         out, "%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
     }
     else
     {
-      TestResult test_result = test_or_bench0(opt.positional[0], sz, opt.flags);
+      TestResult test_result = test_or_bench0(
+        opt.implementation, sz, opt.is_real, opt.is_inverse, opt.is_bench);
+
       stream_printf(out, "%g\n", test_result.error);
 
-      auto precision_it = opt.flags.find("p");
-      if(precision_it != opt.flags.end())
+      if(opt.precision)
       {
-        const char* precision_str = precision_it->second.c_str();
-        char* str_end;
-        double precision = std::strtod(precision_str, &str_end);
-        if(str_end == precision_str)
-        {
-          out <<
-            "Precision parameter \"" << precision_str <<
-            "\" is not a number." << std::endl;
-
-          return false;
-        }
-
-        double max_error = precision * test_result.error_factor;
+        double max_error = *opt.precision * test_result.error_factor;
         if(test_result.error > max_error)
         {
           out <<
@@ -1146,14 +1339,14 @@ bool run_test(const Options& opt, std::ostream& out)
 
     bool break_outer = true;
     for(Int i = sz.size() - 1; i >= 0; i--)
-      if(sz[i] + 1 < size_range.second[i])
+      if(sz[i] + 1 < opt.size[i].end)
       {
         break_outer = false;
         sz[i] = sz[i] + 1;
         break;
       }
       else
-        sz[i] = size_range.first[i];
+        sz[i] = opt.size[i].begin;
 
     if(break_outer) break;
   }
@@ -1163,7 +1356,14 @@ bool run_test(const Options& opt, std::ostream& out)
 
 int main(int argc, char** argv)
 {
-  Options opt = parse_options(argc, argv);
+  Options opt;
+
+  auto result = parse_options(argc, argv, &opt);
+  if(!result)
+  {
+    std::cerr << result.message << std::endl;
+    return result.error ? 1 : 0;
+  }
 
   return run_test(opt, std::cout) ? 0 : 1;
 }
