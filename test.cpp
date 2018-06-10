@@ -71,19 +71,6 @@ struct IterateMultidim
 
 extern "C" void* valloc(size_t);
 
-template<typename T_>
-void dump(T_* ptr, Int n, const char* name, ...)
-{
-  char buf[1 << 10];
-
-  va_list args;
-  va_start(args, name);
-  vsprintf(buf, name, args);
-  va_end(args); 
-
-  std::ofstream(buf, std::ios_base::binary).write((char*) ptr, sizeof(T_) * n);
-}
-
 void* alloc(Int n)
 {
   void* r = valloc(n);
@@ -194,13 +181,6 @@ void fill_view(const T& value, const View<U>& dst)
 
 Int mirror_idx(Int size, Int idx) { return (size - 1) & (size - idx); }
 
-template<typename A>
-void print_range(const A& a)
-{
-  for(auto& e : a) std::cout << e << " ";
-  std::cout << std::endl;
-}
-
 template<bool is_antisym, typename T, typename U>
 void copy_symmetric_view(const View<T>& src, const View<U>& dst)
 {
@@ -236,16 +216,6 @@ static constexpr Int get_im_offset(Int split_im_offset)
 }
 
 template<typename T>
-void print_view(const View<T>& v)
-{
-  printf("view %p (");
-  for(Int i = 0; i < v.ndim; i++) printf("%s%d", i == 0 ? "" : " ", v.size[i]);
-  printf(") (");
-  for(Int i = 0; i < v.ndim - 1; i++) printf("%s%d", i == 0 ? "" : " ", v.stride[i]);
-  printf(")\n");
-}
-
-template<typename T>
 View<T> create_view(T* ptr, const std::vector<Int>& size, Int chunk_size)
 {
   View<T> r;
@@ -260,7 +230,6 @@ View<T> create_view(T* ptr, const std::vector<Int>& size, Int chunk_size)
 
   r.data = ptr;
   r.chunk_size = chunk_size;
-  //printf("create_view "); print_view(r);
   return r;
 }
 
@@ -992,12 +961,11 @@ TestResult compare(const std::vector<Int>& size)
 extern "C" void* aligned_alloc(size_t, size_t);
 
 template<typename... Args>
-void fail(const Args&... args)
+void fail(std::ostream& out, const Args&... args)
 {
-  std::cerr << "Failure: ";
-  (std::cerr << ... << args);
-  std::cerr << std::endl;
-  exit(1);
+  out << "Failure: ";
+  (out << ... << args);
+  out << std::endl;
 }
 
 using Flags = std::unordered_map<std::string, std::string>;
@@ -1109,27 +1077,45 @@ TestResult test_or_bench0(
     return test_or_bench1<false>(impl, lsz, flags);
 }
 
-int main(int argc, char** argv)
+
+void stream_printf(std::ostream& out, const char* format, ...)
 {
-  Options opt = parse_options(argc, argv);
-  if(opt.positional.size() < 2) abort();
+  char buf[1 << 10];
+
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(buf, sizeof(buf), format, args);
+  va_end(args); 
+
+  if(n > 0) out.write(buf, n);
+}
+
+bool run_test(const Options& opt, std::ostream& out)
+{
+  if(opt.positional.size() < 2)
+  {
+    stream_printf(out, "There must be at least two positional arguments.");
+    return false;
+  }
 
   auto size_range = parse_sizes(opt.positional);
 
   auto sz = size_range.first;
   while(true)
   {
-    for(auto e : sz) printf("%2d ", e);
-    fflush(stdout);
+    for(auto e : sz) stream_printf(out, "%2d ", e);
+    out.flush();
+
     if(opt.flags.count("b") > 0)
     {
       auto r = test_or_bench0(opt.positional[0], sz, opt.flags);
-      printf("%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
+      stream_printf(
+        out, "%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
     }
     else
     {
       TestResult test_result = test_or_bench0(opt.positional[0], sz, opt.flags);
-      printf("%g\n", test_result.error);
+      stream_printf(out, "%g\n", test_result.error);
 
       auto precision_it = opt.flags.find("p");
       if(precision_it != opt.flags.end())
@@ -1138,11 +1124,23 @@ int main(int argc, char** argv)
         char* str_end;
         double precision = std::strtod(precision_str, &str_end);
         if(str_end == precision_str)
-          fail("Precision parameter \"", precision_str, "\" is not a number.");
+        {
+          out <<
+            "Precision parameter \"" << precision_str <<
+            "\" is not a number." << std::endl;
+
+          return false;
+        }
 
         double max_error = precision * test_result.error_factor;
         if(test_result.error > max_error)
-          fail("Error exceeds maximal allowed value, which is ", max_error, ".");
+        {
+          out <<
+            "Error exceeds maximal allowed value, which is " <<
+            max_error <<  "." << std::endl;
+
+          return false;
+        }
       }
     }
 
@@ -1160,5 +1158,12 @@ int main(int argc, char** argv)
     if(break_outer) break;
   }
 
-  return 0;
+  return true;
+}
+
+int main(int argc, char** argv)
+{
+  Options opt = parse_options(argc, argv);
+
+  return run_test(opt, std::cout) ? 0 : 1;
 }
