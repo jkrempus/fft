@@ -1,7 +1,5 @@
 #include "fft.h"
 
-namespace
-{
 namespace afft
 {
 
@@ -122,5 +120,4 @@ private:
   detail::members<float, afft_32_ri_type> m;
 };
 
-}
 }

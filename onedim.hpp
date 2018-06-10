@@ -942,7 +942,7 @@ void real_pass(
     i0 <= i1; 
     i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
   {
-    C w = load<V, cf::Split>(twiddle + iw, n / 2);
+    C w = load<V, cf::Split>(twiddle, twiddle + n / 2, iw);
     C s0 = unaligned_load<V, SrcCf>(src_re, src_im, i0 * src_ratio);
     C s1 = reverse_complex<V>(load<V, SrcCf>(src_re, src_im, i1 * src_ratio));
 

@@ -29,7 +29,6 @@ constexpr Int optimal_size = 1 << 11;
 constexpr Int max_vec_size = 8;
 constexpr const Int align_bytes = 64;
 
-//TODO: We need to remove many overloads of load and store
 //TODO: We need to move the code for specific combinations
 //of instruction set and element type to other (new) files.
 
@@ -224,38 +223,6 @@ namespace complex_format
     static const Int idx_ratio = 1;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
-    {
-      return {
-        V::template load<flags>(ptr),
-        V::template load<flags>(ptr + off)};
-    }
-
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(
-      const typename V::T* ptr, Int off)
-    {
-      return {
-        V::unaligned_load(ptr),
-        V::unaligned_load(ptr + off)};
-    }
-
-    template<Uint flags = 0, typename V>
-    static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::template store<flags>(a.re, ptr);
-      V::template store<flags>(a.im, ptr + off);
-    }
-    
-    template<typename V>
-    static FORCEINLINE void unaligned_store(
-      Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::unaligned_store(a.re, ptr);
-      V::unaligned_store(a.im, ptr + off);
-    }
-    
-    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>* im)
     {
       return { V::template load<flags>(re), V::template load<flags>(im) };
@@ -288,36 +255,6 @@ namespace complex_format
     static const Int idx_ratio = 2;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
-    {
-      return {
-        V::template load<flags>(ptr),
-        V::template load<flags>(ptr + V::vec_size)};
-    }
-
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(
-      const typename V::T* ptr, Int off)
-    {
-      return {V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
-    }
-
-    template<Uint flags = 0, typename V>
-    static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::template store<flags>(a.re, ptr);
-      V::template store<flags>(a.im, ptr + V::vec_size);
-    }
-
-    template<typename V>
-    static FORCEINLINE void unaligned_store(
-      Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::unaligned_store(a.re, ptr);
-      V::unaligned_store(a.im, ptr + V::vec_size);
-    }
-
-    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>*)
     {
       return Complex<V>::template load<flags>(re);
@@ -345,47 +282,6 @@ namespace complex_format
   struct Scal
   {
     static const Int idx_ratio = 2;
-
-    template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
-    {
-      Complex<V> r;
-      V::deinterleave(
-        V::template load<flags>(ptr),
-        V::template load<flags>(ptr + V::vec_size),
-        r.re, r.im);
-
-      return r;
-    }
-
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(
-      const typename V::T* ptr, Int off)
-    {
-      Complex<V> r;
-      V::deinterleave(
-        V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size),
-        r.re, r.im);
-
-      return r;
-    }
-
-    template<Uint flags = 0, typename V>
-    static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::interleave(a.re, a.im, a.re, a.im);
-      V::template store<flags>(a.re, ptr);
-      V::template store<flags>(a.im, ptr + V::vec_size);
-    }
-
-    template<typename V>
-    static FORCEINLINE void unaligned_store(
-      Complex<V> a, typename V::T* ptr, Int off)
-    {
-      V::interleave(a.re, a.im, a.re, a.im);
-      V::unaligned_store(a.re, ptr);
-      V::unaligned_store(a.im, ptr + V::vec_size);
-    }
 
     template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>*)
@@ -435,33 +331,6 @@ namespace complex_format
     static const Int idx_ratio = InputCf::idx_ratio;
 
     template<typename V, Uint flags = 0>
-    static FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
-    {
-      auto a = InputCf::template load<V, flags>(ptr, off);
-      return {a.im, a.re};
-    }
-
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(const typename V::T* ptr, Int off)
-    {
-      auto a = InputCf::template unaligned_load<V>(ptr, off);
-      return {a.im, a.re};
-    }
-
-    template<Uint flags = 0, typename V>
-    static FORCEINLINE void store(Complex<V> a, typename V::T* ptr, Int off)
-    {
-      InputCf::template store<flags, V>({a.im, a.re}, ptr, off);
-    }
-
-    template<typename V>
-    static FORCEINLINE void unaligned_store(
-      Complex<V> a, typename V::T* ptr, Int off)
-    {
-      InputCf::template unaligned_store<V>({a.im, a.re}, ptr, off);
-    }
-    
-    template<typename V, Uint flags = 0>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>* im)
     {
       auto a = InputCf::template load<V, flags>(re, im);
@@ -488,12 +357,6 @@ namespace complex_format
       InputCf::template unaligned_store<V>({a.im, a.re}, re, im);
     }
   };
-}
-
-template<typename V, typename Cf, Uint flags = 0>
-FORCEINLINE Complex<V> load(const typename V::T* ptr, Int off)
-{
-  return Cf::template load<V, flags>(ptr, off);
 }
 
 template<typename V, typename Cf, Uint flags = 0>
@@ -1109,14 +972,14 @@ void twiddle_for_step_create(
     for(; br.i < vdft_size; br.advance())
     {
       store_two_pass_twiddle<V>(
-        load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+        load<V, cf::Split>(src_row0, src_row0 + n, br.i * V::vec_size),
         dst + 5 * br.br * dst_stride);
 
-      load<V, cf::Split>(src_row1 + br.i * V::vec_size, n).store(
-        dst + 5 * br.br * dst_stride + 3 * dst_stride);
+      load<V, cf::Split>(src_row1, src_row1 + n, br.i * V::vec_size)
+        .store(dst + 5 * br.br * dst_stride + 3 * dst_stride);
 
-      load<V, cf::Split>(src_row1 + br.i * V::vec_size + dft_size, n).store(
-        dst + 5 * br.br * dst_stride + 4 * dst_stride);
+      load<V, cf::Split>(src_row1, src_row1 + n,  br.i * V::vec_size + dft_size)
+        .store(dst + 5 * br.br * dst_stride + 4 * dst_stride);
     }
   }
   else if(npasses == 2)
@@ -1127,7 +990,7 @@ void twiddle_for_step_create(
     for(; br.i < vdft_size; br.advance())
     {
       store_two_pass_twiddle<V>(
-        load<V, cf::Split>(src_row0 + br.i * V::vec_size, n),
+        load<V, cf::Split>(src_row0, src_row0 + n, br.i * V::vec_size),
         dst + 3 * br.br * dst_stride);
     }
   }
@@ -1137,8 +1000,8 @@ void twiddle_for_step_create(
     Int vdft_size = dft_size / V::vec_size;
     BitReversed br(vdft_size);
     for(; br.i < vdft_size; br.advance())
-      load<V, cf::Split>(src_row0 + br.i * V::vec_size, n).store(
-        dst + br.br * dst_stride);
+      load<V, cf::Split>(src_row0, src_row0 + n, br.i * V::vec_size)
+        .store(dst + br.br * dst_stride);
   }
 }
 
