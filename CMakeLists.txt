@@ -11,3 +11,6 @@ target_link_libraries(testing fft)
 
 add_executable(run run.cpp)
 target_link_libraries(run testing)
+
+add_executable(run_all run_all.cpp)
+target_link_libraries(run_all testing)
