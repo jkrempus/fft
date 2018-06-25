@@ -250,8 +250,7 @@ void last_two_passes(
 }
 
 template<typename V, typename DstCf>
-void bit_reverse_pass(
-  Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
+void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
 {
   VEC_TYPEDEFS(V);
 
@@ -296,7 +295,7 @@ void bit_reverse_pass(
     }
   }
 
-  _mm_sfence();
+  V::sfence();
 }
 
 template<typename V, typename DstCf>

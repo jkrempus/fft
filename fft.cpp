@@ -1,6 +1,8 @@
 #include "fft.h"
 
 #include "fft_internal.hpp"
+#include "sse.hpp"
+#include "avx.hpp"
 
 typedef AvxFloat V;
 typedef complex_format::Split Cf;
