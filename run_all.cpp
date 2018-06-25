@@ -8,6 +8,13 @@
 #include <map>
 #include <set>
 #include <random>
+#include <mutex>
+#include <future>
+
+int64_t num_processed_elements(const std::vector<Int>& a)
+{
+  return 4 * (int64_t(1) << std::accumulate(a.begin(), a.end(), Int(0)));
+}
 
 std::string format_option(const Options& opt)
 {
@@ -29,48 +36,84 @@ std::string format_option(const Options& opt)
   return s.str();
 }
 
-int run_single(const std::vector<Int>& size, bool is_real, bool is_inverse)
+int run(const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity)
 {
-  Options opt;
-  opt.implementation = "fft";
-  for(auto e : size) opt.size.push_back({e, e + 1});
-
-  opt.precision = 1.2e-7;
-  opt.is_bench =  false;
-  opt.is_real = is_real;
-  opt.is_inverse = is_inverse;
-
-  std::cerr << format_option(opt) << std::endl;
-
-  std::stringstream s;
-  if(!run_test(opt, s))
+  for(auto [is_real, is_inverse] : {
+    std::make_pair(true, true),
+    std::make_pair(true, false),
+    std::make_pair(false, true),
+    std::make_pair(false, false)})
   {
-    std::cerr << s.str() << std::endl;
-    exit(1);
+    Options opt;
+    opt.implementation = "fft";
+    for(auto e : size) opt.size.push_back({e, e + 1});
+
+    opt.precision = 1.2e-7;
+    opt.is_bench =  false;
+    opt.is_real = is_real;
+    opt.is_inverse = is_inverse;
+
+    if(verbosity >= 2)
+    {
+      std::lock_guard<std::mutex> lock(output_mutex);
+      std::cerr << format_option(opt) << std::endl;
+    }
+
+    std::stringstream s;
+    if(!run_test(opt, s))
+    {
+      std::lock_guard<std::mutex> lock(output_mutex);
+      std::cerr
+        << "Error while running test \""
+        << format_option(opt) << "\":" << std::endl
+        << s.str() << std::endl;
+
+      exit(1);
+    }
+
+    if(verbosity >= 3)
+    {
+      std::lock_guard<std::mutex> lock(output_mutex);
+      std::cerr << s.str() << std::endl;
+    }
   }
 }
 
-void run(const std::vector<Int>& size)
-{
-  run_single(size, false, false);
-  run_single(size, false, true);
-  run_single(size, true, false);
-  run_single(size, true, true);
-}
-
-void run(const std::vector<std::vector<Int>>& sizes)
+void run(
+  const std::vector<std::vector<Int>>& sizes, Int num_threads, Int verbosity)
 {
   int64_t total_size = 0;
-  for(auto& s : sizes)
-    total_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
+  for(auto& s : sizes) total_size += num_processed_elements(s);
 
+  std::mutex mutex;
+  std::vector<std::future<void>> futures;
+ 
   int64_t done_size = 0;
-  for(auto& s : sizes)
-  {
-    run(s);
-    done_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
-    std::cerr << "Done " << (100.0 * done_size / total_size) << "%" << std::endl;
-  }
+  std::atomic<Int> size_idx = 0;
+
+  for(Int i = 0; i < num_threads; i++)
+    futures.push_back(std::async(
+      std::launch::async,
+      [&]()
+    {
+      while(true)
+      {
+        int idx = size_idx++;
+        if(idx >= sizes.size()) return;
+        auto& s = sizes[idx];
+
+        run(s, mutex, verbosity);
+
+        std::lock_guard<std::mutex> lock(mutex);
+        done_size += num_processed_elements(s);
+
+        if(verbosity >= 1)
+          std::cerr
+            << "Done " << (100.0 * done_size / total_size) << "%" << std::endl;
+      }
+    }));
+
+  for(auto& f : futures) f.get();
 }
 
 void get_all_sizes(
@@ -106,7 +149,7 @@ std::vector<double> get_weights(
 }
 
 double add_random_sizes(
-  Int max_total, Int max_dim, int64_t total_size,
+  Int max_size, Int max_dim, int64_t total_size,
   std::vector<std::vector<Int>>& sizes)
 {
   static std::set<std::vector<Int>> present_sizes;
@@ -116,11 +159,11 @@ double add_random_sizes(
   for(auto& s : sizes)
   {
     present_sizes.insert(s);
-    done_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
+    done_size += num_processed_elements(s);
   }
 
   std::vector<std::vector<Int>> all_sizes;
-  get_all_sizes(std::vector<Int>{}, max_total, max_dim, all_sizes);
+  get_all_sizes(std::vector<Int>{}, max_size, max_dim, all_sizes);
   auto w = get_weights(all_sizes);
 
   Int num_tested = 0;
@@ -139,7 +182,7 @@ double add_random_sizes(
       present_sizes.insert(s);
       sizes.push_back(s);
       num_tested++;
-      done_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
+      done_size += num_processed_elements(s);
     }
   }
 
@@ -148,22 +191,46 @@ double add_random_sizes(
 
 int main(int argc, char** argv)
 {
-  Int max_total = 22;
-  Int max_dim = 5;
+  std::optional<Int> opt_max_size;
+  std::optional<Int> opt_max_dim;
+  std::optional<Int> opt_threads;
+  std::optional<Int> opt_verbosity;
+  std::optional<Int> opt_total;
+
+  OptionParser op;
+  op.add_optional_flag("-v", "Verbosity level.", &opt_verbosity);
+  op.add_optional_flag("--threads", "Number of threads.", &opt_threads);
+  op.add_optional_flag("-d", "Maximal number of dimensions.", &opt_max_dim);
+  op.add_optional_flag(
+    "-s",
+    "Maximal value for the binary logarithm of transform size.",
+    &opt_max_size);
+  op.add_optional_flag(
+    "-t",
+    "The total number of elements that will be processed in all of the tests.",
+    &opt_total);
+
+  op.parse(argc, argv);
+
+  Int max_size = opt_max_size.value_or(22);
+  Int max_dim = opt_max_dim.value_or(5);
+  Int verbosity = opt_verbosity.value_or(1);
 
   std::vector<std::vector<Int>> sizes;
-  for(Int i = 1; i < max_total + 1; i++) sizes.push_back({i});
-  for(Int i = 1; i < max_total / 2 + 1; i++) sizes.push_back({i, i});
-  for(Int i = 1; i < max_total / 3 + 1; i++) sizes.push_back({i, i, i});
-  double tested_percentage =
-    add_random_sizes(max_total, max_dim, 1000000000, sizes);
+  for(Int i = 1; i < max_size + 1; i++) sizes.push_back({i});
+  for(Int i = 1; i < max_size / 2 + 1; i++) sizes.push_back({i, i});
+  for(Int i = 1; i < max_size / 3 + 1; i++) sizes.push_back({i, i, i});
+  double tested_percentage = add_random_sizes(
+    max_size, max_dim, opt_total.value_or(1000000000), sizes);
 
-  std::cerr
-    << (100.0 * tested_percentage) << "% of all possible sizes with up to "
-    << max_dim << " dimensions \nand total number of elements up to 2^"
-    << max_total << " will be tested." << std::endl;
+  if(verbosity >= 1)
+    std::cerr
+      << (100.0 * tested_percentage) << "% of all possible sizes with up to "
+      << max_dim << " dimensions " << std::endl
+      << "and number of elements up to 2^"
+      << max_size << " will be tested." << std::endl;
 
-  run(sizes);
+  run(sizes, opt_threads.value_or(1), verbosity);
 
   return 0;
 }

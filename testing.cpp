@@ -999,6 +999,10 @@ void OptionParser::add_optional_flag(
   flags.emplace(std::string(name), std::move(option));
 }
 
+template void OptionParser::add_optional_flag<Int>(
+  const std::string_view& name, const std::string_view& description,
+  std::optional<Int>* dst);
+
 template<typename T>
 void OptionParser::add_positional(
   const std::string_view& name, const std::string_view& description,
