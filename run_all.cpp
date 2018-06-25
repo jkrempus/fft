@@ -50,19 +50,27 @@ int run_single(const std::vector<Int>& size, bool is_real, bool is_inverse)
   }
 }
 
-int run_with_size(const std::vector<Int>& size)
+void run(const std::vector<Int>& size)
 {
-  static std::set<std::vector<Int>> already_run;
-
-  if(already_run.count(size) == 1) return 0;
-  already_run.insert(size);
-
   run_single(size, false, false);
   run_single(size, false, true);
   run_single(size, true, false);
   run_single(size, true, true);
+}
 
-  return 1;
+void run(const std::vector<std::vector<Int>>& sizes)
+{
+  int64_t total_size = 0;
+  for(auto& s : sizes)
+    total_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
+
+  int64_t done_size = 0;
+  for(auto& s : sizes)
+  {
+    run(s);
+    done_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
+    std::cerr << "Done " << (100.0 * done_size / total_size) << "%" << std::endl;
+  }
 }
 
 void get_all_sizes(
@@ -97,41 +105,65 @@ std::vector<double> get_weights(
   return r;
 }
 
-void run_random_sizes(Int m, Int max_dim)
+double add_random_sizes(
+  Int max_total, Int max_dim, int64_t total_size,
+  std::vector<std::vector<Int>>& sizes)
 {
+  static std::set<std::vector<Int>> present_sizes;
+
+  int64_t done_size = 0;
+
+  for(auto& s : sizes)
+  {
+    present_sizes.insert(s);
+    done_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
+  }
+
   std::vector<std::vector<Int>> all_sizes;
-  get_all_sizes(std::vector<Int>{}, m, max_dim, all_sizes);
+  get_all_sizes(std::vector<Int>{}, max_total, max_dim, all_sizes);
   auto w = get_weights(all_sizes);
-  std::mt19937 rng;
-  std::discrete_distribution<Int> dist{w.begin(), w.end()};
 
   Int num_tested = 0;
-  int64_t total_size = 1000000000;
-  int64_t done_size = 0;
+  for(auto& s : all_sizes)
+    if(present_sizes.count(s) == 1)
+      num_tested++;
+
+  std::mt19937 rng;
+  std::discrete_distribution<Int> dist{w.begin(), w.end()};
 
   while(done_size < total_size && num_tested != all_sizes.size())
   {
     auto& s = all_sizes[dist(rng)];
-    if(run_with_size(s) > 0)
+    if(present_sizes.count(s) == 0)
     {
+      present_sizes.insert(s);
+      sizes.push_back(s);
       num_tested++;
       done_size += int64_t(1) << std::accumulate(s.begin(), s.end(), Int(0));
-      std::cerr
-        << "Done " << (100.0 * done_size / total_size)
-        << "%. Tested " << (100.0 * num_tested / all_sizes.size())
-        << "% of all possible sizes." << std::endl;
     }
   }
 
-  std::cerr << all_sizes.size() << std::endl;
+  return double(num_tested) / double(all_sizes.size());
 }
 
 int main(int argc, char** argv)
 {
-  Int m = 22;
-  for(Int i = 1; i < m + 1; i++) run_with_size({i});
-  for(Int i = 1; i < m / 2 + 1; i++) run_with_size({i, i});
-  for(Int i = 1; i < m / 3 + 1; i++) run_with_size({i, i, i});
-  run_random_sizes(m, 5);
+  Int max_total = 22;
+  Int max_dim = 5;
+
+  std::vector<std::vector<Int>> sizes;
+  for(Int i = 1; i < max_total + 1; i++) sizes.push_back({i});
+  for(Int i = 1; i < max_total / 2 + 1; i++) sizes.push_back({i, i});
+  for(Int i = 1; i < max_total / 3 + 1; i++) sizes.push_back({i, i, i});
+  double tested_percentage =
+    add_random_sizes(max_total, max_dim, 1000000000, sizes);
+
+  std::cerr
+    << (100.0 * tested_percentage) << "% of all possible sizes with up to "
+    << max_dim << " dimensions \nand total number of elements up to 2^"
+    << max_total << " will be tested." << std::endl;
+
+  run(sizes);
+
   return 0;
 }
