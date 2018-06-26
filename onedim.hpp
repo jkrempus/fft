@@ -528,12 +528,12 @@ create_ct_sized_fft_twiddle_table()
 template<int n, int vsz, typename T>
 struct CtSizedFftTwiddleTable
 {
-  static constexpr ReImTable<(n > vsz ? n : vsz), float> value =
-    create_ct_sized_fft_twiddle_table<n, vsz, float>();
+  static constexpr ReImTable<(n > vsz ? n : vsz), T> value =
+    create_ct_sized_fft_twiddle_table<n, vsz, T>();
 };
 
 template<int n, int vsz, typename T>
-constexpr ReImTable<(n > vsz ? n : vsz), float>
+constexpr ReImTable<(n > vsz ? n : vsz), T>
 CtSizedFftTwiddleTable<n, vsz, T>::value;
 
 constexpr bool is_power_of_4(Int n)

@@ -33,6 +33,32 @@ void afft_32_ri_transform(afft_32_ri_type* state,
 
 size_t afft_32_align_size(size_t sz);
 
+typedef struct afft_64_c_struct afft_64_c_type;
+size_t afft_64_c_memsize(size_t ndim, const size_t* dim);
+afft_64_c_type* afft_64_c_create(size_t ndim, const size_t* dim, void* mem);
+void afft_64_c_transform(afft_64_c_type* state,
+  const double* src_re, const double* src_im, double* dst_re, double* dst_im);
+
+typedef struct afft_64_ci_struct afft_64_ci_type;
+size_t afft_64_ci_memsize(size_t ndim, const size_t* dim);
+afft_64_ci_type* afft_64_ci_create(size_t ndim, const size_t* dim, void* mem);
+void afft_64_ci_transform(afft_64_ci_type* state,
+  const double* src_re, const double* src_im, double* dst_re, double* dst_im);
+
+typedef struct afft_64_r_struct afft_64_r_type;
+size_t afft_64_r_memsize(size_t ndim, const size_t* dim);
+afft_64_r_type* afft_64_r_create(size_t ndim, const size_t* dim, void* mem);
+void afft_64_r_transform(afft_64_r_type* state,
+  const double* src, double* dst_re, double* dst_im);
+
+typedef struct afft_64_ri_struct afft_64_ri_type;
+size_t afft_64_ri_memsize(size_t ndim, const size_t* dim);
+afft_64_ri_type* afft_64_ri_create(size_t ndim, const size_t* dim, void* mem);
+void afft_64_ri_transform(afft_64_ri_type* state,
+  const double* src_re, const double* src_im, double* dst);
+
+size_t afft_64_align_size(size_t sz);
+
 extern const size_t afft_alignment;
 
 #ifdef __cplusplus
