@@ -536,39 +536,9 @@ struct Scalar
     r0 = a0;
     r1 = a1;
   }
-  
-  static void FORCEINLINE transpose(
-    Vec a0, Vec a1, Vec a2, Vec a3,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
-  {
-    r0 = a0;
-    r1 = a1;
-    r2 = a2;
-    r3 = a3;
-  }
-
-  static void FORCEINLINE transpose(
-    Vec a0, Vec a1, Vec a2, Vec a3,
-    Vec a4, Vec a5, Vec a6, Vec a7,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
-    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
-  {
-    r0 = a0;
-    r1 = a1;
-    r2 = a2;
-    r3 = a3;
-    r4 = a4;
-    r5 = a5;
-    r6 = a6;
-    r7 = a7;
-  }
 
   static Vec FORCEINLINE vec(T a){ return a; }
-  
-  static Vec reverse(Vec v)
-  {
-    return v;
-  }
+  static Vec reverse(Vec v) { return v; }
 
   template<Uint flags = 0> static Vec load(const T* p) { return *p; }
   static Vec unaligned_load(const T* p) { return *p; }

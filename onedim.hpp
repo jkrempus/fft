@@ -2,6 +2,8 @@
 #define FFT_ONEDIM_H
 
 #include "common.hpp"
+#define ARRAY_IPC_ENABLED
+#include "misc/array_ipc.h"
 
 namespace
 {
@@ -29,6 +31,7 @@ void first_two_passes(
 {
   VEC_TYPEDEFS(V);
   Int l = n * SrcCf::idx_ratio / 4;
+  Int dst_l = n * cf::Vec::idx_ratio / 4;
 
   for(const T* end = src_re + l; src_re < end;)
   {
@@ -49,15 +52,26 @@ void first_two_passes(
     C c1 = b1 + b3.mul_neg_i();
     C c3 = b1 - b3.mul_neg_i();
 
-    C d0, d1, d2, d3;
-    V::transpose(c0.re, c1.re, c2.re, c3.re, d0.re, d1.re, d2.re, d3.re);
-    V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
+    if constexpr(V::vec_size == 1)
+    {
+      c0.store(dst + 0 * dst_l); 
+      c1.store(dst + 1 * dst_l); 
+      c2.store(dst + 2 * dst_l); 
+      c3.store(dst + 3 * dst_l); 
+      dst += stride<V, cf::Vec>();
+    }
+    else
+    {
+      C d0, d1, d2, d3;
+      V::transpose(c0.re, c1.re, c2.re, c3.re, d0.re, d1.re, d2.re, d3.re);
+      V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
 
-    d0.store(dst); 
-    d1.store(dst + stride<V, cf::Vec>()); 
-    d2.store(dst + 2 * stride<V, cf::Vec>()); 
-    d3.store(dst + 3 * stride<V, cf::Vec>()); 
-    dst += 4 * stride<V, cf::Vec>();
+      d0.store(dst); 
+      d1.store(dst + stride<V, cf::Vec>()); 
+      d2.store(dst + 2 * stride<V, cf::Vec>()); 
+      d3.store(dst + 3 * stride<V, cf::Vec>()); 
+      dst += 4 * stride<V, cf::Vec>();
+    }
   }
 }
 
@@ -693,17 +707,21 @@ Int tiny_fft_create_impl(Int n, void* ptr)
   return (Int) ptr;
 }
 
+template<typename V> 
+constexpr Int get_first_npasses()
+{
+  if constexpr(V::vec_size == 8)
+    return 3;
+  else
+    return 2;
+}
+
 template<typename V>
 Int get_npasses(Int n, Int dft_size)
 {
   VEC_TYPEDEFS(V);
   if(dft_size == 1)
-  {
-    if constexpr(V::vec_size == 8)
-      return 3;
-    else
-      return 2;
-  }
+    return get_first_npasses<V>();
   else if((dft_size << 3) == n)
     return 3;
   else
@@ -732,14 +750,20 @@ void small_transform(
   T* w = state->working;
   Int dft_size = 1;
 
-  Int first_npasses = get_npasses<V>(n, 1);
-  if(first_npasses == 2) first_two_passes<V, SrcCf>(n, src_re, src_im, w);
-  else first_three_passes<V, SrcCf>(n, src_re, src_im, w);
+  array_ipc::send("src_re", src_re, n);
+  array_ipc::send("src_im", src_im, n);
+
+  constexpr Int first_npasses = get_first_npasses<V>();
+  if constexpr(first_npasses == 2)
+    first_two_passes<V, SrcCf>(n, src_re, src_im, w);
+  else
+    first_three_passes<V, SrcCf>(n, src_re, src_im, w);
 
   dft_size <<= first_npasses;
 
   for(Int i = 1;; i++)
   {
+    array_ipc::send("w", w, 2 * n);
     Int npasses = get_npasses<V>(n, dft_size);
     Int next_dft_size = dft_size << npasses; 
     if(next_dft_size == n)
@@ -802,13 +826,15 @@ void large_transform(
 {
   VEC_TYPEDEFS(V);
 
-  Int first_npasses = get_npasses<V>(state->n, 1);
+  constexpr Int first_npasses = get_first_npasses<V>();
 
   Int n = state->n;
   T* w = state->working;
 
-  if(first_npasses == 2) first_two_passes<V, SrcCf>(n, src_re, src_im, w);
-  else first_three_passes<V, SrcCf>(n, src_re, src_im, w);
+  if constexpr(first_npasses == 2)
+    first_two_passes<V, SrcCf>(n, src_re, src_im, w);
+  else
+    first_three_passes<V, SrcCf>(n, src_re, src_im, w);
 
   recursive_passes<V>(state, 1, w, 0, n);
 
