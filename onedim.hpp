@@ -2,8 +2,6 @@
 #define FFT_ONEDIM_H
 
 #include "common.hpp"
-#define ARRAY_IPC_ENABLED
-#include "misc/array_ipc.h"
 
 namespace
 {
@@ -54,10 +52,10 @@ void first_two_passes(
 
     if constexpr(V::vec_size == 1)
     {
-      c0.store(dst + 0 * dst_l); 
-      c1.store(dst + 1 * dst_l); 
-      c2.store(dst + 2 * dst_l); 
-      c3.store(dst + 3 * dst_l); 
+      c0.store(dst + 0 * dst_l);
+      c2.store(dst + 1 * dst_l);
+      c1.store(dst + 2 * dst_l);
+      c3.store(dst + 3 * dst_l);
       dst += stride<V, cf::Vec>();
     }
     else
@@ -66,10 +64,10 @@ void first_two_passes(
       V::transpose(c0.re, c1.re, c2.re, c3.re, d0.re, d1.re, d2.re, d3.re);
       V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
 
-      d0.store(dst); 
-      d1.store(dst + stride<V, cf::Vec>()); 
-      d2.store(dst + 2 * stride<V, cf::Vec>()); 
-      d3.store(dst + 3 * stride<V, cf::Vec>()); 
+      d0.store(dst);
+      d1.store(dst + stride<V, cf::Vec>());
+      d2.store(dst + 2 * stride<V, cf::Vec>());
+      d3.store(dst + 3 * stride<V, cf::Vec>());
       dst += 4 * stride<V, cf::Vec>();
     }
   }
@@ -750,9 +748,6 @@ void small_transform(
   T* w = state->working;
   Int dft_size = 1;
 
-  array_ipc::send("src_re", src_re, n);
-  array_ipc::send("src_im", src_im, n);
-
   constexpr Int first_npasses = get_first_npasses<V>();
   if constexpr(first_npasses == 2)
     first_two_passes<V, SrcCf>(n, src_re, src_im, w);
@@ -763,7 +758,6 @@ void small_transform(
 
   for(Int i = 1;; i++)
   {
-    array_ipc::send("w", w, 2 * n);
     Int npasses = get_npasses<V>(n, dft_size);
     Int next_dft_size = dft_size << npasses; 
     if(next_dft_size == n)

@@ -4,9 +4,9 @@
 #include "sse.hpp"
 #include "avx.hpp"
 
-//typedef AvxFloat VF;
+typedef AvxFloat VF;
 //typedef SseFloat VF;
-typedef Scalar<float> VF;
+//typedef Scalar<float> VF;
 typedef Scalar<double> VD;
 typedef complex_format::Split Cf;
 
