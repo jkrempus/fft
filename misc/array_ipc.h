@@ -55,7 +55,7 @@ void write_val(int sock, const T& value)
 }
 
 template<typename T>
-void write_array(int sock, const char* name, T* ptr, size_t len)
+void write_array(int sock, const char* name, const T* ptr, size_t len)
 {
   write_val(sock, int64_t(PackageType::onedim_array));
 
@@ -94,7 +94,7 @@ static int uds_connect(const char* name)
 }
 
 template<typename T>
-void send(const char* name, T* ptr, size_t len)
+void send(const char* name, const T* ptr, size_t len)
 {
   int sock = uds_connect("/tmp/array_ipc");
   if(sock >= 0)

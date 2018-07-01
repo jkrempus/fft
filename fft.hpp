@@ -61,6 +61,24 @@ private:
   detail::members<float, afft_32_c_type> m;
 };
 
+template<>
+class complex_transform<double>
+{
+public:
+  complex_transform(size_t ndim, const size_t* dim, void* mem = 0)
+  : m(afft_64_c_memsize, afft_64_c_create, ndim, dim, mem) { }
+
+  void operator()(
+    const double* src_re, const double* src_im,
+    double* dst_re, double* dst_im)
+  {
+    afft_64_c_transform(m.state, src_re, src_im, dst_re, dst_im);
+  }
+
+private:
+  detail::members<double, afft_64_c_type> m;
+};
+
 template<typename T>
 struct inverse_complex_transform { };
 
@@ -82,6 +100,24 @@ private:
   detail::members<float, afft_32_ci_type> m;
 };
 
+template<>
+class inverse_complex_transform<double>
+{
+public:
+  inverse_complex_transform(size_t ndim, const size_t* dim, void* mem = 0)
+  : m(afft_64_ci_memsize, afft_64_ci_create, ndim, dim, mem) { }
+
+  void operator()(
+    const double* src_re, const double* src_im,
+    double* dst_re, double* dst_im)
+  {
+    afft_64_ci_transform(m.state, src_re, src_im, dst_re, dst_im);
+  }
+
+private:
+  detail::members<double, afft_64_ci_type> m;
+};
+
 template<typename T>
 struct real_transform { };
 
@@ -101,6 +137,22 @@ private:
   detail::members<float, afft_32_r_type> m;
 };
 
+template<>
+class real_transform<double>
+{
+public:
+  real_transform(size_t ndim, const size_t* dim, void* mem = 0)
+  : m(afft_64_r_memsize, afft_64_r_create, ndim, dim, mem) { }
+
+  void operator()(const double* src, double* dst_re, double* dst_im)
+  {
+    afft_64_r_transform(m.state, src, dst_re, dst_im);
+  }
+
+private:
+  detail::members<double, afft_64_r_type> m;
+};
+
 template<typename T>
 struct inverse_real_transform { };
 
@@ -118,6 +170,22 @@ public:
 
 private:
   detail::members<float, afft_32_ri_type> m;
+};
+
+template<>
+class inverse_real_transform<double>
+{
+public:
+  inverse_real_transform(size_t ndim, const size_t* dim, void* mem = 0)
+  : m(afft_64_ri_memsize, afft_64_ri_create, ndim, dim, mem) { }
+
+  void operator()(const double* src_re, const double* src_im, double* dst)
+  {
+    afft_64_ri_transform(m.state, src_re, src_im, dst);
+  }
+
+private:
+  detail::members<double, afft_64_ri_type> m;
 };
 
 }
