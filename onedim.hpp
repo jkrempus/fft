@@ -58,6 +58,22 @@ void first_two_passes(
       c3.store(dst + 3 * dst_l);
       dst += stride<V, cf::Vec>();
     }
+    else if constexpr(V::vec_size == 2)
+    {
+      C d0, d1;
+      V::interleave(c0.re, c1.re, d0.re, d1.re);
+      V::interleave(c0.im, c1.im, d0.im, d1.im);
+      d0.store(dst + 0 * dst_l);
+      d1.store(dst + 0 * dst_l + stride<V, cf::Vec>());
+
+      C d2, d3;
+      V::interleave(c2.re, c3.re, d2.re, d3.re);
+      V::interleave(c2.im, c3.im, d2.im, d3.im);
+      d2.store(dst + 2 * dst_l);
+      d3.store(dst + 2 * dst_l + stride<V, cf::Vec>());
+
+      dst += 2 * stride<V, cf::Vec>();
+    }
     else
     {
       C d0, d1, d2, d3;

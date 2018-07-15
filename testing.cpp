@@ -27,7 +27,7 @@
 
 static constexpr Int maxdim = 64;
 static constexpr Int chunk_size = 0;
-using ElementType = float;
+using ElementType = double;
 
 using std::chrono::high_resolution_clock;
 
