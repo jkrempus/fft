@@ -55,16 +55,6 @@ struct SseFloat
     r3 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
   }
   
-  static void FORCEINLINE transpose(
-    Vec a0, Vec a1, Vec a2, Vec a3,
-    Vec a4, Vec a5, Vec a6, Vec a7,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
-    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
-  {
-    transpose(a0, a1, a2, a3, r0, r2, r4, r6);
-    transpose(a4, a5, a6, a7, r1, r3, r5, r7);
-  }
-  
   static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
   
   static Vec reverse(Vec v)
