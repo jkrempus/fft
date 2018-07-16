@@ -123,7 +123,7 @@ struct SseDouble
 
   static Vec reverse(Vec v)
   {
-    return _mm_shuffle_pd(v, v, _MM_SHUFFLE(0, 0, 0, 1));
+    return _mm_shuffle_pd(v, v, 0x1);
   }
 
   template<Uint flags = 0>

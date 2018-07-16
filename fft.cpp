@@ -7,7 +7,7 @@
 //typedef AvxFloat VF;
 //typedef SseFloat VF;
 typedef Scalar<float> VF;
-typedef SseDouble VD;
+typedef AvxDouble VD;
 //typedef Scalar<double> VD;
 typedef complex_format::Split Cf;
 

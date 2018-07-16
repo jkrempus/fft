@@ -110,6 +110,88 @@ struct AvxFloat
 
   static void sfence(){ _mm_sfence(); }
 };
+
+struct AvxDouble
+{
+  typedef double T;
+  typedef __m256d Vec;
+  const static Int vec_size = 4;
+
+  template<Int elements_per_vec>
+  static FORCEINLINE void interleave_multi(
+    Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    if(elements_per_vec == 4)
+      interleave(a0, a1, r0, r1);
+    else if (elements_per_vec == 2)
+      transpose_128(a0, a1, r0, r1);
+  }
+
+  static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    r0 = _mm256_unpacklo_pd(a0, a1);
+    r1 = _mm256_unpackhi_pd(a0, a1);
+    transpose_128(r0, r1, r0, r1);
+  }
+
+  static FORCEINLINE void deinterleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    transpose_128(a0, a1, a0, a1);
+    r0 = _mm256_unpacklo_pd(a0, a1);
+    r1 = _mm256_unpackhi_pd(a0, a1);
+  }
+
+  static void FORCEINLINE transpose(
+    Vec a0, Vec a1, Vec a2, Vec a3,
+    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
+  {
+    Vec b0, b1, b2, b3;
+    b0 = _mm256_unpacklo_pd(a0, a1);
+    b1 = _mm256_unpackhi_pd(a0, a1);
+    b2 = _mm256_unpacklo_pd(a2, a3);
+    b3 = _mm256_unpackhi_pd(a2, a3);
+
+    transpose_128(b0, b2, r0, r2);
+    transpose_128(b1, b3, r1, r3);
+  }
+
+  static Vec FORCEINLINE vec(T a){ return _mm256_set1_pd(a); }
+
+//private: 
+  static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  {
+    r0 = _mm256_permute2f128_pd(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
+    r1 = _mm256_permute2f128_pd(a0, a1, _MM_SHUFFLE(0, 3, 0, 1));
+  }
+
+  static Vec reverse(Vec v)
+  {
+    v = _mm256_shuffle_pd(v, v, 0x5);
+    return _mm256_permute2f128_pd(v, v, _MM_SHUFFLE(0, 0, 0, 1));
+  }
+
+  template<Uint flags = 0>
+  static Vec load(const T* p)
+  {
+    return (flags & stream_flag) ?
+      _mm256_castsi256_pd(_mm256_stream_load_si256((__m256i*) p)) :
+      _mm256_load_pd(p);
+  }
+
+  static Vec unaligned_load(const T* p) { return _mm256_loadu_pd(p); }
+  template<Uint flags = 0>
+  static void store(Vec val, T* p)
+  {
+    if((flags & stream_flag))
+      _mm256_stream_pd(p, val);
+    else
+      _mm256_store_pd(p, val);
+  }
+
+  static void unaligned_store(Vec val, T* p) { _mm256_storeu_pd(p, val); }
+
+  static void sfence(){ _mm_sfence(); }
+};
 #endif
 
 #endif
