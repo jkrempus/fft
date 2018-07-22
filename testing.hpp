@@ -16,6 +16,7 @@ struct SizeRange
 
 struct Options
 {
+  bool is_double;
   bool is_bench;
   bool is_real;
   bool is_inverse;

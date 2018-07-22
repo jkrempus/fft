@@ -27,7 +27,6 @@
 
 static constexpr Int maxdim = 64;
 static constexpr Int chunk_size = 0;
-using ElementType = double;
 
 using std::chrono::high_resolution_clock;
 
@@ -1159,6 +1158,7 @@ std::istream& operator>>(std::istream& stream, SizeRange& size_range)
 OptionParser::Result parse_options(int argc, char** argv, Options* dst)
 {
   OptionParser parser;
+  parser.add_switch("-d", "Use double precision.", &dst->is_double);
   parser.add_switch("-r", "Test real transform.", &dst->is_real);
   parser.add_switch("-i", "Test inverse transform.", &dst->is_inverse);
   parser.add_switch("-b", "Perform a benchmark.", &dst->is_bench);
@@ -1173,7 +1173,7 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
 }
 
 template<typename Fft>
-TestResult test_or_bench3(
+TestResult test_or_bench4(
   const std::string& impl,
   const std::vector<Int>& lsz,
   bool is_bench)
@@ -1189,39 +1189,40 @@ TestResult test_or_bench3(
       compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size);
 }
 
-template<bool is_real, bool is_inverse>
-TestResult test_or_bench2(
+template<typename ET, bool is_real, bool is_inverse>
+TestResult test_or_bench3(
   const std::string& impl,
   const std::vector<Int>& lsz,
   bool is_bench)
 {
   if(impl == "fft")
-    return test_or_bench3<TestWrapper<ElementType, is_real, is_inverse>>(
+    return test_or_bench4<TestWrapper<ET, is_real, is_inverse>>(
       impl, lsz, is_bench);
 #ifdef HAVE_FFTW
   else if(impl == "fftw")
     return
-      test_or_bench3<FftwTestWrapper<float, is_real, is_inverse>>(
+      test_or_bench4<FftwTestWrapper<ET, is_real, is_inverse>>(
         impl, lsz, is_bench);
 #endif
   else
     abort();
 }
 
-template<bool is_real>
-TestResult test_or_bench1(
+template<typename ET, bool is_real>
+TestResult test_or_bench2(
   const std::string& impl,
   const std::vector<Int>& lsz,
   bool is_inverse,
   bool is_bench)
 {
   if(is_inverse)
-    return test_or_bench2<is_real, true>(impl, lsz, is_bench);
+    return test_or_bench3<ET, is_real, true>(impl, lsz, is_bench);
   else
-    return test_or_bench2<is_real, false>(impl, lsz, is_bench);
+    return test_or_bench3<ET, is_real, false>(impl, lsz, is_bench);
 }
 
-TestResult test_or_bench0(
+template<typename ET>
+TestResult test_or_bench1(
   const std::string& impl,
   const std::vector<Int>& lsz,
   bool is_real,
@@ -1229,9 +1230,23 @@ TestResult test_or_bench0(
   bool is_bench)
 {
   if(is_real)
-    return test_or_bench1<true>(impl, lsz, is_inverse, is_bench);
+    return test_or_bench2<ET, true>(impl, lsz, is_inverse, is_bench);
   else
-    return test_or_bench1<false>(impl, lsz, is_inverse, is_bench);
+    return test_or_bench2<ET, false>(impl, lsz, is_inverse, is_bench);
+}
+
+TestResult test_or_bench0(
+  const std::string& impl,
+  const std::vector<Int>& lsz,
+  bool is_double,
+  bool is_real,
+  bool is_inverse,
+  bool is_bench)
+{
+  if(is_double)
+    return test_or_bench1<double>(impl, lsz, is_real, is_inverse, is_bench);
+  else
+    return test_or_bench1<float>(impl, lsz, is_real, is_inverse, is_bench);
 }
 
 
@@ -1260,7 +1275,8 @@ bool run_test(const Options& opt, std::ostream& out)
     if(opt.is_bench)
     {
       auto r = test_or_bench0(
-        opt.implementation, sz, opt.is_real, opt.is_inverse, opt.is_bench);
+        opt.implementation, sz,
+        opt.is_double, opt.is_real, opt.is_inverse, opt.is_bench);
 
       stream_printf(
         out, "%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
@@ -1268,7 +1284,8 @@ bool run_test(const Options& opt, std::ostream& out)
     else
     {
       TestResult test_result = test_or_bench0(
-        opt.implementation, sz, opt.is_real, opt.is_inverse, opt.is_bench);
+        opt.implementation, sz,
+        opt.is_double, opt.is_real, opt.is_inverse, opt.is_bench);
 
       stream_printf(out, "%g\n", test_result.error);
 
