@@ -3,7 +3,6 @@
 
 #include "common.hpp"
 
-#ifdef __AVX__
 #include <immintrin.h>
 
 struct AvxFloat
@@ -192,6 +191,5 @@ struct AvxDouble
 
   static void sfence(){ _mm_sfence(); }
 };
-#endif
 
 #endif

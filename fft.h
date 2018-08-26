@@ -6,8 +6,8 @@ enum
 {
   afft_auto = 0,
   afft_scalar = 1,
-  afft_sse = 2,
-  afft_avx = 3,
+  afft_sse2 = 2,
+  afft_avx2 = 3,
   afft_neon = 4,
 };
 

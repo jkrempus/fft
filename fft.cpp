@@ -1,5 +1,4 @@
 #include "fft.h"
-
 #include "fft_internal.hpp"
 
 namespace afft
@@ -36,8 +35,8 @@ namespace afft
     DECLARE_IMPL_FOR_TYPE(IMPL, float)
 
     DECLARE_IMPL(afft_scalar)
-    DECLARE_IMPL(afft_sse)
-    DECLARE_IMPL(afft_avx)
+    DECLARE_IMPL(afft_sse2)
+    DECLARE_IMPL(afft_avx2)
     DECLARE_IMPL(afft_neon)
   }
 }
@@ -67,29 +66,50 @@ namespace
   {
     if(impl == afft_auto)
     {
-      //if(afft::detail::impl_supported<afft_neon>())
-      //  return call_impl<afft_neon, Op, T>(FnTag(), args...);
+#ifdef AFFT_NEON_ENABLED
+      if(afft::detail::impl_supported<afft_neon>())
+        return call_impl<afft_neon, Op, T>(FnTag(), args...);
+#endif
 
-      if(afft::detail::impl_supported<afft_avx>())
-        return call_impl<afft_avx, Op, T>(FnTag(), args...);
+#ifdef AFFT_AVX2_ENABLED
+      if(afft::detail::impl_supported<afft_avx2>())
+        return call_impl<afft_avx2, Op, T>(FnTag(), args...);
+#endif
 
-      if(afft::detail::impl_supported<afft_sse>())
-        return call_impl<afft_sse, Op, T>(FnTag(), args...);
+#ifdef AFFT_SSE2_ENABLED
+      if(afft::detail::impl_supported<afft_sse2>())
+        return call_impl<afft_sse2, Op, T>(FnTag(), args...);
+#endif
 
+#ifdef AFFT_SCALAR_ENABLED
       if(afft::detail::impl_supported<afft_scalar>())
         return call_impl<afft_scalar, Op, T>(FnTag(), args...);
+#endif
+
+      return get_null_value(FnTag());
     }
     else
     {
       switch(impl)
       {
-        //case afft_neon: return call_impl<afft_neon, Op, T>(FnTag(), args...);
-        case afft_avx: return call_impl<afft_avx, Op, T>(FnTag(), args...);
-        case afft_sse: return call_impl<afft_sse, Op, T>(FnTag(), args...);
+#ifdef AFFT_NEON_ENABLED
+        case afft_neon: return call_impl<afft_neon, Op, T>(FnTag(), args...);
+#endif
+
+#ifdef AFFT_AVX2_ENABLED
+        case afft_avx2: return call_impl<afft_avx2, Op, T>(FnTag(), args...);
+#endif
+
+#ifdef AFFT_SSE2_ENABLED
+        case afft_sse2: return call_impl<afft_sse2, Op, T>(FnTag(), args...);
+#endif
+
+#ifdef AFFT_SCALAR_ENABLED
         case afft_scalar: return call_impl<afft_scalar, Op, T>(FnTag(), args...);
+#endif
       }
     }
-    
+
     return get_null_value(FnTag());
   }
 }

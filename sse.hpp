@@ -3,8 +3,6 @@
 
 #include "common.hpp"
 
-#ifdef __SSE2__
-
 #include <immintrin.h>
 
 struct SseFloat
@@ -148,6 +146,5 @@ struct SseDouble
 
   static void sfence(){ _mm_sfence(); }
 };
-#endif
 
 #endif

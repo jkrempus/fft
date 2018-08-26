@@ -3,7 +3,6 @@
 
 #include "common.hpp"
 
-#ifdef __ARM_NEON__
 #include <arm_neon.h>
 
 struct Neon
@@ -93,6 +92,5 @@ struct Neon
   static void unaligned_store(Vec val, T* p) { vst1q_f32(p, val); }
   static void sfence(){ }
 };
-#endif
 
 #endif
