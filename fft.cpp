@@ -45,6 +45,7 @@ namespace
 {
   struct MemsizeTag{};
   struct CreateTag{};
+  struct SupportedTag{};
 
   template<Int impl, typename Op, typename T>
   Int call_impl(const MemsizeTag&, Int ndim, const Int* dim)
@@ -58,8 +59,15 @@ namespace
     return afft::detail::create_impl<impl, Op, T>(ndim, dim, ptr);
   }
 
+  template<Int impl, typename Op, typename T>
+  bool call_impl(const SupportedTag&)
+  {
+    return afft::detail::impl_supported<impl>();
+  }
+
   Int get_null_value(const MemsizeTag&){ return 0; }
   void* get_null_value(const CreateTag&){ return nullptr; }
+  bool get_null_value(const SupportedTag&){ return false; }
 
   template<typename FnTag, typename Op, typename T, typename... Args>
   auto call_selected_impl(Int impl, Args... args)
@@ -280,6 +288,11 @@ void afft_64_ri_transform(afft_64_ri_type* state,
 }
 
 size_t afft_64_align_size(size_t sz) { return align_size<double>(sz); }
+
+int afft_supported(int impl)
+{
+  return call_selected_impl<SupportedTag, afft::detail::OpC, float>(impl);
+}
 
 const size_t afft_alignment = 64;
 

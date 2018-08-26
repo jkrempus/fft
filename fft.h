@@ -76,6 +76,8 @@ void afft_64_ri_transform(afft_64_ri_type* state,
 
 size_t afft_64_align_size(size_t sz);
 
+int afft_supported(int impl);
+
 extern const size_t afft_alignment;
 
 #ifdef __cplusplus
