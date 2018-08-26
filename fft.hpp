@@ -14,20 +14,20 @@ struct members
   members(const members&) = delete;
 
   members(
-    size_t (*memsize)(size_t ndim, const size_t* dim),
-    AfftType* (*create)(size_t ndim, const size_t* dim, void* mem),
-    size_t ndim, const size_t* dim, void* mem)
+    size_t (*memsize)(size_t ndim, const size_t* dim, int impl),
+    AfftType* (*create)(size_t ndim, const size_t* dim, void* mem, int impl),
+    size_t ndim, const size_t* dim, void* mem, int impl)
   {
     if(mem == 0)
     {
       size_t align_mask = afft_alignment - 1;
-      allocated = new char[memsize(ndim, dim) + align_mask];
+      allocated = new char[memsize(ndim, dim, impl) + align_mask];
       mem = (void*)((size_t(allocated) + align_mask) & ~align_mask);
     }
 
-    state = create(ndim, dim, mem);
+    state = create(ndim, dim, mem, impl);
   }
-  
+
   members(members&& other)
   {
     allocated = other.allocated;
@@ -47,8 +47,9 @@ template<>
 class complex_transform<float>
 {
 public:
-  complex_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_32_c_memsize, afft_32_c_create, ndim, dim, mem) { }
+  complex_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_32_c_memsize, afft_32_c_create, ndim, dim, mem, impl) { }
 
   void operator()(
     const float* src_re, const float* src_im,
@@ -65,8 +66,9 @@ template<>
 class complex_transform<double>
 {
 public:
-  complex_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_64_c_memsize, afft_64_c_create, ndim, dim, mem) { }
+  complex_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_64_c_memsize, afft_64_c_create, ndim, dim, mem, impl) { }
 
   void operator()(
     const double* src_re, const double* src_im,
@@ -86,8 +88,9 @@ template<>
 class inverse_complex_transform<float>
 {
 public:
-  inverse_complex_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_32_ci_memsize, afft_32_ci_create, ndim, dim, mem) { }
+  inverse_complex_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_32_ci_memsize, afft_32_ci_create, ndim, dim, mem, impl) { }
 
   void operator()(
     const float* src_re, const float* src_im,
@@ -104,8 +107,9 @@ template<>
 class inverse_complex_transform<double>
 {
 public:
-  inverse_complex_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_64_ci_memsize, afft_64_ci_create, ndim, dim, mem) { }
+  inverse_complex_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_64_ci_memsize, afft_64_ci_create, ndim, dim, mem, impl) { }
 
   void operator()(
     const double* src_re, const double* src_im,
@@ -125,8 +129,9 @@ template<>
 class real_transform<float>
 {
 public:
-  real_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_32_r_memsize, afft_32_r_create, ndim, dim, mem) { }
+  real_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_32_r_memsize, afft_32_r_create, ndim, dim, mem, impl) { }
 
   void operator()(const float* src, float* dst_re, float* dst_im)
   {
@@ -141,8 +146,9 @@ template<>
 class real_transform<double>
 {
 public:
-  real_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_64_r_memsize, afft_64_r_create, ndim, dim, mem) { }
+  real_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_64_r_memsize, afft_64_r_create, ndim, dim, mem, impl) { }
 
   void operator()(const double* src, double* dst_re, double* dst_im)
   {
@@ -160,8 +166,9 @@ template<>
 class inverse_real_transform<float>
 {
 public:
-  inverse_real_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_32_ri_memsize, afft_32_ri_create, ndim, dim, mem) { }
+  inverse_real_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_32_ri_memsize, afft_32_ri_create, ndim, dim, mem, impl) { }
 
   void operator()(const float* src_re, const float* src_im, float* dst)
   {
@@ -176,8 +183,9 @@ template<>
 class inverse_real_transform<double>
 {
 public:
-  inverse_real_transform(size_t ndim, const size_t* dim, void* mem = 0)
-  : m(afft_64_ri_memsize, afft_64_ri_create, ndim, dim, mem) { }
+  inverse_real_transform(
+    size_t ndim, const size_t* dim, void* mem = 0, int impl = afft_auto)
+  : m(afft_64_ri_memsize, afft_64_ri_create, ndim, dim, mem, impl) { }
 
   void operator()(const double* src_re, const double* src_im, double* dst)
   {
