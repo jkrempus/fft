@@ -14,6 +14,8 @@ struct SizeRange
   Int end;
 };
 
+struct SimdImpl { Int val; };
+
 struct Options
 {
   bool is_double;
@@ -21,6 +23,7 @@ struct Options
   bool is_real;
   bool is_inverse;
   std::optional<double> precision;
+  SimdImpl simd_impl;
   std::string implementation;
   std::vector<SizeRange> size;
 };
@@ -61,6 +64,11 @@ public:
   void add_optional_flag(
     const std::string_view& name, const std::string_view& description,
     std::optional<T>* dst);
+
+  template<typename T>
+  void add_optional_flag(
+    const std::string_view& name, const std::string_view& description,
+    T* dst);
 
   template<typename T>
   void add_positional(

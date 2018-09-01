@@ -555,9 +555,9 @@ struct TestWrapper<T, false, false>
   static const bool is_inverse = false;
   typedef T value_type;
   afft::complex_transform<T> t;
-  TestWrapper(const std::vector<Int>& size) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
     Base<T, false, false>(size),
-    t(size.size(), (const Uint*) &size[0]) {}
+    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
   {
@@ -574,9 +574,9 @@ struct TestWrapper<T, false, true>
   static const bool is_inverse = true;
   typedef T value_type;
   afft::inverse_complex_transform<T> t;
-  TestWrapper(const std::vector<Int>& size) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
     Base<T, false, true>(size),
-    t(size.size(), (const Uint*) &size[0]) {}
+    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
   {
@@ -594,9 +594,9 @@ struct TestWrapper<T, true, false>
   typedef T value_type;
   afft::real_transform<T> t;
 
-  TestWrapper(const std::vector<Int>& size) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
     Base<T, true, false>(size),
-    t(size.size(), (const Uint*) &size[0]) {}
+    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
   {
@@ -613,9 +613,9 @@ struct TestWrapper<T, true, true>
   typedef T value_type;
   afft::inverse_real_transform<T> t;
 
-  TestWrapper(const std::vector<Int>& size) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
     Base<T, true, true>(size),
-    t(size.size(), (const Uint*) &size[0]) {}
+    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
   {
@@ -682,7 +682,7 @@ struct FftwTestWrapper :
   typedef float value_type;
   fftwf_plan plan;
 
-  FftwTestWrapper(const std::vector<Int>& size)
+  FftwTestWrapper(const std::vector<Int>& size, Int simd_impl)
     : InterleavedWrapperBase<T, HalvedDimLast, is_real, is_inverse_>(size)
   {
     plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
@@ -787,7 +787,7 @@ struct ReferenceFft :
   std::vector<Onedim> onedim;
   std::vector<T> working;
 
-  ReferenceFft(const std::vector<Int>& size)
+  ReferenceFft(const std::vector<Int>& size, Int simd_impl)
     : InterleavedWrapperBase<T, void, false, is_inverse_>(size)
   {
     for(auto e : size) onedim.emplace_back(e);
@@ -843,11 +843,12 @@ struct TestResult
 };
 
 template<typename Fft>
-TestResult bench(const std::vector<Int>& size, double requested_operations)
+TestResult bench(
+  const std::vector<Int>& size, double requested_operations, Int simd_impl)
 {
   Int n = product(size);
   typedef typename Fft::value_type T;
-  Fft fft(size);
+  Fft fft(size, simd_impl);
 
   T* src = alloc_array<T>(2 * n);
   for(Int i = 0; i < n * 2; i++) src[i] = 0.0f;
@@ -875,13 +876,13 @@ TestResult bench(const std::vector<Int>& size, double requested_operations)
 }
 
 template<typename Fft0, typename Fft1>
-TestResult compare(const std::vector<Int>& size)
+TestResult compare(const std::vector<Int>& size, Int simd_impl)
 {
   static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
   Int n = product(size);
-  Fft0 fft0(size);
-  Fft1 fft1(size);
+  Fft0 fft0(size, simd_impl);
+  Fft1 fft1(size, simd_impl);
   T* src = alloc_array<T>(2 * n);
   T* dst0 = alloc_array<T>(2 * n);
   T* dst1 = alloc_array<T>(2 * n);
@@ -981,6 +982,27 @@ template<typename T>
 void OptionParser::add_optional_flag(
   const std::string_view& name, const std::string_view& description,
   std::optional<T>* dst)
+{
+  Option option;
+  option.name = std::string(name);
+  option.description = std::string(description);
+  option.handler = [dst](const char* val)
+  {
+    std::stringstream s(val);
+    T converted;
+    s >> converted;
+    if(s.fail()) return false;
+    *dst = converted;
+    return true;
+  };
+
+  flags.emplace(std::string(name), std::move(option));
+}
+
+template<typename T>
+void OptionParser::add_optional_flag(
+  const std::string_view& name, const std::string_view& description,
+  T* dst)
 {
   Option option;
   option.name = std::string(name);
@@ -1155,6 +1177,20 @@ std::istream& operator>>(std::istream& stream, SizeRange& size_range)
   return stream;
 }
 
+std::istream& operator>>(std::istream& stream, SimdImpl& simd_impl)
+{
+  std::string s(std::istreambuf_iterator<char>(stream), {});
+  
+  if(s == "auto") simd_impl.val = 0;
+  else if(s == "scalar") simd_impl.val = 1;
+  else if(s == "sse2") simd_impl.val = 2;
+  else if(s == "avx2") simd_impl.val = 3;
+  else if(s == "neon") simd_impl.val = 4;
+  else stream.setstate(std::ios_base::failbit);
+
+  return stream;
+}
+
 OptionParser::Result parse_options(int argc, char** argv, Options* dst)
 {
   OptionParser parser;
@@ -1165,6 +1201,10 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
   parser.add_optional_flag(
     "-p", "Required relative precision", &dst->precision);
 
+  dst->simd_impl = {afft_auto};
+  parser.add_optional_flag(
+    "-s", "Which SIMD implementation to use", &dst->simd_impl);
+
   parser.add_positional(
     "implementation", "Fft implementation to test.", &dst->implementation);
 
@@ -1173,80 +1213,58 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
 }
 
 template<typename Fft>
-TestResult test_or_bench4(
-  const std::string& impl,
-  const std::vector<Int>& lsz,
-  bool is_bench)
+TestResult test_or_bench4(const Options& opt, const std::vector<Int>& lsz)
 {
   std::vector<Int> size;
   for(auto e : lsz) size.push_back(1 << e);
 
-  if(is_bench)
-    return bench<Fft>(size, 1e11);
+  if(opt.is_bench)
+    return bench<Fft>(size, 1e11, opt.simd_impl.val);
   else
     //TODO: Use long double for ReferenceFft
     return 
-      compare<ReferenceFft<double, Fft::is_inverse>, Fft>(size);
+      compare<ReferenceFft<double, Fft::is_inverse>, Fft>(
+        size, opt.simd_impl.val);
 }
 
 template<typename ET, bool is_real, bool is_inverse>
-TestResult test_or_bench3(
-  const std::string& impl,
-  const std::vector<Int>& lsz,
-  bool is_bench)
+TestResult test_or_bench3(const Options& opt, const std::vector<Int>& lsz)
 {
-  if(impl == "fft")
-    return test_or_bench4<TestWrapper<ET, is_real, is_inverse>>(
-      impl, lsz, is_bench);
+  if(opt.implementation == "fft")
+    return test_or_bench4<TestWrapper<ET, is_real, is_inverse>>(opt, lsz);
 #ifdef HAVE_FFTW
-  else if(impl == "fftw")
+  else if(opt.implementation == "fftw")
     return
-      test_or_bench4<FftwTestWrapper<ET, is_real, is_inverse>>(
-        impl, lsz, is_bench);
+      test_or_bench4<FftwTestWrapper<ET, is_real, is_inverse>>(opt, lsz);
 #endif
   else
     abort();
 }
 
 template<typename ET, bool is_real>
-TestResult test_or_bench2(
-  const std::string& impl,
-  const std::vector<Int>& lsz,
-  bool is_inverse,
-  bool is_bench)
+TestResult test_or_bench2(const Options& opt, const std::vector<Int>& lsz)
 {
-  if(is_inverse)
-    return test_or_bench3<ET, is_real, true>(impl, lsz, is_bench);
+  if(opt.is_inverse)
+    return test_or_bench3<ET, is_real, true>(opt, lsz);
   else
-    return test_or_bench3<ET, is_real, false>(impl, lsz, is_bench);
+    return test_or_bench3<ET, is_real, false>(opt, lsz);
 }
 
 template<typename ET>
-TestResult test_or_bench1(
-  const std::string& impl,
-  const std::vector<Int>& lsz,
-  bool is_real,
-  bool is_inverse,
-  bool is_bench)
+TestResult test_or_bench1(const Options& opt, const std::vector<Int>& lsz)
 {
-  if(is_real)
-    return test_or_bench2<ET, true>(impl, lsz, is_inverse, is_bench);
+  if(opt.is_real)
+    return test_or_bench2<ET, true>(opt, lsz);
   else
-    return test_or_bench2<ET, false>(impl, lsz, is_inverse, is_bench);
+    return test_or_bench2<ET, false>(opt, lsz);
 }
 
-TestResult test_or_bench0(
-  const std::string& impl,
-  const std::vector<Int>& lsz,
-  bool is_double,
-  bool is_real,
-  bool is_inverse,
-  bool is_bench)
+TestResult test_or_bench0(const Options& opt, const std::vector<Int>& lsz)
 {
-  if(is_double)
-    return test_or_bench1<double>(impl, lsz, is_real, is_inverse, is_bench);
+  if(opt.is_double)
+    return test_or_bench1<double>(opt, lsz);
   else
-    return test_or_bench1<float>(impl, lsz, is_real, is_inverse, is_bench);
+    return test_or_bench1<float>(opt, lsz);
 }
 
 
@@ -1274,18 +1292,14 @@ bool run_test(const Options& opt, std::ostream& out)
 
     if(opt.is_bench)
     {
-      auto r = test_or_bench0(
-        opt.implementation, sz,
-        opt.is_double, opt.is_real, opt.is_inverse, opt.is_bench);
+      auto r = test_or_bench0(opt, sz);
 
       stream_printf(
         out, "%f GFLOPS  %f ns\n", r.flops * 1e-9, r.time_per_element * 1e9);
     }
     else
     {
-      TestResult test_result = test_or_bench0(
-        opt.implementation, sz,
-        opt.is_double, opt.is_real, opt.is_inverse, opt.is_bench);
+      TestResult test_result = test_or_bench0(opt, sz);
 
       stream_printf(out, "%g\n", test_result.error);
 
