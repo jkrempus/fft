@@ -1019,7 +1019,7 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
 
   dst->simd_impl = {afft_auto};
   parser.add_optional_flag(
-    "-s", "Which SIMD implementation to use", &dst->simd_impl);
+    "--simd", "Which SIMD implementation to use", &dst->simd_impl);
 
   parser.add_positional(
     "implementation", "Fft implementation to test.", &dst->implementation);

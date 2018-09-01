@@ -23,3 +23,5 @@ struct Options
 OptionParser::Result parse_options(int argc, char** argv, Options* dst);
 
 bool run_test(const Options& opt, std::ostream& out);
+
+std::istream& operator>>(std::istream& stream, SimdImpl& simd_impl);

@@ -36,7 +36,9 @@ std::string format_option(const Options& opt)
   return s.str();
 }
 
-int run(const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity)
+int run(
+  const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity,
+  Int simd_impl)
 {
   for(auto [is_real, is_inverse] : {
     std::make_pair(true, true),
@@ -52,6 +54,7 @@ int run(const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity)
     opt.is_bench =  false;
     opt.is_real = is_real;
     opt.is_inverse = is_inverse;
+    opt.simd_impl = {simd_impl};
 
     if(verbosity >= 2)
     {
@@ -80,7 +83,8 @@ int run(const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity)
 }
 
 void run(
-  const std::vector<std::vector<Int>>& sizes, Int num_threads, Int verbosity)
+  const std::vector<std::vector<Int>>& sizes, Int num_threads, Int verbosity,
+  Int simd_impl)
 {
   int64_t total_size = 0;
   for(auto& s : sizes) total_size += num_processed_elements(s);
@@ -102,7 +106,7 @@ void run(
         if(idx >= sizes.size()) return;
         auto& s = sizes[idx];
 
-        run(s, mutex, verbosity);
+        run(s, mutex, verbosity, simd_impl);
 
         std::lock_guard<std::mutex> lock(mutex);
         done_size += num_processed_elements(s);
@@ -191,37 +195,34 @@ double add_random_sizes(
 
 int main(int argc, char** argv)
 {
-  std::optional<Int> opt_max_size;
-  std::optional<Int> opt_max_dim;
-  std::optional<Int> opt_threads;
-  std::optional<Int> opt_verbosity;
-  std::optional<Int> opt_total;
+  Int max_size = 22;
+  Int max_dim = 5;
+  Int verbosity = 1;
+  Int threads = 1;
+  Int total = 1000000000;
+  SimdImpl simd_impl = {0};
 
   OptionParser op;
-  op.add_optional_flag("-v", "Verbosity level.", &opt_verbosity);
-  op.add_optional_flag("--threads", "Number of threads.", &opt_threads);
-  op.add_optional_flag("-d", "Maximal number of dimensions.", &opt_max_dim);
+  op.add_optional_flag("-v", "Verbosity level.", &verbosity);
+  op.add_optional_flag("--threads", "Number of threads.", &threads);
+  op.add_optional_flag("-d", "Maximal number of dimensions.", &max_dim);
   op.add_optional_flag(
-    "-s",
-    "Maximal value for the binary logarithm of transform size.",
-    &opt_max_size);
+    "--simd", "which SIMD implementation to use.", &simd_impl);
   op.add_optional_flag(
-    "-t",
-    "The total number of elements that will be processed in all of the tests.",
-    &opt_total);
+    "-s", "Maximal value for the binary logarithm of transform size.",
+    &max_size);
+  op.add_optional_flag(
+    "-t", "The total number of elements that will be processed in all of the tests.",
+    &total);
 
   op.parse(argc, argv);
-
-  Int max_size = opt_max_size.value_or(22);
-  Int max_dim = opt_max_dim.value_or(5);
-  Int verbosity = opt_verbosity.value_or(1);
 
   std::vector<std::vector<Int>> sizes;
   for(Int i = 1; i < max_size + 1; i++) sizes.push_back({i});
   for(Int i = 1; i < max_size / 2 + 1; i++) sizes.push_back({i, i});
   for(Int i = 1; i < max_size / 3 + 1; i++) sizes.push_back({i, i, i});
   double tested_percentage = add_random_sizes(
-    max_size, max_dim, opt_total.value_or(1000000000), sizes);
+    max_size, max_dim, total, sizes);
 
   if(verbosity >= 1)
     std::cerr
@@ -230,7 +231,7 @@ int main(int argc, char** argv)
       << "and number of elements up to 2^"
       << max_size << " will be tested." << std::endl;
 
-  run(sizes, opt_threads.value_or(1), verbosity);
+  run(sizes, threads, verbosity, simd_impl.val);
 
   return 0;
 }
