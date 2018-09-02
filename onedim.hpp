@@ -139,26 +139,15 @@ void first_three_passes(
     src_re += stride<V, SrcCf>();
     src_im += stride<V, SrcCf>();
 
-    {
-      Vec d[8];
-      V::transpose(
-        c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
-        c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
-        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+    V::template transposed_store<stride<V, cf::Vec>()>(
+      c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
+      c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
+      dst);
 
-      for(Int i = 0; i < 8; i++) V::store(d[i], dst + i * stride<V, cf::Vec>());
-    }
-
-    {
-      Vec d[8];
-      V::transpose(
-        c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
-        c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
-        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
-
-      for(Int i = 0; i < 8; i++)
-        V::store(d[i], dst + i * stride<V, cf::Vec>() + V::vec_size);
-    }
+    V::template transposed_store<stride<V, cf::Vec>()>(
+      c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
+      c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
+      dst + V::vec_size);
 
     dst += 8 * stride<V, cf::Vec>();
   }
