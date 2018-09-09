@@ -23,6 +23,24 @@ struct Fft
 
 template<typename T> struct Ifft;
 
+template<typename V>
+FORCEINLINE void first_two_passes_inner(
+  Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
+  Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3)
+{
+  VEC_TYPEDEFS(V);
+
+  C a0 = src0 + src2;
+  C a1 = src0 - src2;
+  C a2 = src1 + src3;
+  C a3 = src1 - src3;
+
+  dst0 = a0 + a2;
+  dst2 = a0 - a2;
+  dst1 = a1 + a3.mul_neg_i();
+  dst3 = a1 - a3.mul_neg_i();
+}
+
 template<typename V, typename SrcCf>
 void first_two_passes(
   Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
@@ -33,22 +51,16 @@ void first_two_passes(
 
   for(const T* end = src_re + l; src_re < end;)
   {
-    C a0 = load<V, SrcCf>(src_re, src_im, 0 * l);
-    C a1 = load<V, SrcCf>(src_re, src_im, 1 * l);
-    C a2 = load<V, SrcCf>(src_re, src_im, 2 * l);
-    C a3 = load<V, SrcCf>(src_re, src_im, 3 * l);
+    C c0, c1, c2, c3;
+    first_two_passes_inner(
+      load<V, SrcCf>(src_re, src_im, 0 * l),
+      load<V, SrcCf>(src_re, src_im, 1 * l),
+      load<V, SrcCf>(src_re, src_im, 2 * l),
+      load<V, SrcCf>(src_re, src_im, 3 * l),
+      c0, c1, c2, c3);
+
     src_re += stride<V, SrcCf>();
     src_im += stride<V, SrcCf>();
-
-    C b0 = a0 + a2;
-    C b1 = a0 - a2;
-    C b2 = a1 + a3;
-    C b3 = a1 - a3;
-
-    C c0 = b0 + b2; 
-    C c2 = b0 - b2;
-    C c1 = b1 + b3.mul_neg_i();
-    C c3 = b1 - b3.mul_neg_i();
 
     if constexpr(V::vec_size == 1)
     {
@@ -99,54 +111,41 @@ void first_three_passes(
 
   for(T* end = dst + n * cf::Vec::idx_ratio; dst < end;)
   {
-    C c0, c1, c2, c3;
-    {
-      C a0 = load<V, SrcCf>(src_re, src_im, 0 * l);
-      C a1 = load<V, SrcCf>(src_re, src_im, 2 * l);
-      C a2 = load<V, SrcCf>(src_re, src_im, 4 * l);
-      C a3 = load<V, SrcCf>(src_re, src_im, 6 * l);
-      C b0 = a0 + a2;
-      C b1 = a0 - a2;
-      C b2 = a1 + a3;
-      C b3 = a1 - a3;
-      c0 = b0 + b2; 
-      c2 = b0 - b2;
-      c1 = b1 + b3.mul_neg_i();
-      c3 = b1 - b3.mul_neg_i();
-    }
+    C a0, a1, a2, a3;
+    first_two_passes_inner(
+      load<V, SrcCf>(src_re, src_im, 0 * l),
+      load<V, SrcCf>(src_re, src_im, 2 * l),
+      load<V, SrcCf>(src_re, src_im, 4 * l),
+      load<V, SrcCf>(src_re, src_im, 6 * l),
+      a0, a1, a2, a3);
 
     C mul0, mul1, mul2, mul3;
     {
-      C a0 = load<V, SrcCf>(src_re, src_im, 1 * l);
-      C a1 = load<V, SrcCf>(src_re, src_im, 3 * l);
-      C a2 = load<V, SrcCf>(src_re, src_im, 5 * l);
-      C a3 = load<V, SrcCf>(src_re, src_im, 7 * l);
-      C b0 = a0 + a2;
-      C b1 = a0 - a2;
-      C b2 = a1 + a3;
-      C b3 = a1 - a3;
-      C c4 = b0 + b2;
-      C c6 = b0 - b2;
-      C c5 = b1 + b3.mul_neg_i();
-      C c7 = b1 - b3.mul_neg_i();
+      C b0, b1, b2, b3;
+      first_two_passes_inner(
+        load<V, SrcCf>(src_re, src_im, 1 * l),
+        load<V, SrcCf>(src_re, src_im, 3 * l),
+        load<V, SrcCf>(src_re, src_im, 5 * l),
+        load<V, SrcCf>(src_re, src_im, 7 * l),
+        b0, b1, b2, b3);
 
-      mul0 = c4;
-      mul1 = {invsqrt2 * (c5.re + c5.im), invsqrt2 * (c5.im - c5.re)};
-      mul2 = c6.mul_neg_i();
-      mul3 = {invsqrt2 * (c7.im - c7.re), invsqrt2 * (-c7.im - c7.re)};
+      mul0 = b0;
+      mul1 = {invsqrt2 * (b1.re + b1.im), invsqrt2 * (b1.im - b1.re)};
+      mul2 = b2.mul_neg_i();
+      mul3 = {invsqrt2 * (b3.im - b3.re), invsqrt2 * (-b3.im - b3.re)};
     }
 
     src_re += stride<V, SrcCf>();
     src_im += stride<V, SrcCf>();
 
     V::template transposed_store<stride<V, cf::Vec>()>(
-      c0.re + mul0.re, c1.re + mul1.re, c2.re + mul2.re, c3.re + mul3.re,
-      c0.re - mul0.re, c1.re - mul1.re, c2.re - mul2.re, c3.re - mul3.re,
+      a0.re + mul0.re, a1.re + mul1.re, a2.re + mul2.re, a3.re + mul3.re,
+      a0.re - mul0.re, a1.re - mul1.re, a2.re - mul2.re, a3.re - mul3.re,
       dst);
 
     V::template transposed_store<stride<V, cf::Vec>()>(
-      c0.im + mul0.im, c1.im + mul1.im, c2.im + mul2.im, c3.im + mul3.im,
-      c0.im - mul0.im, c1.im - mul1.im, c2.im - mul2.im, c3.im - mul3.im,
+      a0.im + mul0.im, a1.im + mul1.im, a2.im + mul2.im, a3.im + mul3.im,
+      a0.im - mul0.im, a1.im - mul1.im, a2.im - mul2.im, a3.im - mul3.im,
       dst + V::vec_size);
 
     dst += 8 * stride<V, cf::Vec>();
