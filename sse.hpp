@@ -37,22 +37,22 @@ struct SseFloat
     r0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(2, 0, 2, 0));
     r1 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 1, 3, 1));
   }
-  
-  static void FORCEINLINE transpose(
-    Vec a0, Vec a1, Vec a2, Vec a3,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
+
+  template<Int stride>  
+  static void FORCEINLINE transposed_store(
+    Vec a0, Vec a1, Vec a2, Vec a3, T* dst)
   {
     Vec b0 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)); 
     Vec b1 = _mm_shuffle_ps(a2, a3, _MM_SHUFFLE(1, 0, 1, 0));
     Vec b2 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2)); 
     Vec b3 = _mm_shuffle_ps(a2, a3, _MM_SHUFFLE(3, 2, 3, 2));
-     
-    r0 = _mm_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0));
-    r1 = _mm_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1));
-    r2 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0));
-    r3 = _mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1));
+
+    store(_mm_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0)), dst + 0 * stride);
+    store(_mm_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1)), dst + 1 * stride);
+    store(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0)), dst + 2 * stride);
+    store(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1)), dst + 3 * stride);
   }
-  
+
   static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
   
   static Vec reverse(Vec v)
@@ -111,12 +111,6 @@ struct SseDouble
     r1 = _mm_unpackhi_pd(a0, a1);
   }
   
-  static void FORCEINLINE transpose(Vec a0, Vec a1, Vec& r0, Vec& r1)
-  {
-    r0 = _mm_unpacklo_pd(a0, a1);
-    r1 = _mm_unpackhi_pd(a0, a1);
-  }
-
   static Vec FORCEINLINE vec(T a){ return _mm_set1_pd(a); }
 
   static Vec reverse(Vec v)

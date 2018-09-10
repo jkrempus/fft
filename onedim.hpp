@@ -88,14 +88,12 @@ void first_two_passes(
     }
     else
     {
-      C d0, d1, d2, d3;
-      V::transpose(c0.re, c1.re, c2.re, c3.re, d0.re, d1.re, d2.re, d3.re);
-      V::transpose(c0.im, c1.im, c2.im, c3.im, d0.im, d1.im, d2.im, d3.im);
+      V::template transposed_store<stride<V, cf::Vec>()>(
+        c0.re, c1.re, c2.re, c3.re, dst);
 
-      d0.store(dst);
-      d1.store(dst + stride<V, cf::Vec>());
-      d2.store(dst + 2 * stride<V, cf::Vec>());
-      d3.store(dst + 3 * stride<V, cf::Vec>());
+      V::template transposed_store<stride<V, cf::Vec>()>(
+        c0.im, c1.im, c2.im, c3.im, dst + V::vec_size);
+
       dst += 4 * stride<V, cf::Vec>();
     }
   }
