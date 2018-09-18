@@ -10,8 +10,7 @@ typedef long Int;
 typedef unsigned long Uint;
 #endif
 
-//#define FORCEINLINE __attribute__((always_inline)) inline
-#define FORCEINLINE
+#define FORCEINLINE __attribute__((always_inline)) inline
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
 
@@ -146,26 +145,26 @@ struct Complex
   typedef typename V::Vec Vec;
   Vec re;
   Vec im;
-  FORCEINLINE constexpr Complex mul_neg_i() { return {im, -re}; }
-  FORCEINLINE constexpr Complex adj() { return {re, -im}; }
-  FORCEINLINE constexpr Complex operator+(Complex other)
+  FORCEINLINE constexpr Complex mul_neg_i() const { return {im, -re}; }
+  FORCEINLINE constexpr Complex adj() const { return {re, -im}; }
+  FORCEINLINE constexpr Complex operator+(Complex other) const
   {
     return {re + other.re, im + other.im};
   }
 
-  FORCEINLINE constexpr Complex operator-(Complex other)
+  FORCEINLINE constexpr Complex operator-(Complex other) const
   {
     return {re - other.re, im - other.im};
   }
 
-  FORCEINLINE constexpr Complex operator*(Complex other)
+  FORCEINLINE constexpr Complex operator*(Complex other) const
   {
     return {
       re * other.re - im * other.im,
       re * other.im + im * other.re};
   }
 
-  FORCEINLINE constexpr Complex operator*(Vec other)
+  FORCEINLINE constexpr Complex operator*(Vec other) const
   {
     return {re * other, im * other};
   }

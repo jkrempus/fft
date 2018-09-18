@@ -46,30 +46,7 @@ constexpr Complex<Scalar<T>> root_of_unity(Int i, Int n)
 }
 
 template<typename V>
-FORCEINLINE void two_passes_inner(
-    Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
-    Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3,
-    Complex<V> tw0, Complex<V> tw1, Complex<V> tw2)
-{
-  typedef Complex<V> C;
-  C mul0 =       src0;
-  C mul1 = tw0 * src1;
-  C mul2 = tw1 * src2;
-  C mul3 = tw2 * src3;
-
-  C sum02 = mul0 + mul2;
-  C dif02 = mul0 - mul2;
-  C sum13 = mul1 + mul3;
-  C dif13 = mul1 - mul3;
-
-  dst0 = sum02 + sum13;
-  dst2 = sum02 - sum13;
-  dst1 = dif02 + dif13.mul_neg_i();
-  dst3 = dif02 - dif13.mul_neg_i();
-}
-
-template<typename V>
-FORCEINLINE void first_two_passes_inner(
+FORCEINLINE void two_passes_inner_unity_twiddle(
     Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
     Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3)
 {
@@ -85,6 +62,17 @@ FORCEINLINE void first_two_passes_inner(
   dst3 = dif02 - dif13.mul_neg_i();
 }
 
+template<typename V>
+FORCEINLINE void two_passes_inner(
+    Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
+    Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3,
+    Complex<V> tw0, Complex<V> tw1, Complex<V> tw2)
+{
+  two_passes_inner_unity_twiddle<V>(
+    src0, tw0 * src1, tw1 * src2, tw2 * src3,
+    dst0, dst1, dst2, dst3);
+}
+
 template<typename V, typename SrcCf>
 void first_two_passes(
   Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
@@ -96,7 +84,7 @@ void first_two_passes(
   for(const T* end = src_re + l; src_re < end;)
   {
     C c0, c1, c2, c3;
-    first_two_passes_inner(
+    two_passes_inner_unity_twiddle(
       load<V, SrcCf>(src_re, src_im, 0 * l),
       load<V, SrcCf>(src_re, src_im, 1 * l),
       load<V, SrcCf>(src_re, src_im, 2 * l),
@@ -154,7 +142,7 @@ void first_three_passes(
   for(T* end = dst + n * cf::Vec::idx_ratio; dst < end;)
   {
     C a0, a1, a2, a3;
-    first_two_passes_inner(
+    two_passes_inner_unity_twiddle(
       load<V, SrcCf>(src_re, src_im, 0 * l),
       load<V, SrcCf>(src_re, src_im, 2 * l),
       load<V, SrcCf>(src_re, src_im, 4 * l),
@@ -164,7 +152,7 @@ void first_three_passes(
     C mul0, mul1, mul2, mul3;
     {
       C b0, b1, b2, b3;
-      first_two_passes_inner(
+      two_passes_inner_unity_twiddle(
         load<V, SrcCf>(src_re, src_im, 1 * l),
         load<V, SrcCf>(src_re, src_im, 3 * l),
         load<V, SrcCf>(src_re, src_im, 5 * l),
@@ -194,6 +182,21 @@ void first_three_passes(
   }
 }
 
+template<typename V, int i>
+FORCEINLINE void first_four_passes_helper(Complex<V> (&interm)[16])
+{
+  VEC_TYPEDEFS(V);
+  constexpr auto tw0 = root_of_unity<T>(i, 16).adj();
+  constexpr auto tw1 = tw0 * tw0;
+  constexpr auto tw2 = tw1 * tw0;
+  two_passes_inner(
+    interm[i], interm[i + 4], interm[i + 8], interm[i + 12],
+    interm[i], interm[i + 4], interm[i + 8], interm[i + 12],
+    C{ V::vec(tw0.re), V::vec(tw0.im) },
+    C{ V::vec(tw1.re), V::vec(tw1.im) },
+    C{ V::vec(tw2.re), V::vec(tw2.im) });
+}
+
 template<typename V, typename SrcCf>
 void first_four_passes(
   Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
@@ -202,20 +205,12 @@ void first_four_passes(
   constexpr Int m = 16;
   Int l = n / m * SrcCf::idx_ratio;
 
-  Complex<Scalar<T>> table[12];
-  for(Int i = 0; i < 4; i++)
-  {
-    table[3 * i] = root_of_unity<T>(i, m).adj();
-    table[3 * i + 1] = table[3 * i] * table[3 * i];
-    table[3 * i + 2] = table[3 * i] * table[3 * i + 1];
-  }
-
   for(T* end = dst + n * cf::Vec::idx_ratio; dst < end;)
   {
     C interm[m];
 
     for(Int i = 0; i < 4; i++)
-      first_two_passes_inner(
+      two_passes_inner_unity_twiddle(
         load<V, SrcCf>(src_re, src_im, (0 + i) * l),
         load<V, SrcCf>(src_re, src_im, (4 + i) * l),
         load<V, SrcCf>(src_re, src_im, (8 + i) * l),
@@ -226,13 +221,10 @@ void first_four_passes(
     src_re += stride<V, SrcCf>();
     src_im += stride<V, SrcCf>();
 
-    for(Int i = 0; i < 4; i++)
-      two_passes_inner(
-        interm[i], interm[i + 4], interm[i + 8], interm[i + 12],
-        interm[i], interm[i + 4], interm[i + 8], interm[i + 12],
-        C{V::vec(table[3 * i].re), V::vec(table[3 * i].im)},
-        C{V::vec(table[3 * i + 1].re), V::vec(table[3 * i + 1].im)},
-        C{V::vec(table[3 * i + 2].re), V::vec(table[3 * i + 2].im)});
+    first_four_passes_helper<V, 0>(interm);
+    first_four_passes_helper<V, 1>(interm);
+    first_four_passes_helper<V, 2>(interm);
+    first_four_passes_helper<V, 3>(interm);
 
     Vec real[m];
     for(Int i = 0; i < m; i++) real[i] = interm[i].re;
@@ -665,25 +657,25 @@ FORCEINLINE void tiny_transform_pass(A& src_re, A& src_im, A& dst_re, A& dst_im)
 template<typename Vec, int n> struct Locals
 {
   Vec a[n];
-  Vec& operator[](int i) { return a[i]; }
+  FORCEINLINE Vec& operator[](int i) { return a[i]; }
 };
 
 template<typename Vec> struct Locals<Vec, 1>
 {
   Vec a0;
-  Vec& operator[](int i) { return a0; }
+  FORCEINLINE Vec& operator[](int i) { return a0; }
 };
 
 template<typename Vec> struct Locals<Vec, 2>
 {
   Vec a0, a1;
-  Vec& operator[](int i) { return i == 0 ? a0 : a1; }
+  FORCEINLINE Vec& operator[](int i) { return i == 0 ? a0 : a1; }
 };
 
 template<typename Vec> struct Locals<Vec, 4>
 {
   Vec a0, a1, a2, a3;
-  Vec& operator[](int i)
+  FORCEINLINE Vec& operator[](int i)
   {
     return 
       i == 0 ? a0 :
@@ -695,7 +687,7 @@ template<typename Vec> struct Locals<Vec, 4>
 template<typename Vec> struct Locals<Vec, 8>
 {
   Vec a0, a1, a2, a3, a4, a5, a6, a7;
-  Vec& operator[](int i)
+  FORCEINLINE Vec& operator[](int i)
   {
     return 
       i == 0 ? a0 :
