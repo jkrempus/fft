@@ -624,76 +624,92 @@ struct TestWrapper<T, true, true>
 };
 
 #ifdef HAVE_FFTW
-template<bool is_real, bool is_inverse, typename T>
-fftwf_plan make_plan(const std::vector<Int>& size, T* src, T* dst);
-
-const unsigned fftw_flags = FFTW_PATIENT;
-
-template<> fftwf_plan make_plan<false, false, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft(
-    size.size(), idx, 
-    (fftwf_complex*) src, (fftwf_complex*) dst,
-    FFTW_FORWARD, fftw_flags);
-}
-
-template<> fftwf_plan make_plan<false, true, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft(
-    size.size(), idx, 
-    (fftwf_complex*) src, (fftwf_complex*) dst,
-    FFTW_BACKWARD, fftw_flags);
-}
-
-template<> fftwf_plan make_plan<true, false, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft_r2c(
-    size.size(), idx, 
-    src, (fftwf_complex*) dst,
-    fftw_flags);
-}
-
-template<> fftwf_plan make_plan<true, true, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft_c2r(
-    size.size(), idx, 
-    (fftwf_complex*) src, dst,
-    fftw_flags);
-}
 
 template<typename T, bool is_real_, bool is_inverse_>
 struct FftwTestWrapper :
   public InterleavedWrapperBase<T, HalvedDimLast, is_real_, is_inverse_>
 {
+  static const unsigned fftw_flags = FFTW_PATIENT;
   static const bool is_real = is_real_;
   static const bool is_inverse = is_inverse_;
   typedef float value_type;
-  fftwf_plan plan;
+  std::conditional_t<std::is_same_v<T, float>, fftwf_plan, fftw_plan> plan;
 
   FftwTestWrapper(const std::vector<Int>& size, Int simd_impl)
     : InterleavedWrapperBase<T, HalvedDimLast, is_real, is_inverse_>(size)
   {
-    plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
+    int idx[maxdim];
+    std::copy_n(&size[0], size.size(), idx);
+    auto src = this->src;
+    auto dst = this->dst;
+
+    if constexpr(is_real_)
+    {
+      if constexpr(is_inverse_)
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft_c2r(
+            size.size(), idx, (fftwf_complex*) src, dst, fftw_flags);
+        else
+          plan = fftw_plan_dft_c2r(
+            size.size(), idx, (fftw_complex*) src, dst, fftw_flags);
+      }
+      else
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft_r2c(
+            size.size(), idx, src, (fftwf_complex*) dst, fftw_flags);
+        else
+          plan = fftw_plan_dft_r2c(
+            size.size(), idx, src, (fftw_complex*) dst, fftw_flags);
+      }
+    }
+    else
+    {
+      if constexpr(is_inverse_)
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft(
+            size.size(), idx, 
+            (fftwf_complex*) src, (fftwf_complex*) dst,
+            FFTW_BACKWARD, fftw_flags);
+        else
+          plan = fftw_plan_dft(
+            size.size(), idx, 
+            (fftw_complex*) src, (fftw_complex*) dst,
+            FFTW_BACKWARD, fftw_flags);
+      }
+      else
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft(
+            size.size(), idx, 
+            (fftwf_complex*) src, (fftwf_complex*) dst,
+            FFTW_FORWARD, fftw_flags);
+        else
+          plan = fftw_plan_dft(
+            size.size(), idx, 
+            (fftw_complex*) src, (fftw_complex*) dst,
+            FFTW_FORWARD, fftw_flags);
+      }
+    }
   }
 
-  ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
+  ~FftwTestWrapper()
+  {
+    if constexpr(std::is_same_v<T, float>)
+      fftwf_destroy_plan(plan);
+    else
+      fftw_destroy_plan(plan);
+  }
 
   void transform()
   {
     Int n = product(this->size);
-    fftwf_execute(plan);
+    if constexpr(std::is_same_v<T, float>)
+      fftwf_execute(plan);
+    else
+      fftw_execute(plan);
   }
 };
 #endif
