@@ -1006,7 +1006,8 @@ std::istream& operator>>(std::istream& stream, SimdImpl& simd_impl)
   else if(s == "scalar") simd_impl.val = 1;
   else if(s == "sse2") simd_impl.val = 2;
   else if(s == "avx2") simd_impl.val = 3;
-  else if(s == "neon") simd_impl.val = 4;
+  else if(s == "avx512f") simd_impl.val = 4;
+  else if(s == "neon") simd_impl.val = 5;
   else stream.setstate(std::ios_base::failbit);
 
   return stream;

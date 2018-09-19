@@ -37,6 +37,7 @@ namespace afft
     DECLARE_IMPL(afft_scalar)
     DECLARE_IMPL(afft_sse2)
     DECLARE_IMPL(afft_avx2)
+    DECLARE_IMPL(afft_avx512f)
     DECLARE_IMPL(afft_neon)
   }
 }
@@ -79,6 +80,11 @@ namespace
         return call_impl<afft_neon, Op, T>(FnTag(), args...);
 #endif
 
+#ifdef AFFT_AVX512F_ENABLED
+      if(afft::detail::impl_supported<afft_avx2>())
+        return call_impl<afft_avx512f, Op, T>(FnTag(), args...);
+#endif
+
 #ifdef AFFT_AVX2_ENABLED
       if(afft::detail::impl_supported<afft_avx2>())
         return call_impl<afft_avx2, Op, T>(FnTag(), args...);
@@ -102,6 +108,10 @@ namespace
       {
 #ifdef AFFT_NEON_ENABLED
         case afft_neon: return call_impl<afft_neon, Op, T>(FnTag(), args...);
+#endif
+
+#ifdef AFFT_AVX512F_ENABLED
+        case afft_avx512f: return call_impl<afft_avx512f, Op, T>(FnTag(), args...);
 #endif
 
 #ifdef AFFT_AVX2_ENABLED

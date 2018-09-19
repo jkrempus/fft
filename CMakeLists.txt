@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.6)
 project(fft)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_EXE_LINKER_FLAGS -static)
 
 option(ENABLE_SCALAR "Enable the scalar implementation" ON)
 if(ENABLE_SCALAR)
@@ -22,6 +23,14 @@ if(ENABLE_AVX2)
   set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_AVX2_ENABLED=1)
   set_source_files_properties(
     avx2_impl.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+endif()
+
+option(ENABLE_AVX512F "Enable the AVX512F implementation" ON)
+if(ENABLE_AVX512F)
+  set(IMPL_FILES ${IMPL_FILES} avx512f_impl.cpp)
+  set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_AVX512F_ENABLED=1)
+  set_source_files_properties(
+    avx512f_impl.cpp PROPERTIES COMPILE_FLAGS "-mavx512f -mfma")
 endif()
 
 option(ENABLE_NEON "Enable the NEON implementation" OFF)
