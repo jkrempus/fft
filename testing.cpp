@@ -1,3 +1,4 @@
+//#define ARRAY_IPC_ENABLED
 #include "misc/array_ipc.h"
 
 #include "fft.hpp"
@@ -972,7 +973,11 @@ std::istream& operator>>(std::istream& stream, SizeRange& size_range)
 
   p = next_p;
 
-  if(*p == 0) return stream;
+  if(*p == 0)
+  {
+    size_range.end = size_range.begin + 1;
+    return stream;
+  }
 
   if(*p != '-')
   {
@@ -996,7 +1001,7 @@ std::istream& operator>>(std::istream& stream, SizeRange& size_range)
 std::istream& operator>>(std::istream& stream, SimdImpl& simd_impl)
 {
   std::string s(std::istreambuf_iterator<char>(stream), {});
-  
+
   if(s == "auto") simd_impl.val = 0;
   else if(s == "scalar") simd_impl.val = 1;
   else if(s == "sse2") simd_impl.val = 2;
