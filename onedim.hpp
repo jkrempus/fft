@@ -194,6 +194,58 @@ void first_three_passes(
   }
 }
 
+template<typename V, typename SrcCf>
+void first_four_passes(
+  Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
+{
+  VEC_TYPEDEFS(V);
+  constexpr Int m = 16;
+  Int l = n / m * SrcCf::idx_ratio;
+
+  Complex<Scalar<T>> table[12];
+  for(Int i = 0; i < 4; i++)
+  {
+    table[3 * i] = root_of_unity<T>(i, m).adj();
+    table[3 * i + 1] = table[3 * i] * table[3 * i];
+    table[3 * i + 2] = table[3 * i] * table[3 * i + 1];
+  }
+
+  for(T* end = dst + n * cf::Vec::idx_ratio; dst < end;)
+  {
+    C interm[m];
+
+    for(Int i = 0; i < 4; i++)
+      first_two_passes_inner(
+        load<V, SrcCf>(src_re, src_im, (0 + i) * l),
+        load<V, SrcCf>(src_re, src_im, (4 + i) * l),
+        load<V, SrcCf>(src_re, src_im, (8 + i) * l),
+        load<V, SrcCf>(src_re, src_im, (12 + i) * l),
+        interm[4 * i + 0], interm[4 * i + 1],
+        interm[4 * i + 2], interm[4 * i + 3]);
+
+    src_re += stride<V, SrcCf>();
+    src_im += stride<V, SrcCf>();
+
+    for(Int i = 0; i < 4; i++)
+      two_passes_inner(
+        interm[i], interm[i + 4], interm[i + 8], interm[i + 12],
+        interm[i], interm[i + 4], interm[i + 8], interm[i + 12],
+        C{V::vec(table[3 * i].re), V::vec(table[3 * i].im)},
+        C{V::vec(table[3 * i + 1].re), V::vec(table[3 * i + 1].im)},
+        C{V::vec(table[3 * i + 2].re), V::vec(table[3 * i + 2].im)});
+
+    Vec real[m];
+    for(Int i = 0; i < m; i++) real[i] = interm[i].re;
+    V::template transposed_store<stride<V, cf::Vec>()>(real, dst);
+
+    Vec imag[m];
+    for(Int i = 0; i < m; i++) imag[i] = interm[i].im;
+    V::template transposed_store<stride<V, cf::Vec>()>(imag, dst + V::vec_size);
+
+    dst += m * stride<V, cf::Vec>();
+  }
+}
+
 template<typename V>
 void two_passes(
   Int n, Int start_offset, Int end_offset, Int dft_size,
@@ -640,6 +692,22 @@ template<typename Vec> struct Locals<Vec, 4>
   }
 };
 
+template<typename Vec> struct Locals<Vec, 8>
+{
+  Vec a0, a1, a2, a3, a4, a5, a6, a7;
+  Vec& operator[](int i)
+  {
+    return 
+      i == 0 ? a0 :
+      i == 1 ? a1 :
+      i == 2 ? a2 :
+      i == 3 ? a3 :
+      i == 4 ? a4 :
+      i == 5 ? a5 :
+      i == 6 ? a6 : a7;
+  }
+};
+
 template<typename V, typename SrcCf, typename DstCf, Int n>
 void tiny_transform(
   const Fft<typename V::T>* state,
@@ -670,6 +738,8 @@ void tiny_transform(
   if(n >  4) tiny_transform_pass<V, vn,  4>(a_re, a_im, b_re, b_im);
   if(n >  8) tiny_transform_pass<V, vn,  8>(b_re, b_im, a_re, a_im);
   if(n > 16) tiny_transform_pass<V, vn, 16>(a_re, a_im, b_re, b_im);
+  if(n > 32) tiny_transform_pass<V, vn, 32>(b_re, b_im, a_re, a_im);
+  if(n > 64) tiny_transform_pass<V, vn, 64>(a_re, a_im, b_re, b_im);
 
   for(Int i = 0; i < vn; i++)
   {
@@ -699,7 +769,9 @@ Int tiny_fft_create_impl(Int n, void* ptr)
     n ==  4 ?  &tiny_transform<V, SrcCf, DstCf,  4> :
     n ==  8 ?  &tiny_transform<V, SrcCf, DstCf,  8> :
     n == 16 ?  &tiny_transform<V, SrcCf, DstCf, 16> :
-    n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> : nullptr;
+    n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> :
+    n == 64 ?  &tiny_transform<V, SrcCf, DstCf, 64> :
+    n == 128 ?  &tiny_transform<V, SrcCf, DstCf, 128> : nullptr;
 
   return (Int) ptr;
 }
@@ -707,6 +779,8 @@ Int tiny_fft_create_impl(Int n, void* ptr)
 template<typename V> 
 constexpr Int get_first_npasses()
 {
+  if constexpr(V::vec_size == 16)
+    return 4;
   if constexpr(V::vec_size == 8)
     return 3;
   else
@@ -750,8 +824,10 @@ void small_transform(
   constexpr Int first_npasses = get_first_npasses<V>();
   if constexpr(first_npasses == 2)
     first_two_passes<V, SrcCf>(n, src_re, src_im, w);
-  else
+  else if constexpr(first_npasses == 3)
     first_three_passes<V, SrcCf>(n, src_re, src_im, w);
+  else
+    first_four_passes<V, SrcCf>(n, src_re, src_im, w);
 
   dft_size <<= first_npasses;
 
@@ -826,8 +902,10 @@ void large_transform(
 
   if constexpr(first_npasses == 2)
     first_two_passes<V, SrcCf>(n, src_re, src_im, w);
-  else
+  else if constexpr(first_npasses == 3)
     first_three_passes<V, SrcCf>(n, src_re, src_im, w);
+  else
+    first_four_passes<V, SrcCf>(n, src_re, src_im, w);
 
   recursive_passes<V>(state, 1, w, 0, n);
 
