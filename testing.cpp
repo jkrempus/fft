@@ -878,7 +878,7 @@ TestResult bench(
   for(int64_t i = 0; i < iter; i++)
   {
     fft.transform();
-    int64_t j = i / (iter / 10);
+    //int64_t j = i / (iter / 10);
     //if(j * (iter / 10) == i) { printf("%d ", j); fflush(stdout); }
   }
 
@@ -1039,6 +1039,11 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
   parser.add_optional_flag(
     "-p", "Required relative precision", &dst->precision);
 
+  dst->num_ops = 1e11;
+  parser.add_optional_flag(
+    "-n", "Approximage number of operations to perform during benchmarking.",
+    &dst->num_ops);
+
   dst->simd_impl = {afft_auto};
   parser.add_optional_flag(
     "--simd", "Which SIMD implementation to use", &dst->simd_impl);
@@ -1057,7 +1062,7 @@ TestResult test_or_bench4(const Options& opt, const std::vector<Int>& lsz)
   for(auto e : lsz) size.push_back(1 << e);
 
   if(opt.is_bench)
-    return bench<Fft>(size, 1e11, opt.simd_impl.val);
+    return bench<Fft>(size, opt.num_ops, opt.simd_impl.val);
   else
     //TODO: Use long double for ReferenceFft
     return 

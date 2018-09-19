@@ -15,6 +15,7 @@ struct Options
   bool is_real;
   bool is_inverse;
   std::optional<double> precision;
+  double num_ops;
   SimdImpl simd_impl;
   std::string implementation;
   std::vector<SizeRange> size;
