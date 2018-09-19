@@ -23,22 +23,66 @@ struct Fft
 
 template<typename T> struct Ifft;
 
+template<int len, typename T>
+struct ReImTable
+{
+  T re[len];
+  T im[len];
+};
+
+template<typename T>
+constexpr Complex<Scalar<T>> root_of_unity(Int i, Int n)
+{
+  using C = Complex<Scalar<T>>;
+  C r{1, 0};
+  int table_i = 0;
+  for(int bit = n / 2; bit > 0; bit >>= 1, table_i++)
+    if((i & bit) != 0)
+      r = r * C{
+        SinCosTable<T>::cos[table_i],
+        SinCosTable<T>::sin[table_i]};
+
+  return r;
+}
+
+template<typename V>
+FORCEINLINE void two_passes_inner(
+    Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
+    Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3,
+    Complex<V> tw0, Complex<V> tw1, Complex<V> tw2)
+{
+  typedef Complex<V> C;
+  C mul0 =       src0;
+  C mul1 = tw0 * src1;
+  C mul2 = tw1 * src2;
+  C mul3 = tw2 * src3;
+
+  C sum02 = mul0 + mul2;
+  C dif02 = mul0 - mul2;
+  C sum13 = mul1 + mul3;
+  C dif13 = mul1 - mul3;
+
+  dst0 = sum02 + sum13;
+  dst2 = sum02 - sum13;
+  dst1 = dif02 + dif13.mul_neg_i();
+  dst3 = dif02 - dif13.mul_neg_i();
+}
+
 template<typename V>
 FORCEINLINE void first_two_passes_inner(
-  Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
-  Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3)
+    Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
+    Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3)
 {
-  VEC_TYPEDEFS(V);
+  typedef Complex<V> C;
+  C sum02 = src0 + src2;
+  C dif02 = src0 - src2;
+  C sum13 = src1 + src3;
+  C dif13 = src1 - src3;
 
-  C a0 = src0 + src2;
-  C a1 = src0 - src2;
-  C a2 = src1 + src3;
-  C a3 = src1 - src3;
-
-  dst0 = a0 + a2;
-  dst2 = a0 - a2;
-  dst1 = a1 + a3.mul_neg_i();
-  dst3 = a1 - a3.mul_neg_i();
+  dst0 = sum02 + sum13;
+  dst2 = sum02 - sum13;
+  dst1 = dif02 + dif13.mul_neg_i();
+  dst3 = dif02 - dif13.mul_neg_i();
 }
 
 template<typename V, typename SrcCf>
@@ -148,29 +192,6 @@ void first_three_passes(
 
     dst += 8 * stride<V, cf::Vec>();
   }
-}
-
-template<typename V>
-FORCEINLINE void two_passes_inner(
-  Complex<V> src0, Complex<V> src1, Complex<V> src2, Complex<V> src3,
-  Complex<V>& dst0, Complex<V>& dst1, Complex<V>& dst2, Complex<V>& dst3,
-  Complex<V> tw0, Complex<V> tw1, Complex<V> tw2)
-{
-  typedef Complex<V> C;
-  C mul0 =       src0;
-  C mul1 = tw0 * src1;
-  C mul2 = tw1 * src2;
-  C mul3 = tw2 * src3;
-
-  C sum02 = mul0 + mul2;
-  C dif02 = mul0 - mul2;
-  C sum13 = mul1 + mul3;
-  C dif13 = mul1 - mul3;
-
-  dst0 = sum02 + sum13;
-  dst2 = sum02 - sum13;
-  dst1 = dif02 + dif13.mul_neg_i();
-  dst3 = dif02 - dif13.mul_neg_i();
 }
 
 template<typename V>
@@ -495,13 +516,6 @@ void last_three_passes_in_place(
   }
 }
 
-template<int len, typename T>
-struct ReImTable
-{
-  T re[len];
-  T im[len];
-};
-
 template<int n, int vsz, typename T>
 constexpr ReImTable<(n > vsz ? n : vsz), T>
 create_ct_sized_fft_twiddle_table()
@@ -510,24 +524,9 @@ create_ct_sized_fft_twiddle_table()
   ReImTable<len, T> r = {0};
   for(int i = 0; i < n; i++)
   {
-    T re = T(1);
-    T im = T(0);
-    int table_i = 1;
-    for(int bit = n / 2; bit > 0; bit >>= 1, table_i++)
-      if((i & bit) != 0)
-      {
-        T table_re = SinCosTable<T>::cos[table_i];
-        T table_im = SinCosTable<T>::sin[table_i];
-
-        T new_re = table_re * re - table_im * im;
-        T new_im = table_re * im + table_im * re;
-
-        re = new_re;
-        im = new_im;
-      }
-
-    r.re[i] = re;
-    r.im[i] = -im;
+    auto tmp = root_of_unity<T>(i, n * 2);
+    r.re[i] = tmp.re;
+    r.im[i] = -tmp.im;
   }
 
   for(int i = 0; i < vsz; i++)
@@ -650,8 +649,7 @@ void tiny_transform(
   typename V::T* dst_im)
 {
   VEC_TYPEDEFS(V);
-  constexpr Int vsz = V::vec_size;
-
+  
   //Round up just to make it compile
   constexpr Int vn = (n + V::vec_size - 1) / V::vec_size;
 
@@ -676,8 +674,7 @@ void tiny_transform(
   for(Int i = 0; i < vn; i++)
   {
     C c;
-    constexpr bool result_in_a = is_power_of_4(n);
-    if(result_in_a) c = { a_re[i], a_im[i] };
+    if constexpr(is_power_of_4(n)) c = { a_re[i], a_im[i] };
     else c = { b_re[i], b_im[i] };
 
     store<DstCf>(c, dst_re, dst_im, i * stride<V, DstCf>());
