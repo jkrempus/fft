@@ -10,7 +10,8 @@ typedef long Int;
 typedef unsigned long Uint;
 #endif
 
-#define FORCEINLINE __attribute__((always_inline)) inline
+//#define FORCEINLINE __attribute__((always_inline)) inline
+#define FORCEINLINE
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
 
@@ -34,6 +35,8 @@ template<typename T>
 struct SameType<T, T> { static const bool value = true; };
 
 template<typename T> T max(const T& a, const T& b){ return a > b ? a : b; }
+
+Int log2(Int a)
 {
   Int r = 0;
   while(a > 1)
@@ -143,26 +146,26 @@ struct Complex
   typedef typename V::Vec Vec;
   Vec re;
   Vec im;
-  FORCEINLINE constexpr Complex mul_neg_i() const { return {im, -re}; }
-  FORCEINLINE constexpr Complex adj() const { return {re, -im}; }
-  FORCEINLINE constexpr Complex operator+(Complex other) const
+  FORCEINLINE constexpr Complex mul_neg_i() { return {im, -re}; }
+  FORCEINLINE constexpr Complex adj() { return {re, -im}; }
+  FORCEINLINE constexpr Complex operator+(Complex other)
   {
     return {re + other.re, im + other.im};
   }
 
-  FORCEINLINE constexpr Complex operator-(Complex other) const
+  FORCEINLINE constexpr Complex operator-(Complex other)
   {
     return {re - other.re, im - other.im};
   }
 
-  FORCEINLINE constexpr Complex operator*(Complex other) const
+  FORCEINLINE constexpr Complex operator*(Complex other)
   {
     return {
       re * other.re - im * other.im,
       re * other.im + im * other.re};
   }
 
-  FORCEINLINE constexpr Complex operator*(Vec other) const
+  FORCEINLINE constexpr Complex operator*(Vec other)
   {
     return {re * other, im * other};
   }
