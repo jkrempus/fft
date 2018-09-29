@@ -36,7 +36,7 @@ std::string format_option(const Options& opt)
   return s.str();
 }
 
-int run(
+void run(
   const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity,
   Int simd_impl)
 {

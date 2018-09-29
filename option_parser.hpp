@@ -20,15 +20,6 @@ typename Map::mapped_type* map_element_ptr(
 //TODO add --help flag handling
 class OptionParser
 {
-public:
-  struct Result
-  {
-    bool data_valid;
-    bool error;
-    std::string message;
-    operator bool() const { return data_valid; }
-  };
-
   struct Switch
   {
     std::string description;
@@ -43,6 +34,15 @@ public:
     Int min_num = 0;
     Int max_num = 1;
     Int num = 0;
+  };
+
+public:
+  struct Result
+  {
+    bool data_valid;
+    bool error;
+    std::string message;
+    operator bool() const { return data_valid; }
   };
 
   void add_switch(
@@ -142,15 +142,17 @@ public:
 
   Result parse(int argc, char** argv)
   {
-    for(auto& [name, switch_] : switches) *switch_.dst = false;
-
     auto positional_it = positional.begin();
+
+    for(auto& [name, switch_] : switches) *switch_.dst = false;
 
     for(int i = 1; i < argc; i++)
     {
       if(argv[i][0] == '-')
       {
-        if(auto switch_ = map_element_ptr(switches, argv[i]))
+        if(std::string_view(argv[i]) == "--help")
+          return Result{false, false, generate_help(argv[0])};
+        else if(auto switch_ = map_element_ptr(switches, argv[i]))
           *switch_->dst = true;
         else if(auto flag = map_element_ptr(flags, argv[i]))
         {
@@ -199,7 +201,7 @@ public:
 
 
 private:  
-  
+
   template<typename... Args>
   Result fail(const Args&... args)
   {
@@ -211,6 +213,59 @@ private:
     (s << ... << args);
     r.message = s.str();
     return r;
+  }
+
+  std::string generate_help(std::string_view program_name)
+  {
+    std::stringstream s;
+
+    s << "Usage:\n  " << program_name;
+
+    for(auto& [name, switch_] : switches)
+      s << " [" << name << "]";
+
+    for(auto& [name, opt] : flags)
+    {
+      if(opt.min_num == 1 && opt.max_num == 1)
+        s << " " << opt.name << " <value>";
+      else if(opt.min_num == 0 && opt.max_num == 1)
+        s << " [" << opt.name << " <value>]";
+      else if(opt.max_num > 1)
+        s << " (" << opt.name << " <value>)...";
+    }
+
+    for(auto& opt : positional)
+    {
+      if(opt.min_num == 1 && opt.max_num == 1)
+        s << " <" << opt.name << ">";
+      else if(opt.min_num == 0 && opt.max_num == 1)
+        s << " [<" << opt.name << ">]";
+      else if(opt.max_num > 1)
+        s << " <" << opt.name << ">...";
+    }
+
+    s << "\n\nOptions:\n";
+
+    auto add_description = [&s](
+      std::string_view title, std::string_view description)
+    {
+      s << "  " << title << "   ";
+      for(Int i = title.size(); i < 20; i++) s << " ";
+      s << description << "\n";
+    };
+
+    for(auto& [name, switch_] : switches)
+      add_description(name, switch_.description);
+
+    for(auto& [name, opt] : flags)
+      add_description(name + " <value>", opt.description);
+
+    for(auto& opt : positional)
+      add_description("<" + opt.name + ">", opt.description);
+      
+    add_description("--help", "Print help.");
+
+    return s.str();
   }
 
   std::unordered_map<std::string, Switch> switches;
