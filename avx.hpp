@@ -12,8 +12,7 @@ struct AvxFloat
   const static Int vec_size = 8;
 
   template<Int elements_per_vec>
-  static FORCEINLINE void interleave_multi(
-    Vec a0, Vec a1, Vec& r0, Vec& r1)
+  static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     if(elements_per_vec == 8)
     {
@@ -44,20 +43,33 @@ struct AvxFloat
     r0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(2, 0, 2, 0));
     r1 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 1, 3, 1));
   }
-  
-  static void FORCEINLINE transpose(
+
+  template<Int stride>
+  static void FORCEINLINE transposed_store(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3,
-    Vec& r4, Vec& r5, Vec& r6, Vec& r7)
+    T* dst)
   {
     transpose4x4_two(a0, a1, a2, a3);
     transpose4x4_two(a4, a5, a6, a7);
 
+    Vec r0, r1, r2, r3, r4, r5, r6, r7;
+
     transpose_128(a0, a4, r0, r4);
+    store(r0, dst + 0 * stride);
+    store(r4, dst + 4 * stride);
+
     transpose_128(a1, a5, r1, r5);
+    store(r1, dst + 1 * stride);
+    store(r5, dst + 5 * stride);
+
     transpose_128(a2, a6, r2, r6);
+    store(r2, dst + 2 * stride);
+    store(r6, dst + 6 * stride);
+
     transpose_128(a3, a7, r3, r7);
+    store(r3, dst + 3 * stride);
+    store(r7, dst + 7 * stride);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
@@ -68,7 +80,7 @@ struct AvxFloat
     r0 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
     r1 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 3, 0, 1));
   }
-  
+
   static void transpose4x4_two(Vec& a0, Vec& a1, Vec& a2, Vec& a3)
   {
     Vec b0 = _mm256_unpacklo_ps(a0, a2);
@@ -140,9 +152,9 @@ struct AvxDouble
     r1 = _mm256_unpackhi_pd(a0, a1);
   }
 
-  static void FORCEINLINE transpose(
-    Vec a0, Vec a1, Vec a2, Vec a3,
-    Vec& r0, Vec& r1, Vec& r2, Vec& r3)
+  template<Int stride>
+  static void FORCEINLINE transposed_store(
+    Vec a0, Vec a1, Vec a2, Vec a3, T* dst)
   {
     Vec b0, b1, b2, b3;
     b0 = _mm256_unpacklo_pd(a0, a1);
@@ -150,8 +162,15 @@ struct AvxDouble
     b2 = _mm256_unpacklo_pd(a2, a3);
     b3 = _mm256_unpackhi_pd(a2, a3);
 
+    Vec r0, r1, r2, r3;
+
     transpose_128(b0, b2, r0, r2);
+    store(r0, dst + 0 * stride);
+    store(r2, dst + 2 * stride);
+
     transpose_128(b1, b3, r1, r3);
+    store(r1, dst + 1 * stride);
+    store(r3, dst + 3 * stride);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_pd(a); }

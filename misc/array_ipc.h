@@ -14,11 +14,10 @@
 
 namespace array_ipc
 {
-
-enum class PackageType { onedim_array };
-
 namespace
 {
+enum class PackageType { onedim_array };
+
 template<typename T> int64_t element_type_id();
 
 template<> int64_t element_type_id<float>(){ return 0; }
@@ -31,7 +30,6 @@ template<> int64_t element_type_id<uint8_t>(){ return 6; }
 template<> int64_t element_type_id<uint16_t>(){ return 7; }
 template<> int64_t element_type_id<uint32_t>(){ return 8; }
 template<> int64_t element_type_id<uint64_t>(){ return 9; }
-}
 
 void write_all(int sock, const void* buf, size_t n)
 {
@@ -91,6 +89,7 @@ static int uds_connect(const char* name)
   }
 
   return sock;
+}
 }
 
 template<typename T>

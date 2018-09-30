@@ -8,7 +8,8 @@ enum
   afft_scalar = 1,
   afft_sse2 = 2,
   afft_avx2 = 3,
-  afft_neon = 4,
+  afft_avx512f = 4,
+  afft_neon = 5,
 };
 
 #ifdef __cplusplus

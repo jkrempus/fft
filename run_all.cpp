@@ -95,29 +95,34 @@ void run(
   int64_t done_size = 0;
   std::atomic<Int> size_idx = 0;
 
-  for(Int i = 0; i < num_threads; i++)
-    futures.push_back(std::async(
-      std::launch::async,
-      [&]()
+  auto fn = [&]()
+  {
+    while(true)
     {
-      while(true)
-      {
-        int idx = size_idx++;
-        if(idx >= sizes.size()) return;
-        auto& s = sizes[idx];
+      int idx = size_idx++;
+      if(idx >= sizes.size()) return;
+      auto& s = sizes[idx];
 
-        run(s, mutex, verbosity, simd_impl);
+      run(s, mutex, verbosity, simd_impl);
 
-        std::lock_guard<std::mutex> lock(mutex);
-        done_size += num_processed_elements(s);
+      std::lock_guard<std::mutex> lock(mutex);
+      done_size += num_processed_elements(s);
 
-        if(verbosity >= 1)
-          std::cerr
-            << "Done " << (100.0 * done_size / total_size) << "%" << std::endl;
-      }
-    }));
+      if(verbosity >= 1)
+        std::cerr
+          << "Done " << (100.0 * done_size / total_size) << "%" << std::endl;
+    }
+  };
 
-  for(auto& f : futures) f.get();
+  if(num_threads == 1)
+    fn();
+  else
+  {
+    for(Int i = 0; i < num_threads; i++)
+      futures.push_back(std::async(std::launch::async, fn));
+
+    for(auto& f : futures) f.get();
+  }
 }
 
 void get_all_sizes(

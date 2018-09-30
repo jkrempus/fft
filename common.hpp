@@ -35,16 +35,6 @@ struct SameType<T, T> { static const bool value = true; };
 
 template<typename T> T max(const T& a, const T& b){ return a > b ? a : b; }
 
-Int tiny_log2(Int a)
-{
-  return
-    a == 1 ? 0 :
-    a == 2 ? 1 :
-    a == 4 ? 2 :
-    a == 8 ? 3 :
-    a == 16 ? 4 : -1;
-}
-
 Int log2(Int a)
 {
   Int r = 0;
@@ -155,26 +145,26 @@ struct Complex
   typedef typename V::Vec Vec;
   Vec re;
   Vec im;
-  FORCEINLINE Complex mul_neg_i() { return {im, -re}; }
-  FORCEINLINE Complex adj() { return {re, -im}; }
-  FORCEINLINE Complex operator+(Complex other)
+  FORCEINLINE constexpr Complex mul_neg_i() const { return {im, -re}; }
+  FORCEINLINE constexpr Complex adj() const { return {re, -im}; }
+  FORCEINLINE constexpr Complex operator+(Complex other) const
   {
     return {re + other.re, im + other.im};
   }
 
-  FORCEINLINE Complex operator-(Complex other)
+  FORCEINLINE constexpr Complex operator-(Complex other) const
   {
     return {re - other.re, im - other.im};
   }
 
-  FORCEINLINE Complex operator*(Complex other)
+  FORCEINLINE constexpr Complex operator*(Complex other) const
   {
     return {
       re * other.re - im * other.im,
       re * other.im + im * other.re};
   }
-  
-  FORCEINLINE Complex operator*(Vec other)
+
+  FORCEINLINE constexpr Complex operator*(Vec other) const
   {
     return {re * other, im * other};
   }

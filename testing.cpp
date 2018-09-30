@@ -1,3 +1,4 @@
+//#define ARRAY_IPC_ENABLED
 #include "misc/array_ipc.h"
 
 #include "fft.hpp"
@@ -623,76 +624,92 @@ struct TestWrapper<T, true, true>
 };
 
 #ifdef HAVE_FFTW
-template<bool is_real, bool is_inverse, typename T>
-fftwf_plan make_plan(const std::vector<Int>& size, T* src, T* dst);
-
-const unsigned fftw_flags = FFTW_PATIENT;
-
-template<> fftwf_plan make_plan<false, false, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft(
-    size.size(), idx, 
-    (fftwf_complex*) src, (fftwf_complex*) dst,
-    FFTW_FORWARD, fftw_flags);
-}
-
-template<> fftwf_plan make_plan<false, true, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft(
-    size.size(), idx, 
-    (fftwf_complex*) src, (fftwf_complex*) dst,
-    FFTW_BACKWARD, fftw_flags);
-}
-
-template<> fftwf_plan make_plan<true, false, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft_r2c(
-    size.size(), idx, 
-    src, (fftwf_complex*) dst,
-    fftw_flags);
-}
-
-template<> fftwf_plan make_plan<true, true, float>(
-  const std::vector<Int>& size, float* src, float* dst)
-{
-  int idx[maxdim];
-  std::copy_n(&size[0], size.size(), idx);
-  return fftwf_plan_dft_c2r(
-    size.size(), idx, 
-    (fftwf_complex*) src, dst,
-    fftw_flags);
-}
 
 template<typename T, bool is_real_, bool is_inverse_>
 struct FftwTestWrapper :
   public InterleavedWrapperBase<T, HalvedDimLast, is_real_, is_inverse_>
 {
+  static const unsigned fftw_flags = FFTW_PATIENT;
   static const bool is_real = is_real_;
   static const bool is_inverse = is_inverse_;
   typedef float value_type;
-  fftwf_plan plan;
+  std::conditional_t<std::is_same_v<T, float>, fftwf_plan, fftw_plan> plan;
 
   FftwTestWrapper(const std::vector<Int>& size, Int simd_impl)
     : InterleavedWrapperBase<T, HalvedDimLast, is_real, is_inverse_>(size)
   {
-    plan = make_plan<is_real, is_inverse_>(size, this->src, this->dst);
+    int idx[maxdim];
+    std::copy_n(&size[0], size.size(), idx);
+    auto src = this->src;
+    auto dst = this->dst;
+
+    if constexpr(is_real_)
+    {
+      if constexpr(is_inverse_)
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft_c2r(
+            size.size(), idx, (fftwf_complex*) src, dst, fftw_flags);
+        else
+          plan = fftw_plan_dft_c2r(
+            size.size(), idx, (fftw_complex*) src, dst, fftw_flags);
+      }
+      else
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft_r2c(
+            size.size(), idx, src, (fftwf_complex*) dst, fftw_flags);
+        else
+          plan = fftw_plan_dft_r2c(
+            size.size(), idx, src, (fftw_complex*) dst, fftw_flags);
+      }
+    }
+    else
+    {
+      if constexpr(is_inverse_)
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft(
+            size.size(), idx, 
+            (fftwf_complex*) src, (fftwf_complex*) dst,
+            FFTW_BACKWARD, fftw_flags);
+        else
+          plan = fftw_plan_dft(
+            size.size(), idx, 
+            (fftw_complex*) src, (fftw_complex*) dst,
+            FFTW_BACKWARD, fftw_flags);
+      }
+      else
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_dft(
+            size.size(), idx, 
+            (fftwf_complex*) src, (fftwf_complex*) dst,
+            FFTW_FORWARD, fftw_flags);
+        else
+          plan = fftw_plan_dft(
+            size.size(), idx, 
+            (fftw_complex*) src, (fftw_complex*) dst,
+            FFTW_FORWARD, fftw_flags);
+      }
+    }
   }
 
-  ~FftwTestWrapper() { fftwf_destroy_plan(plan); }
+  ~FftwTestWrapper()
+  {
+    if constexpr(std::is_same_v<T, float>)
+      fftwf_destroy_plan(plan);
+    else
+      fftw_destroy_plan(plan);
+  }
 
   void transform()
   {
     Int n = product(this->size);
-    fftwf_execute(plan);
+    if constexpr(std::is_same_v<T, float>)
+      fftwf_execute(plan);
+    else
+      fftw_execute(plan);
   }
 };
 #endif
@@ -861,7 +878,7 @@ TestResult bench(
   for(int64_t i = 0; i < iter; i++)
   {
     fft.transform();
-    int64_t j = i / (iter / 10);
+    //int64_t j = i / (iter / 10);
     //if(j * (iter / 10) == i) { printf("%d ", j); fflush(stdout); }
   }
 
@@ -972,7 +989,11 @@ std::istream& operator>>(std::istream& stream, SizeRange& size_range)
 
   p = next_p;
 
-  if(*p == 0) return stream;
+  if(*p == 0)
+  {
+    size_range.end = size_range.begin + 1;
+    return stream;
+  }
 
   if(*p != '-')
   {
@@ -996,12 +1017,13 @@ std::istream& operator>>(std::istream& stream, SizeRange& size_range)
 std::istream& operator>>(std::istream& stream, SimdImpl& simd_impl)
 {
   std::string s(std::istreambuf_iterator<char>(stream), {});
-  
+
   if(s == "auto") simd_impl.val = 0;
   else if(s == "scalar") simd_impl.val = 1;
   else if(s == "sse2") simd_impl.val = 2;
   else if(s == "avx2") simd_impl.val = 3;
-  else if(s == "neon") simd_impl.val = 4;
+  else if(s == "avx512f") simd_impl.val = 4;
+  else if(s == "neon") simd_impl.val = 5;
   else stream.setstate(std::ios_base::failbit);
 
   return stream;
@@ -1016,6 +1038,11 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
   parser.add_switch("-b", "Perform a benchmark.", &dst->is_bench);
   parser.add_optional_flag(
     "-p", "Required relative precision", &dst->precision);
+
+  dst->num_ops = 1e11;
+  parser.add_optional_flag(
+    "-n", "Approximage number of operations to perform during benchmarking.",
+    &dst->num_ops);
 
   dst->simd_impl = {afft_auto};
   parser.add_optional_flag(
@@ -1035,7 +1062,7 @@ TestResult test_or_bench4(const Options& opt, const std::vector<Int>& lsz)
   for(auto e : lsz) size.push_back(1 << e);
 
   if(opt.is_bench)
-    return bench<Fft>(size, 1e11, opt.simd_impl.val);
+    return bench<Fft>(size, opt.num_ops, opt.simd_impl.val);
   else
     //TODO: Use long double for ReferenceFft
     return 
