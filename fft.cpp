@@ -81,7 +81,7 @@ namespace
 #endif
 
 #ifdef AFFT_AVX512F_ENABLED
-      if(afft::detail::impl_supported<afft_avx2>())
+      if(afft::detail::impl_supported<afft_avx512f>())
         return call_impl<afft_avx512f, Op, T>(FnTag(), args...);
 #endif
 
