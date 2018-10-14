@@ -238,24 +238,25 @@ void first_four_passes(
   }
 }
 
+template<typename T>
+const T* two_pass_twiddle_ptr(const T* tw, Int n, Int offset, Int dft_size)
+{
+  return tw + ((3 * offset * cf::Vec::idx_ratio * dft_size) >> log2(n));
+} 
+
 template<typename V>
 void two_passes(
-  Int n, Int start_offset, Int end_offset, Int dft_size,
-  ET<V>* ptr_arg, const ET<V>* tw)
+  Int n, Int dft_size, ET<V>* data_ptr, Int data_n, const ET<V>* tw)
 {
   VEC_TYPEDEFS(V);
 
   auto off1 = (n >> log2(dft_size)) / 4 * stride<V, cf::Vec>();
   auto off2 = off1 + off1;
   auto off3 = off2 + off1;
-  
-  auto start = start_offset * cf::Vec::idx_ratio;
-  auto end = end_offset * cf::Vec::idx_ratio;
 
-  if(start != 0)
-    tw += 3 * stride<V, cf::Vec>() * (start >> log2(off1 + off3));
-
-  for(auto p = ptr_arg + start; p < ptr_arg + end;)
+  for(
+    auto p = data_ptr, end = data_ptr + data_n * cf::Vec::idx_ratio;
+    p < end;)
   {
     auto tw0 = C::load(tw);
     auto tw1 = C::load(tw + stride<V, cf::Vec>());
@@ -264,8 +265,8 @@ void two_passes(
 
     for(auto end1 = p + off1;;)
     {
-      ASSERT(p >= ptr_arg);
-      ASSERT(p + off3 < ptr_arg + n * cf::Vec::idx_ratio);
+      ASSERT(p >= data_ptr);
+      ASSERT(p + off3 < data_ptr + data_n * cf::Vec::idx_ratio);
 
       C d0, d1, d2, d3;
       two_passes_inner(
@@ -838,7 +839,7 @@ void small_transform(
     }
     else
     {
-      two_passes<V>(n, 0, n, dft_size, w, state->twiddle[i]);
+      two_passes<V>(n, dft_size, w, n, state->twiddle[i]);
       dft_size = next_dft_size;
     }
   }
@@ -861,7 +862,9 @@ NOINLINE void recursive_passes(
   if(npasses == 3) 
     last_three_passes_in_place<V>(n, start, end, p, state->twiddle[step]);
   else
-    two_passes<V>(n, start, end, dft_size, p, state->twiddle[step]);
+    two_passes<V>(
+      n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+      two_pass_twiddle_ptr(state->twiddle[step], n, start, dft_size));
 
   if((dft_size << npasses) < state->n)
   {
