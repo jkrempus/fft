@@ -14,14 +14,15 @@ typedef unsigned long Uint;
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
 
-#define ASSERT(condition) ((condition) || *((volatile int*) 0))
+//#define ASSERT(condition) ((condition) || *((volatile int*) 0))
+#define ASSERT(condition)
 
 namespace
 {
 constexpr Int max_int = Int(Uint(-1) >> 1);
 
 constexpr Int large_fft_size = 1 << 13;
-constexpr Int optimal_size = 1 << 11;
+constexpr Int optimal_size = 1 << 10;
 constexpr Int max_vec_size = 8;
 constexpr const Int align_bytes = 64;
 
