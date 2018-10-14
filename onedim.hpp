@@ -846,39 +846,47 @@ void small_transform(
 }
 
 template<typename V>
-NOINLINE void recursive_passes(
-  const Fft<typename V::T>* state,
-  Int step, typename V::T* p, Int start, Int end)
+NOINLINE void last_recursive_passes(
+  Int n, Int dft_size, ET<V>* p, Int start, Int end, ET<V>** tw)
 {
   VEC_TYPEDEFS(V);
-  Int dft_size = 1;
-  for(Int i = 0; i < step; i++)
-    dft_size <<= get_npasses<V>(state->n, dft_size);
-
-  Int npasses = get_npasses<V>(state->n, dft_size);
-
-  Int n = state->n;
-
-  if(npasses == 3) 
-    last_three_passes_in_place<V>(n, start, end, p, state->twiddle[step]);
-  else
-    two_passes<V>(
-      n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-      two_pass_twiddle_ptr(state->twiddle[step], n, start, dft_size));
-
-  if((dft_size << npasses) < state->n)
+  
+  for(; dft_size < n;)
   {
-    if(end - start > optimal_size)
-    {
-      Int next_sz = (end - start) >> npasses;
-      for(Int s = start; s < end; s += next_sz)
-        recursive_passes<V>(state, step + 1, p, s, s + next_sz);
-    }
+    Int npasses = get_npasses<V>(n, dft_size);
+
+    if(npasses == 3) 
+      last_three_passes_in_place<V>(n, start, end, p, *tw);
     else
-      recursive_passes<V>(state, step + 1, p, start, end);
+      two_passes<V>(
+        n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+        two_pass_twiddle_ptr(*tw, n, start, dft_size));
+
+    dft_size <<= npasses;
+    tw++;
   }
 }
 
+template<typename V>
+NOINLINE void recursive_passes(
+  Int n, Int dft_size, ET<V>* p, Int start, Int end, ET<V>** tw)
+{
+  VEC_TYPEDEFS(V);
+  Int npasses = get_npasses<V>(n, dft_size);
+
+  two_passes<V>(
+    n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+    two_pass_twiddle_ptr(*tw, n, start, dft_size));
+
+  if(end - start > optimal_size)
+  {
+    Int next_sz = (end - start) >> npasses;
+    for(Int s = start; s < end; s += next_sz)
+      recursive_passes<V>(n, dft_size << npasses, p, s, s + next_sz, tw + 1);
+  }
+  else
+    last_recursive_passes<V>(n, dft_size << npasses, p, start, end, tw + 1);
+}
 
 template<typename V, typename SrcCf, typename DstCf>
 void large_transform(
@@ -902,7 +910,7 @@ void large_transform(
   else
     first_four_passes<V, SrcCf>(n, src_re, src_im, w);
 
-  recursive_passes<V>(state, 1, w, 0, n);
+  recursive_passes<V>(n, Int(1) << first_npasses, w, 0, n, state->twiddle + 1);
 
   bit_reverse_pass<V, DstCf>(n, w, dst_re, dst_im);
 }

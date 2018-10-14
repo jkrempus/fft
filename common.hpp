@@ -33,7 +33,8 @@ struct SameType { static const bool value = false; };
 template<typename T>
 struct SameType<T, T> { static const bool value = true; };
 
-template<typename T> T max(const T& a, const T& b){ return a > b ? a : b; }
+template<typename T>
+constexpr T max(const T& a, const T& b){ return a > b ? a : b; }
 
 Int log2(Int a)
 {
