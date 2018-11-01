@@ -8,6 +8,13 @@ namespace
 namespace onedim
 {
 template<typename T>
+struct Step
+{
+  Int npasses;
+  T* twiddle;
+};
+
+template<typename T>
 struct Fft
 {
   typedef void(*transform_fun_type)(
@@ -18,7 +25,7 @@ struct Fft
   Int n;
   transform_fun_type transform_fun;
   T* working;
-  T** twiddle;
+  Step<T>* steps;
 };
 
 template<typename T> struct Ifft;
@@ -717,7 +724,7 @@ Int tiny_fft_create_impl(Int n, void* ptr)
   ptr = aligned_increment(ptr, sizeof(Fft<T>));
 
   state->working = nullptr;
-  state->twiddle = nullptr;
+  state->steps = nullptr;
   state->n = n;
   state->transform_fun = 
     n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
@@ -794,24 +801,26 @@ void small_transform(
 
   for(Int i = 1;; i++)
   {
-    Int npasses = get_npasses<V>(n, dft_size);
+    Int npasses = state->steps[i].npasses;
 
     Int next_dft_size = dft_size << npasses; 
     if(next_dft_size == n)
     {
       if(npasses == 2)
-        last_two_passes<V, DstCf>(n, w, state->twiddle[i], dst_re, dst_im);
+        last_two_passes<V, DstCf>(
+          n, w, state->steps[i].twiddle, dst_re, dst_im);
       else
-        last_three_passes<V, DstCf>(n, w, state->twiddle[i], dst_re, dst_im);
+        last_three_passes<V, DstCf>(
+          n, w, state->steps[i].twiddle, dst_re, dst_im);
 
       break;
     }
     else
     {
       if(npasses == 2)
-        two_passes<V>(n, dft_size, w, n, state->twiddle[i]);
+        two_passes<V>(n, dft_size, w, n, state->steps[i].twiddle);
       else
-        three_passes<V>(n, dft_size, w, n, state->twiddle[i]);
+        three_passes<V>(n, dft_size, w, n, state->steps[i].twiddle);
 
       dft_size = next_dft_size;
     }
@@ -820,52 +829,52 @@ void small_transform(
 
 template<typename V>
 NOINLINE void last_recursive_passes(
-  Int n, Int dft_size, ET<V>* p, Int start, Int end, ET<V>** tw)
+  Int n, Int dft_size, ET<V>* p, Int start, Int end, Step<ET<V>>* steps)
 {
   VEC_TYPEDEFS(V);
   
   for(; dft_size < n;)
   {
-    Int npasses = get_npasses<V>(n, dft_size);
+    Int npasses = steps[0].npasses;
 
     if(npasses == 3) 
       three_passes<V>(
         n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-        three_pass_twiddle_ptr(*tw, n, start, dft_size));
+        three_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
     else
       two_passes<V>(
         n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-        two_pass_twiddle_ptr(*tw, n, start, dft_size));
+        two_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
 
     dft_size <<= npasses;
-    tw++;
+    steps++;
   }
 }
 
 template<typename V>
 NOINLINE void recursive_passes(
-  Int n, Int dft_size, ET<V>* p, Int start, Int end, ET<V>** tw)
+  Int n, Int dft_size, ET<V>* p, Int start, Int end, Step<ET<V>>* steps)
 {
   VEC_TYPEDEFS(V);
-  Int npasses = get_npasses<V>(n, dft_size);
+  Int npasses = steps[0].npasses;
 
   if(npasses == 2)
     two_passes<V>(
       n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-      two_pass_twiddle_ptr(*tw, n, start, dft_size));
+      two_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
   else
     three_passes<V>(
       n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-      three_pass_twiddle_ptr(*tw, n, start, dft_size));
+      three_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
 
   if(end - start > optimal_size)
   {
     Int next_sz = (end - start) >> npasses;
     for(Int s = start; s < end; s += next_sz)
-      recursive_passes<V>(n, dft_size << npasses, p, s, s + next_sz, tw + 1);
+      recursive_passes<V>(n, dft_size << npasses, p, s, s + next_sz, steps + 1);
   }
   else
-    last_recursive_passes<V>(n, dft_size << npasses, p, start, end, tw + 1);
+    last_recursive_passes<V>(n, dft_size << npasses, p, start, end, steps + 1);
 }
 
 template<typename V, typename SrcCf, typename DstCf>
@@ -890,7 +899,7 @@ void large_transform(
   else
     first_four_passes<V, SrcCf>(n, src_re, src_im, w);
 
-  recursive_passes<V>(n, Int(1) << first_npasses, w, 0, n, state->twiddle + 1);
+  recursive_passes<V>(n, Int(1) << first_npasses, w, 0, n, state->steps + 1);
 
   bit_reverse_pass<V, DstCf>(n, w, dst_re, dst_im);
 }
@@ -920,8 +929,8 @@ Int fft_create_impl(Int n, void* ptr)
     state->working = (T*) ptr;
     ptr = aligned_increment(ptr, sizeof(T) * 2 * n);
 
-    state->twiddle = (T**) ptr;
-    ptr = aligned_increment(ptr, total_num_steps<V>(n) * sizeof(T*));
+    state->steps = (Step<ET<V>>*) ptr;
+    ptr = aligned_increment(ptr, total_num_steps<V>(n) * sizeof(Step<ET<V>>));
 
     if(do_create)
       compute_twiddle_range<V>(n, state->working, state->working + n);
@@ -931,7 +940,12 @@ Int fft_create_impl(Int n, void* ptr)
       Int npasses = get_npasses<V>(n, dft_size);
 
       T* tw = (T*) ptr;
-      if(do_create) state->twiddle[i] = tw;
+      if(do_create)
+      {
+        state->steps[i].twiddle = tw;
+        state->steps[i].npasses = npasses;
+      }
+
       ptr = aligned_increment(
         ptr, twiddle_for_step_memsize<V>(dft_size, npasses));
 
