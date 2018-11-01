@@ -75,17 +75,18 @@ FORCEINLINE void two_passes_inner(
 
 template<typename V, typename DstCf, bool br_dst>
 FORCEINLINE void three_passes_inner(
-  const ET<V>* src, Int src_stride, const ET<V>* tw,
+  const ET<V>* src, Int src_stride,
+  Complex<V> tw0,
+  Complex<V> tw1,
+  Complex<V> tw2,
+  Complex<V> tw3,
+  Complex<V> tw4,
   ET<V>* dst_re, ET<V>* dst_im, Int dst_stride)
 {
   VEC_TYPEDEFS(V);
 
   C a0, a1, a2, a3, a4, a5, a6, a7;
   {
-    C tw0 = C::load(tw);
-    C tw1 = C::load(tw + stride<V, cf::Vec>());
-    C tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
-
     two_passes_inner(
       C::load(src + 0 * src_stride), C::load(src + 2 * src_stride),
       C::load(src + 4 * src_stride), C::load(src + 6 * src_stride),
@@ -100,33 +101,27 @@ FORCEINLINE void three_passes_inner(
   }
 
   {
-    C tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
-    {
-      auto mul = tw3 * a4;
-      store<DstCf>(a0 + mul, dst_re, dst_im, (br_dst ? 0 : 0) * dst_stride);
-      store<DstCf>(a0 - mul, dst_re, dst_im, (br_dst ? 1 : 4) * dst_stride);
-    }
-
-    {
-      auto mul = tw3.mul_neg_i() * a6;
-      store<DstCf>(a2 + mul, dst_re, dst_im, (br_dst ? 2 : 2) * dst_stride);
-      store<DstCf>(a2 - mul, dst_re, dst_im, (br_dst ? 3 : 6) * dst_stride);
-    }
+    auto mul = tw3 * a4;
+    store<DstCf>(a0 + mul, dst_re, dst_im, (br_dst ? 0 : 0) * dst_stride);
+    store<DstCf>(a0 - mul, dst_re, dst_im, (br_dst ? 1 : 4) * dst_stride);
   }
 
   {
-    C tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
-    {
-      auto mul = tw4 * a5;
-      store<DstCf>(a1 + mul, dst_re, dst_im, (br_dst ? 4 : 1) * dst_stride);
-      store<DstCf>(a1 - mul, dst_re, dst_im, (br_dst ? 5 : 5) * dst_stride);
-    }
+    auto mul = tw3.mul_neg_i() * a6;
+    store<DstCf>(a2 + mul, dst_re, dst_im, (br_dst ? 2 : 2) * dst_stride);
+    store<DstCf>(a2 - mul, dst_re, dst_im, (br_dst ? 3 : 6) * dst_stride);
+  }
 
-    {
-      auto mul = tw4.mul_neg_i() * a7;
-      store<DstCf>(a3 + mul, dst_re, dst_im, (br_dst ? 6 : 3) * dst_stride);
-      store<DstCf>(a3 - mul, dst_re, dst_im, (br_dst ? 7 : 7) * dst_stride);
-    }
+  {
+    auto mul = tw4 * a5;
+    store<DstCf>(a1 + mul, dst_re, dst_im, (br_dst ? 4 : 1) * dst_stride);
+    store<DstCf>(a1 - mul, dst_re, dst_im, (br_dst ? 5 : 5) * dst_stride);
+  }
+
+  {
+    auto mul = tw4.mul_neg_i() * a7;
+    store<DstCf>(a3 + mul, dst_re, dst_im, (br_dst ? 6 : 3) * dst_stride);
+    store<DstCf>(a3 - mul, dst_re, dst_im, (br_dst ? 7 : 7) * dst_stride);
   }
 }
 
@@ -301,6 +296,12 @@ const T* two_pass_twiddle_ptr(const T* tw, Int n, Int offset, Int dft_size)
   return tw + ((3 * offset * cf::Vec::idx_ratio * dft_size) >> log2(n));
 } 
 
+template<typename T>
+const T* three_pass_twiddle_ptr(const T* tw, Int n, Int offset, Int dft_size)
+{
+  return tw + ((5 * offset * cf::Vec::idx_ratio * dft_size) >> log2(n));
+} 
+
 template<typename V>
 void two_passes(
   Int n, Int dft_size, ET<V>* data_ptr, Int data_n, const ET<V>* tw)
@@ -435,6 +436,43 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
   V::sfence();
 }
 
+template<typename V>
+void three_passes(
+  Int n, Int dft_size, ET<V>* data_ptr, Int data_n, const ET<V>* tw)
+{
+  VEC_TYPEDEFS(V);
+
+  auto off1 = (n >> log2(dft_size)) / 8 * stride<V, cf::Vec>();
+  auto gap = 7 * off1;
+
+  for(
+    auto p = data_ptr, end = data_ptr + data_n * cf::Vec::idx_ratio;
+    p < end;)
+  {
+    auto tw0 = C::load(tw);
+    auto tw1 = C::load(tw + stride<V, cf::Vec>());
+    auto tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
+    auto tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
+    auto tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
+    tw += 5 * stride<V, cf::Vec>();
+
+    for(auto end1 = p + off1;;)
+    {
+      ASSERT(p >= data_ptr);
+      ASSERT(p + gap < data_ptr + data_n * cf::Vec::idx_ratio);
+
+      C d0, d1, d2, d3;
+      three_passes_inner<V, cf::Vec, true>(
+        p, off1, tw0, tw1, tw2, tw3, tw4, p, nullptr, off1);
+
+      p += stride<V, cf::Vec>();
+      if(!(p < end1)) break;
+    }
+
+    p += gap;
+  }
+}
+
 template<typename V, typename DstCf>
 void last_three_passes(
   Int n, const ET<V>* src, const ET<V>* tw, ET<V>* dst_re, ET<V>* dst_im)
@@ -443,12 +481,20 @@ void last_three_passes(
 
   Int m = n / 8 / V::vec_size;
   for(BitReversed br(m); br.i < m; br.advance())
+  {
+    auto this_tw = tw + 5 * stride<V, cf::Vec>() * br.i;
+    C tw0 = C::load(this_tw);
+    C tw1 = C::load(this_tw + stride<V, cf::Vec>());
+    C tw2 = C::load(this_tw + 2 * stride<V, cf::Vec>());
+    C tw3 = C::load(this_tw + 3 * stride<V, cf::Vec>());
+    C tw4 = C::load(this_tw + 4 * stride<V, cf::Vec>());
     three_passes_inner<V, DstCf, false>(
       src + 8 * stride<V, cf::Vec>() * br.i, stride<V, cf::Vec>(),
-      tw + 5 * stride<V, cf::Vec>() * br.i,
+      tw0, tw1, tw2, tw3, tw4,
       dst_re + br.br * stride<V, DstCf>(),
       dst_im + br.br * stride<V, DstCf>(),
       m * stride<V, DstCf>());
+  }
 }
 
 template<typename V>
@@ -464,8 +510,14 @@ void last_three_passes_in_place(
 
   for(auto p = ptr_arg + start; p < ptr_arg + end;)
   {
+    C tw0 = C::load(tw);
+    C tw1 = C::load(tw + stride<V, cf::Vec>());
+    C tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
+    C tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
+    C tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
     three_passes_inner<V, cf::Vec, true>(
-      p, stride<V, cf::Vec>(), tw, p, nullptr, stride<V, cf::Vec>());
+      p, stride<V, cf::Vec>(), tw0, tw1, tw2, tw3, tw4,
+      p, nullptr, stride<V, cf::Vec>());
 
     p += 8 * stride<V, cf::Vec>();
     tw += 5 * stride<V, cf::Vec>();
@@ -697,10 +749,15 @@ Int get_npasses(Int n, Int dft_size)
   VEC_TYPEDEFS(V);
   if(dft_size == 1)
     return get_first_npasses<V>();
-  else if((dft_size << 3) == n)
-    return 3;
   else
-    return 2;
+  {
+    Int log2n = log2(n);
+    Int log2s = log2(dft_size);
+    if((log2n - log2s) % 3 == 0)
+      return 3;
+    else
+      return 2;
+  }
 }
 
 template<typename V>
@@ -738,6 +795,7 @@ void small_transform(
   for(Int i = 1;; i++)
   {
     Int npasses = get_npasses<V>(n, dft_size);
+
     Int next_dft_size = dft_size << npasses; 
     if(next_dft_size == n)
     {
@@ -750,7 +808,11 @@ void small_transform(
     }
     else
     {
-      two_passes<V>(n, dft_size, w, n, state->twiddle[i]);
+      if(npasses == 2)
+        two_passes<V>(n, dft_size, w, n, state->twiddle[i]);
+      else
+        three_passes<V>(n, dft_size, w, n, state->twiddle[i]);
+
       dft_size = next_dft_size;
     }
   }
@@ -767,7 +829,9 @@ NOINLINE void last_recursive_passes(
     Int npasses = get_npasses<V>(n, dft_size);
 
     if(npasses == 3) 
-      last_three_passes_in_place<V>(n, start, end, p, *tw);
+      three_passes<V>(
+        n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+        three_pass_twiddle_ptr(*tw, n, start, dft_size));
     else
       two_passes<V>(
         n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
@@ -785,9 +849,14 @@ NOINLINE void recursive_passes(
   VEC_TYPEDEFS(V);
   Int npasses = get_npasses<V>(n, dft_size);
 
-  two_passes<V>(
-    n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-    two_pass_twiddle_ptr(*tw, n, start, dft_size));
+  if(npasses == 2)
+    two_passes<V>(
+      n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+      two_pass_twiddle_ptr(*tw, n, start, dft_size));
+  else
+    three_passes<V>(
+      n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+      three_pass_twiddle_ptr(*tw, n, start, dft_size));
 
   if(end - start > optimal_size)
   {
