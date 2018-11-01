@@ -73,6 +73,63 @@ FORCEINLINE void two_passes_inner(
     dst0, dst1, dst2, dst3);
 }
 
+template<typename V, typename DstCf, bool br_dst>
+FORCEINLINE void three_passes_inner(
+  const ET<V>* src, Int src_stride, const ET<V>* tw,
+  ET<V>* dst_re, ET<V>* dst_im, Int dst_stride)
+{
+  VEC_TYPEDEFS(V);
+
+  C a0, a1, a2, a3, a4, a5, a6, a7;
+  {
+    C tw0 = C::load(tw);
+    C tw1 = C::load(tw + stride<V, cf::Vec>());
+    C tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
+
+    two_passes_inner(
+      C::load(src + 0 * src_stride), C::load(src + 2 * src_stride),
+      C::load(src + 4 * src_stride), C::load(src + 6 * src_stride),
+      a0, a1, a2, a3,
+      tw0, tw1, tw2);
+
+    two_passes_inner(
+      C::load(src + 1 * src_stride), C::load(src + 3 * src_stride),
+      C::load(src + 5 * src_stride), C::load(src + 7 * src_stride),
+      a4, a5, a6, a7,
+      tw0, tw1, tw2);
+  }
+
+  {
+    C tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
+    {
+      auto mul = tw3 * a4;
+      store<DstCf>(a0 + mul, dst_re, dst_im, (br_dst ? 0 : 0) * dst_stride);
+      store<DstCf>(a0 - mul, dst_re, dst_im, (br_dst ? 1 : 4) * dst_stride);
+    }
+
+    {
+      auto mul = tw3.mul_neg_i() * a6;
+      store<DstCf>(a2 + mul, dst_re, dst_im, (br_dst ? 2 : 2) * dst_stride);
+      store<DstCf>(a2 - mul, dst_re, dst_im, (br_dst ? 3 : 6) * dst_stride);
+    }
+  }
+
+  {
+    C tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
+    {
+      auto mul = tw4 * a5;
+      store<DstCf>(a1 + mul, dst_re, dst_im, (br_dst ? 4 : 1) * dst_stride);
+      store<DstCf>(a1 - mul, dst_re, dst_im, (br_dst ? 5 : 5) * dst_stride);
+    }
+
+    {
+      auto mul = tw4.mul_neg_i() * a7;
+      store<DstCf>(a3 + mul, dst_re, dst_im, (br_dst ? 6 : 3) * dst_stride);
+      store<DstCf>(a3 - mul, dst_re, dst_im, (br_dst ? 7 : 7) * dst_stride);
+    }
+  }
+}
+
 template<typename V, typename SrcCf>
 void first_two_passes(
   Int n, const ET<V>* src_re, const ET<V>* src_im, ET<V>* dst)
@@ -384,92 +441,14 @@ void last_three_passes(
 {
   VEC_TYPEDEFS(V);
 
-  Int l1 = n / 8 / V::vec_size;
-  Int l2 = 2 * l1;
-  Int l3 = 3 * l1;
-  Int l4 = 4 * l1;
-  Int l5 = 5 * l1;
-  Int l6 = 6 * l1;
-  Int l7 = 7 * l1;
-
-  for(BitReversed br(l1); br.i < l1; br.advance())
-  {
-    auto d_re = dst_re + br.br * stride<V, DstCf>();
-    auto d_im = dst_im + br.br * stride<V, DstCf>();
-    auto s = src + 8 * stride<V, cf::Vec>() * br.i;
-    auto this_tw = tw + 5 * stride<V, cf::Vec>() * br.i;
-
-    C a0, a1, a2, a3, a4, a5, a6, a7;
-    {
-      C tw0 = C::load(this_tw);
-      C tw1 = C::load(this_tw + stride<V, cf::Vec>());
-      C tw2 = C::load(this_tw + 2 * stride<V, cf::Vec>());
-
-      {
-        C mul0 =       C::load(s);
-        C mul1 = tw0 * C::load(s + 2 * stride<V, cf::Vec>());
-        C mul2 = tw1 * C::load(s + 4 * stride<V, cf::Vec>());
-        C mul3 = tw2 * C::load(s + 6 * stride<V, cf::Vec>());
-
-        C sum02 = mul0 + mul2;
-        C dif02 = mul0 - mul2;
-        C sum13 = mul1 + mul3;
-        C dif13 = mul1 - mul3;
-
-        a0 = sum02 + sum13; 
-        a1 = dif02 + dif13.mul_neg_i();
-        a2 = sum02 - sum13;
-        a3 = dif02 - dif13.mul_neg_i();
-      }
-
-      {
-        C mul0 =       C::load(s + 1 * stride<V, cf::Vec>());
-        C mul1 = tw0 * C::load(s + 3 * stride<V, cf::Vec>());
-        C mul2 = tw1 * C::load(s + 5 * stride<V, cf::Vec>());
-        C mul3 = tw2 * C::load(s + 7 * stride<V, cf::Vec>());
-
-        C sum02 = mul0 + mul2;
-        C dif02 = mul0 - mul2;
-        C sum13 = mul1 + mul3;
-        C dif13 = mul1 - mul3;
-
-        a4 = sum02 + sum13;
-        a5 = dif02 + dif13.mul_neg_i();
-        a6 = sum02 - sum13;
-        a7 = dif02 - dif13.mul_neg_i();
-      }
-    }
-
-    {
-      C tw3 = C::load(this_tw + 3 * stride<V, cf::Vec>());
-      {
-        auto mul = tw3 * a4;
-        store<DstCf>(a0 + mul, d_re, d_im, 0);
-        store<DstCf>(a0 - mul, d_re, d_im, l4 * stride<V, DstCf>());
-      }
-
-      {
-        auto mul = tw3.mul_neg_i() * a6;
-        store<DstCf>(a2 + mul, d_re, d_im, l2 * stride<V, DstCf>());
-        store<DstCf>(a2 - mul, d_re, d_im, l6 * stride<V, DstCf>());
-      }
-    }
-
-    {
-      C tw4 = C::load(this_tw + 4 * stride<V, cf::Vec>());
-      {
-        auto mul = tw4 * a5;
-        store<DstCf>(a1 + mul, d_re, d_im, l1 * stride<V, DstCf>());
-        store<DstCf>(a1 - mul, d_re, d_im, l5 * stride<V, DstCf>());
-      }
-
-      {
-        auto mul = tw4.mul_neg_i() * a7;
-        store<DstCf>(a3 + mul, d_re, d_im, l3 * stride<V, DstCf>());
-        store<DstCf>(a3 - mul, d_re, d_im, l7 * stride<V, DstCf>());
-      }
-    }
-  }
+  Int m = n / 8 / V::vec_size;
+  for(BitReversed br(m); br.i < m; br.advance())
+    three_passes_inner<V, DstCf, false>(
+      src + 8 * stride<V, cf::Vec>() * br.i, stride<V, cf::Vec>(),
+      tw + 5 * stride<V, cf::Vec>() * br.i,
+      dst_re + br.br * stride<V, DstCf>(),
+      dst_im + br.br * stride<V, DstCf>(),
+      m * stride<V, DstCf>());
 }
 
 template<typename V>
@@ -485,76 +464,8 @@ void last_three_passes_in_place(
 
   for(auto p = ptr_arg + start; p < ptr_arg + end;)
   {
-    C a0, a1, a2, a3, a4, a5, a6, a7;
-    {
-      C tw0 = C::load(tw);
-      C tw1 = C::load(tw + stride<V, cf::Vec>());
-      C tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
-
-      {
-        C mul0 =       C::load(p);
-        C mul1 = tw0 * C::load(p + 2 * stride<V, cf::Vec>());
-        C mul2 = tw1 * C::load(p + 4 * stride<V, cf::Vec>());
-        C mul3 = tw2 * C::load(p + 6 * stride<V, cf::Vec>());
-
-        C sum02 = mul0 + mul2;
-        C dif02 = mul0 - mul2;
-        C sum13 = mul1 + mul3;
-        C dif13 = mul1 - mul3;
-
-        a0 = sum02 + sum13; 
-        a1 = dif02 + dif13.mul_neg_i();
-        a2 = sum02 - sum13;
-        a3 = dif02 - dif13.mul_neg_i();
-      }
-
-      {
-        C mul0 =       C::load(p + 1 * stride<V, cf::Vec>());
-        C mul1 = tw0 * C::load(p + 3 * stride<V, cf::Vec>());
-        C mul2 = tw1 * C::load(p + 5 * stride<V, cf::Vec>());
-        C mul3 = tw2 * C::load(p + 7 * stride<V, cf::Vec>());
-
-        C sum02 = mul0 + mul2;
-        C dif02 = mul0 - mul2;
-        C sum13 = mul1 + mul3;
-        C dif13 = mul1 - mul3;
-
-        a4 = sum02 + sum13;
-        a5 = dif02 + dif13.mul_neg_i();
-        a6 = sum02 - sum13;
-        a7 = dif02 - dif13.mul_neg_i();
-      }
-    }
-
-    {
-      C tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
-      {
-        auto mul = tw3 * a4;
-        (a0 + mul).store(p + 0);
-        (a0 - mul).store(p + 1 * stride<V, cf::Vec>());
-      }
-
-      {
-        auto mul = tw3.mul_neg_i() * a6;
-        (a2 + mul).store(p + 2 * stride<V, cf::Vec>());
-        (a2 - mul).store(p + 3 * stride<V, cf::Vec>());
-      }
-    }
-
-    {
-      C tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
-      {
-        auto mul = tw4 * a5;
-        (a1 + mul).store(p + 4 * stride<V, cf::Vec>());
-        (a1 - mul).store(p + 5 * stride<V, cf::Vec>());
-      }
-
-      {
-        auto mul = tw4.mul_neg_i() * a7;
-        (a3 + mul).store(p + 6 * stride<V, cf::Vec>());
-        (a3 - mul).store(p + 7 * stride<V, cf::Vec>());
-      }
-    }
+    three_passes_inner<V, cf::Vec, true>(
+      p, stride<V, cf::Vec>(), tw, p, nullptr, stride<V, cf::Vec>());
 
     p += 8 * stride<V, cf::Vec>();
     tw += 5 * stride<V, cf::Vec>();
