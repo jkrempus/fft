@@ -9,8 +9,9 @@ struct Neon
 {
   typedef float T;
   typedef float32x4_t Vec;
-  const static Int vec_size = 4;
-  
+  static constexpr Int vec_size = 4;
+  static constexpr bool prefer_three_passes = false;
+
   template<Int elements_per_vec>
   static FORCEINLINE void interleave_multi(
     Vec a0, Vec a1, Vec& r0, Vec& r1)

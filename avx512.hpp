@@ -9,7 +9,8 @@ struct Avx512Float
 {
   typedef float T;
   typedef __v16sf Vec;
-  const static Int vec_size = 16;
+  static constexpr Int vec_size = 16;
+  static constexpr bool prefer_three_passes = true;
 
   template<Int elements_per_vec>
   static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)

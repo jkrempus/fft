@@ -9,8 +9,9 @@ struct SseFloat
 {
   typedef float T;
   typedef __m128 Vec;
-  const static Int vec_size = 4;
-  
+  static constexpr Int vec_size = 4;
+  static constexpr bool prefer_three_passes = false;
+
   template<Int elements_per_vec>
   static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
@@ -87,7 +88,8 @@ struct SseDouble
 {
   typedef double T;
   typedef __m128d Vec;
-  const static Int vec_size = 2;
+  static constexpr Int vec_size = 2;
+  static constexpr bool prefer_three_passes = false;
   
   template<Int elements_per_vec>
   static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)

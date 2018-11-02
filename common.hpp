@@ -508,8 +508,9 @@ struct Scalar
 {
   typedef T_ T;
   typedef T_ Vec;
-  const static Int vec_size = 1;
-  
+  static constexpr Int vec_size = 1;
+  static constexpr bool prefer_three_passes = false;
+
   template<Int elements_per_vec>
   static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {

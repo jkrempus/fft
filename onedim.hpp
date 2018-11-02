@@ -504,33 +504,6 @@ void last_three_passes(
   }
 }
 
-template<typename V>
-void last_three_passes_in_place(
-  Int n, Int start_offset, Int end_offset, ET<V>* ptr_arg, const ET<V>* tw_arg)
-{
-  VEC_TYPEDEFS(V);
-  
-  auto start = start_offset * cf::Vec::idx_ratio;
-  auto end = end_offset * cf::Vec::idx_ratio;
-  
-  const T* tw = tw_arg + start * 5 / 8;
-
-  for(auto p = ptr_arg + start; p < ptr_arg + end;)
-  {
-    C tw0 = C::load(tw);
-    C tw1 = C::load(tw + stride<V, cf::Vec>());
-    C tw2 = C::load(tw + 2 * stride<V, cf::Vec>());
-    C tw3 = C::load(tw + 3 * stride<V, cf::Vec>());
-    C tw4 = C::load(tw + 4 * stride<V, cf::Vec>());
-    three_passes_inner<V, cf::Vec, true>(
-      p, stride<V, cf::Vec>(), tw0, tw1, tw2, tw3, tw4,
-      p, nullptr, stride<V, cf::Vec>());
-
-    p += 8 * stride<V, cf::Vec>();
-    tw += 5 * stride<V, cf::Vec>();
-  }
-}
-
 template<int n, int vsz, typename T>
 constexpr ReImTable<(n > vsz ? n : vsz), T>
 create_ct_sized_fft_twiddle_table()
@@ -758,12 +731,20 @@ Int get_npasses(Int n, Int dft_size)
     return get_first_npasses<V>();
   else
   {
-    Int log2n = log2(n);
-    Int log2s = log2(dft_size);
-    if((log2n - log2s) % 3 == 0)
-      return 3;
+    if constexpr(V::prefer_three_passes)
+    {
+      if((log2(n) - log2(dft_size)) % 3 == 0)
+        return 3;
+      else
+        return 2;
+    }
     else
-      return 2;
+    {
+      if((dft_size << 3) == n)
+        return 3;
+      else
+        return 2;
+    }
   }
 }
 
@@ -817,10 +798,10 @@ void small_transform(
     }
     else
     {
-      if(npasses == 2)
-        two_passes<V>(n, dft_size, w, n, state->steps[i].twiddle);
-      else
+      if(V::prefer_three_passes && npasses == 3)
         three_passes<V>(n, dft_size, w, n, state->steps[i].twiddle);
+      else
+        two_passes<V>(n, dft_size, w, n, state->steps[i].twiddle);
 
       dft_size = next_dft_size;
     }
@@ -837,7 +818,7 @@ NOINLINE void last_recursive_passes(
   {
     Int npasses = steps[0].npasses;
 
-    if(npasses == 3) 
+    if(npasses == 3)
       three_passes<V>(
         n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
         three_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
@@ -858,14 +839,14 @@ NOINLINE void recursive_passes(
   VEC_TYPEDEFS(V);
   Int npasses = steps[0].npasses;
 
-  if(npasses == 2)
-    two_passes<V>(
-      n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
-      two_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
-  else
+  if(V::prefer_three_passes && npasses == 3)
     three_passes<V>(
       n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
       three_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
+  else
+    two_passes<V>(
+      n, dft_size, p + start * cf::Vec::idx_ratio, end - start,
+      two_pass_twiddle_ptr(steps[0].twiddle, n, start, dft_size));
 
   if(end - start > optimal_size)
   {
