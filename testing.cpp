@@ -625,6 +625,16 @@ struct TestWrapper<T, true, true>
 
 #ifdef HAVE_FFTW
 
+struct FftwSplitImOff
+{
+  template<typename T>
+  static Int get(const std::vector<Int>& size)
+  {
+    Int outer = product(&size[0], &size[0] + size.size() - 1);
+    return (size.back() / 2 + 1) * outer;
+  }
+};
+
 template<typename T, bool is_real_, bool is_inverse_>
 struct FftwTestWrapper :
   public InterleavedWrapperBase<T, HalvedDimLast, is_real_, is_inverse_>
@@ -696,6 +706,123 @@ struct FftwTestWrapper :
   }
 
   ~FftwTestWrapper()
+  {
+    if constexpr(std::is_same_v<T, float>)
+      fftwf_destroy_plan(plan);
+    else
+      fftw_destroy_plan(plan);
+  }
+
+  void transform()
+  {
+    Int n = product(this->size);
+    if constexpr(std::is_same_v<T, float>)
+      fftwf_execute(plan);
+    else
+      fftw_execute(plan);
+  }
+};
+
+template<typename T, bool is_real_, bool is_inverse_>
+struct FftwSplitTestWrapper :
+  public SplitWrapperBase<T, FftwSplitImOff, HalvedDimLast, is_real_, is_inverse_>
+{
+  static constexpr unsigned fftw_flags = FFTW_PATIENT;
+  static constexpr bool is_real = is_real_;
+  static constexpr bool is_inverse = is_inverse_;
+  using value_type = T;
+  std::conditional_t<std::is_same_v<T, float>, fftwf_plan, fftw_plan> plan;
+
+  FftwSplitTestWrapper(const std::vector<Int>& size, Int simd_impl)
+  : SplitWrapperBase<T, FftwSplitImOff, HalvedDimLast, is_real, is_inverse>(
+      size)
+  {
+    auto src = this->src;
+    auto dst = this->dst;
+
+    fftw_iodim dims[maxdim];
+    Int src_stride = 1;
+    Int dst_stride = 1;
+    for(Int i = size.size() - 1; i >= 0; i--)
+    {
+      ptrdiff_t n = size[i];
+      dims[i].n = n;
+      dims[i].is = src_stride;
+      dims[i].os = dst_stride;
+      if(is_real && i == size.size() - 1)
+      {
+        if(is_inverse)
+        {
+          src_stride *= n / 2 + 1;
+          dst_stride *= n;
+        }
+        else
+        {
+          src_stride *= n;
+          dst_stride *= n / 2 + 1;
+        }
+      }
+      else
+      {
+        src_stride *= n;
+        dst_stride *= n;
+      }
+    }
+
+    if constexpr(is_real_)
+    {
+      if constexpr(is_inverse_)
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_guru_split_dft_c2r(
+            size.size(), dims,
+            0, nullptr,
+            src, src + this->im_off, dst,
+            fftw_flags);
+        else
+          plan = fftw_plan_guru_split_dft_c2r(
+            size.size(), dims,
+            0, nullptr,
+            src, src + this->im_off, dst,
+            fftw_flags);
+      }
+      else
+      {
+        if constexpr(std::is_same_v<T, float>)
+          plan = fftwf_plan_guru_split_dft_r2c(
+              size.size(), dims,
+              0, nullptr,
+              src, dst, dst + this->im_off,
+              fftw_flags);
+        else
+          plan = fftw_plan_guru_split_dft_r2c(
+              size.size(), dims,
+              0, nullptr,
+              src, dst, dst + this->im_off,
+              fftw_flags);
+      }
+    }
+    else
+    {
+      Int n = product(this->size);
+      Int re_off = is_inverse ? n : 0;
+      Int im_off = is_inverse ? 0 : n;
+      if constexpr(std::is_same_v<T, float>)
+        plan = fftwf_plan_guru_split_dft(
+            size.size(), dims,
+            0, nullptr,
+            src + re_off, src + im_off, dst + re_off, dst + im_off,
+            fftw_flags);
+      else
+        plan = fftw_plan_guru_split_dft(
+            size.size(), dims,
+            0, nullptr,
+            src + re_off, src + im_off, dst + re_off, dst + im_off,
+            fftw_flags);
+    }
+  }
+
+  ~FftwSplitTestWrapper()
   {
     if constexpr(std::is_same_v<T, float>)
       fftwf_destroy_plan(plan);
@@ -1079,6 +1206,9 @@ TestResult test_or_bench3(const Options& opt, const std::vector<Int>& lsz)
   else if(opt.implementation == "fftw")
     return
       test_or_bench4<FftwTestWrapper<ET, is_real, is_inverse>>(opt, lsz);
+  else if(opt.implementation == "fftw-split")
+    return
+      test_or_bench4<FftwSplitTestWrapper<ET, is_real, is_inverse>>(opt, lsz);
 #endif
   else
     abort();
