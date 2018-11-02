@@ -38,7 +38,7 @@ std::string format_option(const Options& opt)
 
 void run(
   const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity,
-  Int simd_impl)
+  std::string_view implementation, Int simd_impl)
 {
   for(auto [is_real, is_inverse] : {
     std::make_pair(true, true),
@@ -47,7 +47,7 @@ void run(
     std::make_pair(false, false)})
   {
     Options opt;
-    opt.implementation = "fft";
+    opt.implementation = std::string(implementation);
     for(auto e : size) opt.size.push_back({e, e + 1});
 
     opt.precision = 1.2e-7;
@@ -84,7 +84,7 @@ void run(
 
 void run(
   const std::vector<std::vector<Int>>& sizes, Int num_threads, Int verbosity,
-  Int simd_impl)
+  std::string_view implementation, Int simd_impl)
 {
   int64_t total_size = 0;
   for(auto& s : sizes) total_size += num_processed_elements(s);
@@ -103,7 +103,7 @@ void run(
       if(idx >= sizes.size()) return;
       auto& s = sizes[idx];
 
-      run(s, mutex, verbosity, simd_impl);
+      run(s, mutex, verbosity, implementation, simd_impl);
 
       std::lock_guard<std::mutex> lock(mutex);
       done_size += num_processed_elements(s);
@@ -205,6 +205,7 @@ int main(int argc, char** argv)
   Int verbosity = 1;
   Int threads = 1;
   Int total = 1000000000;
+  std::string implementation;
   SimdImpl simd_impl = {0};
 
   OptionParser op;
@@ -219,8 +220,16 @@ int main(int argc, char** argv)
   op.add_optional_flag(
     "-t", "The total number of elements that will be processed in all of the tests.",
     &total);
+  
+  op.add_positional(
+    "implementation", "Fft implementation to test.", &implementation);
 
-  op.parse(argc, argv);
+  auto parsing_result = op.parse(argc, argv);
+  if(!parsing_result)
+  {
+    std::cerr << parsing_result.message << std::endl;
+    return parsing_result.error ? 1 : 0;
+  }
 
   std::vector<std::vector<Int>> sizes;
   for(Int i = 1; i < max_size + 1; i++) sizes.push_back({i});
@@ -236,7 +245,7 @@ int main(int argc, char** argv)
       << "and number of elements up to 2^"
       << max_size << " will be tested." << std::endl;
 
-  run(sizes, threads, verbosity, simd_impl.val);
+  run(sizes, threads, verbosity, implementation, simd_impl.val);
 
   return 0;
 }
