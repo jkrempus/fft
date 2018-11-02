@@ -555,7 +555,7 @@ struct TestWrapper<T, false, false>
   static const bool is_inverse = false;
   typedef T value_type;
   afft::complex_transform<T> t;
-  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
     Base<T, false, false>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
@@ -574,7 +574,7 @@ struct TestWrapper<T, false, true>
   static const bool is_inverse = true;
   typedef T value_type;
   afft::inverse_complex_transform<T> t;
-  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
     Base<T, false, true>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
@@ -594,7 +594,7 @@ struct TestWrapper<T, true, false>
   typedef T value_type;
   afft::real_transform<T> t;
 
-  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
     Base<T, true, false>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
@@ -613,7 +613,7 @@ struct TestWrapper<T, true, true>
   typedef T value_type;
   afft::inverse_real_transform<T> t;
 
-  TestWrapper(const std::vector<Int>& size, Int simd_impl) :
+  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
     Base<T, true, true>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
@@ -639,14 +639,17 @@ template<typename T, bool is_real_, bool is_inverse_>
 struct FftwTestWrapper :
   public InterleavedWrapperBase<T, HalvedDimLast, is_real_, is_inverse_>
 {
-  static const unsigned fftw_flags = FFTW_PATIENT;
+  using Base = InterleavedWrapperBase<T, HalvedDimLast, is_real_, is_inverse_>;
+
   static const bool is_real = is_real_;
   static const bool is_inverse = is_inverse_;
   typedef float value_type;
   std::conditional_t<std::is_same_v<T, float>, fftwf_plan, fftw_plan> plan;
 
-  FftwTestWrapper(const std::vector<Int>& size, Int simd_impl)
-    : InterleavedWrapperBase<T, HalvedDimLast, is_real, is_inverse_>(size)
+  unsigned fftw_flags;
+
+  FftwTestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench)
+  : Base(size), fftw_flags(is_bench ? FFTW_PATIENT : FFTW_ESTIMATE)
   {
     int idx[maxdim];
     std::copy_n(&size[0], size.size(), idx);
@@ -727,15 +730,19 @@ template<typename T, bool is_real_, bool is_inverse_>
 struct FftwSplitTestWrapper :
   public SplitWrapperBase<T, FftwSplitImOff, HalvedDimLast, is_real_, is_inverse_>
 {
-  static constexpr unsigned fftw_flags = FFTW_PATIENT;
+  using Base =
+    SplitWrapperBase<T, FftwSplitImOff, HalvedDimLast, is_real_, is_inverse_>;
+
   static constexpr bool is_real = is_real_;
   static constexpr bool is_inverse = is_inverse_;
   using value_type = T;
   std::conditional_t<std::is_same_v<T, float>, fftwf_plan, fftw_plan> plan;
 
-  FftwSplitTestWrapper(const std::vector<Int>& size, Int simd_impl)
-  : SplitWrapperBase<T, FftwSplitImOff, HalvedDimLast, is_real, is_inverse>(
-      size)
+  unsigned fftw_flags;
+
+  FftwSplitTestWrapper(
+    const std::vector<Int>& size, Int simd_impl, Int is_bench)
+  : Base(size), fftw_flags(is_bench ? FFTW_PATIENT : FFTW_ESTIMATE)
   {
     auto src = this->src;
     auto dst = this->dst;
@@ -930,7 +937,7 @@ struct ReferenceFft :
   std::vector<Onedim> onedim;
   std::vector<T> working;
 
-  ReferenceFft(const std::vector<Int>& size, Int simd_impl)
+  ReferenceFft(const std::vector<Int>& size, Int simd_impl, bool is_bench)
     : InterleavedWrapperBase<T, void, false, is_inverse_>(size)
   {
     for(auto e : size) onedim.emplace_back(e);
@@ -991,7 +998,7 @@ TestResult bench(
 {
   Int n = product(size);
   typedef typename Fft::value_type T;
-  Fft fft(size, simd_impl);
+  Fft fft(size, simd_impl, true);
 
   T* src = alloc_array<T>(2 * n);
   for(Int i = 0; i < n * 2; i++) src[i] = 0.0f;
@@ -1024,8 +1031,8 @@ TestResult compare(const std::vector<Int>& size, Int simd_impl)
   static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
   Int n = product(size);
-  Fft0 fft0(size, simd_impl);
-  Fft1 fft1(size, simd_impl);
+  Fft0 fft0(size, simd_impl, false);
+  Fft1 fft1(size, simd_impl, false);
   T* src = alloc_array<T>(2 * n);
   T* dst0 = alloc_array<T>(2 * n);
   T* dst1 = alloc_array<T>(2 * n);
