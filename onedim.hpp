@@ -1096,8 +1096,8 @@ Int rfft_create_impl(Int n, void* ptr)
 
     Int m =  n / 2;
     compute_twiddle<V>(m, r->twiddle, r->twiddle + m);
-    copy(r->twiddle + 1, m - 1, r->twiddle);
-    copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+    copy<V>(r->twiddle + 1, m - 1, r->twiddle);
+    copy<V>(r->twiddle + m + 1, m - 1, r->twiddle + m);
 
     r->state = fft_create<V, cf::Scal, cf::Split>(n / 2, ptr);
   }
@@ -1163,8 +1163,8 @@ Int irfft_create_impl(Int n, void* ptr)
 
     Int m =  n / 2;
     compute_twiddle<V>(m, r->twiddle, r->twiddle + m);
-    copy(r->twiddle + 1, m - 1, r->twiddle);
-    copy(r->twiddle + m + 1, m - 1, r->twiddle + m);
+    copy<V>(r->twiddle + 1, m - 1, r->twiddle);
+    copy<V>(r->twiddle + m + 1, m - 1, r->twiddle + m);
 
     r->state = ifft_create<V, cf::Split, cf::Scal>(n / 2, ptr);
   }

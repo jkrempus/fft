@@ -119,14 +119,15 @@ struct BitReversed
   }
 };
 
-template<typename T>
-FORCEINLINE void copy(const T* src, Int n, T* dst)
+template<typename V>
+FORCEINLINE void copy(const ET<V>* src, Int n, ET<V>* dst)
 {
-#if defined __GNUC__ || defined __clang__
-  __builtin_memmove(dst, src, n * sizeof(T));
-#else
-  for(Int i = 0; i < n; i++) dst[i] = src[i];
-#endif
+  if(n > 0 && n < V::vec_size) return;
+
+  ASSERT(i & (V::vec_size - 1) == 0);
+
+  for(Int i = 0; i < n; i += V::vec_size) 
+    V::store(V::load(src + i), dst + i);
 }
 
 template<typename T = char>
