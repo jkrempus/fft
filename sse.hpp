@@ -64,9 +64,14 @@ struct SseFloat
   template<Uint flags = 0>
   static Vec load(const T* p)
   {
+#if 0
+    // Ignore the stream flag because _mm_stream_load_si128
+    // requires sse4.1
     return (flags & stream_flag) ? 
       _mm_castsi128_ps(_mm_stream_load_si128((__m128i*) p)) :
       _mm_load_ps(p);
+#endif
+    _mm_load_ps(p);
   }
 
   static Vec unaligned_load(const T* p) { return _mm_loadu_ps(p); }
@@ -123,9 +128,15 @@ struct SseDouble
   template<Uint flags = 0>
   static Vec load(const T* p)
   {
+#if 0
+    // Ignore the stream flag because _mm_stream_load_si128
+    // requires sse4.1
     return (flags & stream_flag) ? 
       _mm_castsi128_pd(_mm_stream_load_si128((__m128i*) p)) :
       _mm_load_pd(p);
+#endif
+
+    return _mm_load_pd(p);
   }
 
   static Vec unaligned_load(const T* p) { return _mm_loadu_pd(p); }
