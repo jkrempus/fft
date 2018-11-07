@@ -69,13 +69,20 @@ extern "C" void* valloc(size_t);
 
 void* alloc(Int n)
 {
-  void* r = valloc(n);
-  return r;
+#ifdef _WIN32
+  return _aligned_malloc(n, 4096);
+#else
+  return valloc(n);
+#endif
 }
 
 void dealloc(void* p)
 {
+#ifdef _WIN32
+  _aligned_free(p);
+#else
   free(p);
+#endif
 }
 
 template<typename T>
