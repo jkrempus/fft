@@ -1,3 +1,8 @@
+#ifndef X86_FEATURES_HPP
+#define X86_FEATURES_HPP
+
+#include <intrin.h>
+
 namespace
 {
 namespace x86_features
@@ -16,7 +21,7 @@ CpuidResult cpuid(unsigned a_in, unsigned c_in)
     : "0" (a_in), "2" (c_in));
 #elif defined _MSC_VER
   int array[4];
-  __cpuid_ex(array, a_in, c_in);
+  __cpuidex(array, a_in, c_in);
   r.a = array[0];
   r.b = array[1];
   r.c = array[2];
@@ -33,7 +38,7 @@ unsigned long long xgetbv(unsigned c_in)
   using U = unsigned long long;
   return (U(d) << 32) | U(a);
 #elif defined _MSC_VER
-  return _xgetbv(x_in);
+  return _xgetbv(c_in);
 #endif
 }
 
@@ -57,7 +62,7 @@ unsigned get_supported()
     unsigned new_supported = initialized_bit;
 
     if(get_bits(cpuid(1, 0).d, 25, 2) == 3UL) new_supported |= sse2_bit;
-      
+
     unsigned cpuid_1_0_c = cpuid(1, 0).c;
     if(
       get_bit(cpuid_1_0_c, 27) == 1U &&
@@ -94,3 +99,5 @@ bool supports_avx2()
 }
 }
 }
+
+#endif
