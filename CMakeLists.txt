@@ -58,7 +58,7 @@ endif()
 add_library(fft STATIC fft.cpp ${IMPL_FILES})
 
 if(MSVC)
-  target_compile_options(fft PRIVATE "$<$<CONFIG:RelWithDebInfo>:-Ob2"> -W4)
+  target_compile_options(fft PRIVATE "$<$<CONFIG:RelWithDebInfo>:-Ob2">)
 else()
   target_compile_options(fft PRIVATE -fno-fast-math)
 endif()

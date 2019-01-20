@@ -154,28 +154,18 @@ struct Complex
   typedef typename V::Vec Vec;
   Vec re;
   Vec im;
-  FORCEINLINE constexpr Complex mul_neg_i() const { return {im, -re}; }
-  FORCEINLINE constexpr Complex adj() const { return {re, -im}; }
-  FORCEINLINE constexpr Complex operator+(Complex other) const
+
+  // mul_neg_i and adj need to be static methods because
+  // MSVC refuses to inline them if they are non-static methods,
+  // even though __forceinline is used.
+  static FORCEINLINE constexpr Complex mul_neg_i(Complex a)
   {
-    return {re + other.re, im + other.im};
+    return {a.im, -a.re};
   }
 
-  FORCEINLINE constexpr Complex operator-(Complex other) const
+  static FORCEINLINE constexpr Complex adj(Complex a)
   {
-    return {re - other.re, im - other.im};
-  }
-
-  FORCEINLINE constexpr Complex operator*(Complex other) const
-  {
-    return {
-      re * other.re - im * other.im,
-      re * other.im + im * other.re};
-  }
-
-  FORCEINLINE constexpr Complex operator*(Vec other) const
-  {
-    return {re * other, im * other};
+    return {a.re, -a.im};
   }
 
   template<Uint flags = 0>
@@ -204,6 +194,30 @@ struct Complex
     V::unaligned_store(im, ptr + V::vec_size);
   }
 };
+
+template<typename V>
+FORCEINLINE constexpr Complex<V> operator+(Complex<V> a, Complex<V> b)
+{
+  return {a.re + b.re, a.im + b.im};
+}
+
+template<typename V>
+FORCEINLINE constexpr Complex<V> operator-(Complex<V> a, Complex<V> b)
+{
+  return {a.re - b.re, a.im - b.im};
+}
+
+template<typename V>
+FORCEINLINE constexpr Complex<V> operator*(Complex<V> a, Complex<V> b)
+{
+  return { a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re};
+}
+
+template<typename V>
+FORCEINLINE constexpr Complex<V> operator*(Complex<V> a, typename V::Vec b)
+{
+  return {a.re * b, a.im * b};
+}
 
 namespace complex_format
 {

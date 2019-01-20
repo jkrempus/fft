@@ -65,8 +65,8 @@ FORCEINLINE void two_passes_inner_unity_twiddle(
 
   dst0 = sum02 + sum13;
   dst2 = sum02 - sum13;
-  dst1 = dif02 + dif13.mul_neg_i();
-  dst3 = dif02 - dif13.mul_neg_i();
+  dst1 = dif02 + C::mul_neg_i(dif13);
+  dst3 = dif02 - C::mul_neg_i(dif13);
 }
 
 template<typename V>
@@ -114,7 +114,7 @@ FORCEINLINE void three_passes_inner(
   }
 
   {
-    auto mul = tw3.mul_neg_i() * a6;
+    auto mul = C::mul_neg_i(tw3) * a6;
     store<DstCf>(a2 + mul, dst_re, dst_im, (br_dst ? 2 : 2) * dst_stride);
     store<DstCf>(a2 - mul, dst_re, dst_im, (br_dst ? 3 : 6) * dst_stride);
   }
@@ -126,7 +126,7 @@ FORCEINLINE void three_passes_inner(
   }
 
   {
-    auto mul = tw4.mul_neg_i() * a7;
+    auto mul = C::mul_neg_i(tw4) * a7;
     store<DstCf>(a3 + mul, dst_re, dst_im, (br_dst ? 6 : 3) * dst_stride);
     store<DstCf>(a3 - mul, dst_re, dst_im, (br_dst ? 7 : 7) * dst_stride);
   }
@@ -220,7 +220,7 @@ void first_three_passes(
 
       mul0 = b0;
       mul1 = {invsqrt2 * (b1.re + b1.im), invsqrt2 * (b1.im - b1.re)};
-      mul2 = b2.mul_neg_i();
+      mul2 = C::mul_neg_i(b2);
       mul3 = {invsqrt2 * (b3.im - b3.re), invsqrt2 * (-b3.im - b3.re)};
     }
 
@@ -245,7 +245,7 @@ template<typename V, Int i>
 FORCEINLINE void first_four_passes_helper(Complex<V> (&interm)[16])
 {
   VEC_TYPEDEFS(V);
-  constexpr auto tw0 = root_of_unity<T>(i, 16).adj();
+  constexpr auto tw0 = C::adj(root_of_unity<T>(i, 16));
   constexpr auto tw1 = tw0 * tw0;
   constexpr auto tw2 = tw1 * tw0;
   two_passes_inner(
@@ -1023,17 +1023,17 @@ void real_pass(
 
     if(inverse)
     {
-      a = s0 + s1.adj();
-      b = (s1.adj() - s0) * w.adj();
+      a = s0 + C::adj(s1);
+      b = (C::adj(s1) - s0) * C::adj(w);
     }
     else
     {
-      a = (s0 + s1.adj()) * half;
-      b = ((s0 - s1.adj()) * w) * half;
+      a = (s0 + C::adj(s1)) * half;
+      b = ((s0 - C::adj(s1)) * w) * half;
     }
 
-    C d0 = a + b.mul_neg_i();
-    C d1 = a.adj() + b.adj().mul_neg_i();
+    C d0 = a + C::mul_neg_i(b);
+    C d1 = C::adj(a) + C::mul_neg_i(C::adj(b));
 
     unaligned_store<DstCf>(d0, dst_re, dst_im, i0 * dst_ratio);
     store<DstCf>(reverse_complex<V>(d1), dst_re, dst_im, i1 * dst_ratio);
@@ -1041,7 +1041,8 @@ void real_pass(
 
   // fixes the aliasing bug
   store<DstCf>(
-    middle.adj() * (inverse ? 2.0f : 1.0f), dst_re, dst_im, n / 4 * dst_ratio);
+    C::adj(middle) * (inverse ? 2.0f : 1.0f),
+    dst_re, dst_im, n / 4 * dst_ratio);
 
   if(inverse)
   {

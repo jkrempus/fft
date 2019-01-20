@@ -75,8 +75,8 @@ void first_two_passes(
 
       C c0 = b0 + b1;
       C c1 = b0 - b1;
-      C c2 = b2 + b3.mul_neg_i();
-      C c3 = b2 - b3.mul_neg_i();
+      C c2 = b2 + C::mul_neg_i(b3);
+      C c3 = b2 - C::mul_neg_i(b3);
 
       store<DstCf>(c0, dst0.re, dst0.im, d);
       store<DstCf>(c1, dst1.re, dst1.im, d);
@@ -366,17 +366,17 @@ void real_pass(Int n, Int m, ET<V>* twiddle, ET<V>* dst_re, ET<V>* dst_im)
 
       if(inverse)
       {
-        a = sval0 + sval1.adj();
-        b = (sval1.adj() - sval0) * w.adj();
+        a = sval0 + C::adj(sval1);
+        b = (C::adj(sval1) - sval0) * C::adj(w);
       }
       else
       {
-        a = (sval0 + sval1.adj()) * half;
-        b = ((sval0 - sval1.adj()) * w) * half;
+        a = (sval0 + C::adj(sval1)) * half;
+        b = ((sval0 - C::adj(sval1)) * w) * half;
       }
 
-      C dval0 = a + b.mul_neg_i();
-      C dval1 = a.adj() + b.adj().mul_neg_i();
+      C dval0 = a + C::mul_neg_i(b);
+      C dval1 = C::adj(a) + C::mul_neg_i(C::adj(b));
 
       store<DstCf>(dval0, re0, im0, off);
       store<DstCf>(dval1, re1, im1, off);
