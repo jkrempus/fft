@@ -71,7 +71,7 @@ struct SseFloat
       _mm_castsi128_ps(_mm_stream_load_si128((__m128i*) p)) :
       _mm_load_ps(p);
 #endif
-    _mm_load_ps(p);
+    return _mm_load_ps(p);
   }
 
   static Vec unaligned_load(const T* p) { return _mm_loadu_ps(p); }

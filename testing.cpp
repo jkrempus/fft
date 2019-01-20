@@ -64,14 +64,23 @@ struct IterateMultidim
   }
 };
 
-#ifdef _MSC_VER
-void* alloc(Int n) { return _aligned_malloc(n, 4096); }
-void dealloc(void* p) { _aligned_free(p); }
+void* alloc(Int n)
+{
+#ifdef _WIN32
+  return _aligned_malloc(n, 4096);
 #else
-extern "C" void* valloc(size_t);
-void* alloc(Int n) { return valloc(n); }
-void dealloc(void* p) { free(p); }
+  return valloc(n);
 #endif
+}
+
+void dealloc(void* p)
+{
+#ifdef _WIN32
+  _aligned_free(p);
+#else
+  free(p);
+#endif
+}
 
 template<typename T>
 T* alloc_array(Int n)
