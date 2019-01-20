@@ -12,7 +12,6 @@
 #include <cstdarg>
 #include <iostream>
 #include <fstream>
-#include <unistd.h>
 #include <random>
 #include <cstdint>
 #include <unordered_set>
@@ -65,18 +64,14 @@ struct IterateMultidim
   }
 };
 
+#ifdef _MSC_VER
+void* alloc(Int n) { return _aligned_malloc(n, 4096); }
+void dealloc(void* p) { _aligned_free(p); }
+#else
 extern "C" void* valloc(size_t);
-
-void* alloc(Int n)
-{
-  void* r = valloc(n);
-  return r;
-}
-
-void dealloc(void* p)
-{
-  free(p);
-}
+void* alloc(Int n) { return valloc(n); }
+void dealloc(void* p) { free(p); }
+#endif
 
 template<typename T>
 T* alloc_array(Int n)

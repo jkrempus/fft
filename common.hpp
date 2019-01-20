@@ -10,9 +10,15 @@ typedef long Int;
 typedef unsigned long Uint;
 #endif
 
+#ifdef _MSC_VER
+#define FORCEINLINE __forceinline
+#define HOT
+#define NOINLINE __declspec(noinline)
+#elif
 #define FORCEINLINE __attribute__((always_inline)) inline
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
+#endif
 
 //#define ASSERT(condition) ((condition) || *((volatile int*) 0))
 #define ASSERT(condition)

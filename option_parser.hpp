@@ -219,7 +219,7 @@ private:
   {
     std::stringstream s;
 
-    s << "Usage:\n  " << program_name;
+    s << "Usage:\n  " << std::string(program_name);
 
     for(auto& [name, switch_] : switches)
       s << " [" << name << "]";
@@ -249,9 +249,9 @@ private:
     auto add_description = [&s](
       std::string_view title, std::string_view description)
     {
-      s << "  " << title << "   ";
+      s << "  " << std::string(title) << "   ";
       for(Int i = title.size(); i < 20; i++) s << " ";
-      s << description << "\n";
+      s << std::string(description) << "\n";
     };
 
     for(auto& [name, switch_] : switches)
