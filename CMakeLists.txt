@@ -22,7 +22,8 @@ option(ENABLE_SSE2 "Enable the SSE2 implementation" ON)
 if(ENABLE_SSE2)
   set(IMPL_FILES ${IMPL_FILES} sse2_impl.cpp)
   set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_SSE2_ENABLED=1)
-  set_source_files_properties(sse2_impl.cpp PROPERTIES COMPILE_FLAGS SSE2_FLAGS)
+  set_source_files_properties(
+    sse2_impl.cpp PROPERTIES COMPILE_FLAGS ${SSE2_FLAGS})
 endif()
 
 option(ENABLE_AVX2 "Enable the AVX2 implementation" ON)
@@ -30,7 +31,7 @@ if(ENABLE_AVX2)
   set(IMPL_FILES ${IMPL_FILES} avx2_impl.cpp)
   set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_AVX2_ENABLED=1)
   set_source_files_properties(
-    avx2_impl.cpp PROPERTIES COMPILE_FLAGS AVX2_FLAGS)
+    avx2_impl.cpp PROPERTIES COMPILE_FLAGS ${AVX2_FLAGS})
 endif()
 
 option(ENABLE_AVX512F "Enable the AVX512F implementation" ON)
@@ -58,7 +59,7 @@ endif()
 add_library(fft STATIC fft.cpp ${IMPL_FILES})
 
 if(MSVC)
-  target_compile_options(fft PRIVATE "$<$<CONFIG:RelWithDebInfo>:-Ob2">)
+  target_compile_options(fft PRIVATE "$<$<CONFIG:RelWithDebInfo>:-Ob2>")
 else()
   target_compile_options(fft PRIVATE -fno-fast-math)
 endif()
