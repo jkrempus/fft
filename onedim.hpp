@@ -30,7 +30,7 @@ struct Fft
 
 template<typename T> struct Ifft;
 
-template<int len, typename T>
+template<Int len, typename T>
 struct ReImTable
 {
   T re[len];
@@ -42,8 +42,8 @@ constexpr Complex<Scalar<T>> root_of_unity(Int i, Int n)
 {
   using C = Complex<Scalar<T>>;
   C r{1, 0};
-  int table_i = 0;
-  for(int bit = n / 2; bit > 0; bit >>= 1, table_i++)
+  Int table_i = 0;
+  for(Int bit = n / 2; bit > 0; bit >>= 1, table_i++)
     if((i & bit) != 0)
       r = r * C{
         SinCosTable<T>::cos[table_i],
@@ -241,7 +241,7 @@ void first_three_passes(
   }
 }
 
-template<typename V, int i>
+template<typename V, Int i>
 FORCEINLINE void first_four_passes_helper(Complex<V> (&interm)[16])
 {
   VEC_TYPEDEFS(V);
@@ -369,7 +369,7 @@ void last_two_passes(
   auto dst2_im = dst1_im + vn / 4 * stride<V, DstCf>(); 
   auto dst3_im = dst2_im + vn / 4 * stride<V, DstCf>(); 
 
-  for(BitReversed br(vn / 4); br.i < vn / 4; br.advance())
+  for(BitReversed br(vn / 4); Int(br.i) < vn / 4; br.advance())
   {
     auto tw0 = C::load(tw);
     auto tw1 = C::load(tw + stride<V, cf::Vec>());
@@ -403,11 +403,11 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
   //const Int br_table[] = {0, 2, 1, 3};
   constexpr Int br_table[] = {0, 4, 2, 6, 1, 5, 3, 7};
   //constexpr Int br_table[] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
-  constexpr int m = sizeof(br_table) / sizeof(br_table[0]);
+  constexpr Int m = sizeof(br_table) / sizeof(br_table[0]);
 
   if(vn < m * m)
   {
-    for(BitReversed br(vn); br.i < vn; br.advance())
+    for(BitReversed br(vn); Int(br.i) < vn; br.advance())
       store<DstCf, stream_flag>(
         C::load(src + br.i * stride<V, cf::Vec>()),
         dst_re, dst_im, 
@@ -417,7 +417,7 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
   {
     Int stride_ = vn / m;
 
-    for(BitReversed br(vn / (m * m)); br.i < vn / (m * m); br.advance())
+    for(BitReversed br(vn / (m * m)); Int(br.i) < vn / (m * m); br.advance())
     {
       const T* s_outer = src + br.i * m * stride<V, cf::Vec>();
       T* d_outer_re = dst_re + br.br * m * stride<V, DstCf>();
@@ -468,7 +468,6 @@ void three_passes(
       ASSERT(p >= data_ptr);
       ASSERT(p + gap < data_ptr + data_n * cf::Vec::idx_ratio);
 
-      C d0, d1, d2, d3;
       three_passes_inner<V, cf::Vec, true>(
         p, off1, tw0, tw1, tw2, tw3, tw4, p, nullptr, off1);
 
@@ -487,7 +486,7 @@ void last_three_passes(
   VEC_TYPEDEFS(V);
 
   Int m = n / 8 / V::vec_size;
-  for(BitReversed br(m); br.i < m; br.advance())
+  for(BitReversed br(m); Int(br.i) < m; br.advance())
   {
     auto this_tw = tw + 5 * stride<V, cf::Vec>() * br.i;
     C tw0 = C::load(this_tw);
@@ -504,20 +503,20 @@ void last_three_passes(
   }
 }
 
-template<int n, int vsz, typename T>
+template<Int n, Int vsz, typename T>
 constexpr ReImTable<(n > vsz ? n : vsz), T>
 create_ct_sized_fft_twiddle_table()
 {
-  constexpr int len = n > vsz ? n : vsz;
+  constexpr Int len = n > vsz ? n : vsz;
   ReImTable<len, T> r = {0};
-  for(int i = 0; i < n; i++)
+  for(Int i = 0; i < n; i++)
   {
     auto tmp = root_of_unity<T>(i, n * 2);
     r.re[i] = tmp.re;
     r.im[i] = -tmp.im;
   }
 
-  for(int i = 0; i < vsz; i++)
+  for(Int i = 0; i < vsz; i++)
   {
     r.re[i] = r.re[i & (n - 1)];
     r.im[i] = r.im[i & (n - 1)];
@@ -526,14 +525,14 @@ create_ct_sized_fft_twiddle_table()
   return r;
 }
 
-template<int n, int vsz, typename T>
+template<Int n, Int vsz, typename T>
 struct CtSizedFftTwiddleTable
 {
   static constexpr ReImTable<(n > vsz ? n : vsz), T> value =
     create_ct_sized_fft_twiddle_table<n, vsz, T>();
 };
 
-template<int n, int vsz, typename T>
+template<Int n, Int vsz, typename T>
 constexpr ReImTable<(n > vsz ? n : vsz), T>
 CtSizedFftTwiddleTable<n, vsz, T>::value;
 
@@ -598,28 +597,28 @@ FORCEINLINE void tiny_transform_pass(A& src_re, A& src_im, A& dst_re, A& dst_im)
 
 //One weird trick to prevent GCC from needlessly
 //writing array elements to the stack.
-template<typename Vec, int n> struct Locals
+template<typename Vec, Int n> struct Locals
 {
   Vec a[n];
-  FORCEINLINE Vec& operator[](int i) { return a[i]; }
+  FORCEINLINE Vec& operator[](Int i) { return a[i]; }
 };
 
 template<typename Vec> struct Locals<Vec, 1>
 {
   Vec a0;
-  FORCEINLINE Vec& operator[](int i) { return a0; }
+  FORCEINLINE Vec& operator[](Int i) { return a0; }
 };
 
 template<typename Vec> struct Locals<Vec, 2>
 {
   Vec a0, a1;
-  FORCEINLINE Vec& operator[](int i) { return i == 0 ? a0 : a1; }
+  FORCEINLINE Vec& operator[](Int i) { return i == 0 ? a0 : a1; }
 };
 
 template<typename Vec> struct Locals<Vec, 4>
 {
   Vec a0, a1, a2, a3;
-  FORCEINLINE Vec& operator[](int i)
+  FORCEINLINE Vec& operator[](Int i)
   {
     return 
       i == 0 ? a0 :
@@ -631,7 +630,7 @@ template<typename Vec> struct Locals<Vec, 4>
 template<typename Vec> struct Locals<Vec, 8>
 {
   Vec a0, a1, a2, a3, a4, a5, a6, a7;
-  FORCEINLINE Vec& operator[](int i)
+  FORCEINLINE Vec& operator[](Int i)
   {
     return 
       i == 0 ? a0 :
@@ -993,7 +992,7 @@ void real_pass(
   typename V::T* dst_re,
   typename V::T* dst_im)
 {
-  if(SameType<DstCf, cf::Vec>::value) ASSERT(0);
+  if(SameType<DstCf, cf::Vec>::value) { ASSERT(0) };
   VEC_TYPEDEFS(V);
 
   const Int src_ratio = SrcCf::idx_ratio;

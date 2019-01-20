@@ -678,7 +678,7 @@ void twiddle_for_step_create(
     auto src_row1 = twiddle_range + (n - 8 * dft_size);
     Int vdft_size = dft_size / V::vec_size;
     BitReversed br(vdft_size);
-    for(; br.i < vdft_size; br.advance())
+    for(; Int(br.i) < vdft_size; br.advance())
     {
       store_two_pass_twiddle<V>(
         load<V, cf::Split>(src_row0, src_row0 + n, br.i * V::vec_size),
@@ -696,7 +696,7 @@ void twiddle_for_step_create(
     auto src_row0 = twiddle_range + (n - 4 * dft_size);
     Int vdft_size = dft_size / V::vec_size;
     BitReversed br(vdft_size);
-    for(; br.i < vdft_size; br.advance())
+    for(; Int(br.i) < vdft_size; br.advance())
     {
       store_two_pass_twiddle<V>(
         load<V, cf::Split>(src_row0, src_row0 + n, br.i * V::vec_size),
@@ -708,7 +708,7 @@ void twiddle_for_step_create(
     auto src_row0 = twiddle_range + (n - 2 * dft_size);
     Int vdft_size = dft_size / V::vec_size;
     BitReversed br(vdft_size);
-    for(; br.i < vdft_size; br.advance())
+    for(; Int(br.i) < vdft_size; br.advance())
       load<V, cf::Split>(src_row0, src_row0 + n, br.i * V::vec_size)
         .store(dst + br.br * dst_stride);
   }

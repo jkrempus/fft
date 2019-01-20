@@ -125,7 +125,7 @@ void fft_impl(
 
     Int m = s->transforms[idim]->m;
     Int n = s->transforms[idim]->n;
-    for(BitReversed br(n); br.i < n; br.advance())
+    for(BitReversed br(n); Int(br.i) < n; br.advance())
     {
       auto next_src_re = working + br.i * m * s->working_idx_ratio;;
       Int dst_off = br.br * m * s->dst_idx_ratio;
