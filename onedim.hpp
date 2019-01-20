@@ -1041,7 +1041,7 @@ void real_pass(
 
   // fixes the aliasing bug
   store<DstCf>(
-    C::adj(middle) * (inverse ? 2.0f : 1.0f),
+    SC::adj(middle) * (inverse ? 2.0f : 1.0f),
     dst_re, dst_im, n / 4 * dst_ratio);
 
   if(inverse)

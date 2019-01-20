@@ -8,7 +8,7 @@
 struct AvxFloat
 {
   typedef float T;
-  typedef __v8sf Vec;
+  typedef __m256 Vec;
   static constexpr Int vec_size = 8;
   static constexpr bool prefer_three_passes = false;
 
@@ -24,7 +24,7 @@ struct AvxFloat
     }
     else if(elements_per_vec == 4)
       transpose_128(
-        _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)), 
+        _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(1, 0, 1, 0)),
         _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2)),
         r0, r1);
     else if (elements_per_vec == 2)
@@ -75,7 +75,7 @@ struct AvxFloat
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
 
-//private: 
+//private:
   static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
@@ -177,7 +177,7 @@ struct AvxDouble
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_pd(a); }
 
-//private: 
+//private:
   static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = _mm256_permute2f128_pd(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
@@ -212,5 +212,47 @@ struct AvxDouble
 
   static void sfence(){ _mm_sfence(); }
 };
+
+#ifdef _MSC_VER
+  FORCEINLINE __m256 operator+(__m256 a, __m256 b)
+  {
+    return _mm256_add_ps(a, b);
+  }
+
+  FORCEINLINE __m256 operator-(__m256 a, __m256 b)
+  {
+    return _mm256_sub_ps(a, b);
+  }
+
+  FORCEINLINE __m256 operator-(__m256 a)
+  {
+    return _mm256_sub_ps(_mm256_setzero_ps(), a);
+  }
+
+  FORCEINLINE __m256 operator*(__m256 a, __m256 b)
+  {
+    return _mm256_mul_ps(a, b);
+  }
+
+  FORCEINLINE __m256d operator+(__m256d a, __m256d b)
+  {
+    return _mm256_add_pd(a, b);
+  }
+
+  FORCEINLINE __m256d operator-(__m256d a, __m256d b)
+  {
+    return _mm256_sub_pd(a, b);
+  }
+
+  FORCEINLINE __m256d operator-(__m256d a)
+  {
+    return _mm256_sub_pd(_mm256_setzero_pd(), a);
+  }
+
+  FORCEINLINE __m256d operator*(__m256d a, __m256d b)
+  {
+    return _mm256_mul_pd(a, b);
+  }
+#endif
 
 #endif
