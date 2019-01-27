@@ -642,6 +642,8 @@ void loop_body(A& src_re, A& src_im, A& dst_re, A& dst_im)
 template<typename V, Int vn, Int dft_sz, typename A>
 FORCEINLINE void pass(A& src_re, A& src_im, A& dst_re, A& dst_im)
 {
+  static_assert(vn <= 8);
+
   if constexpr (vn / 2 > 0)
     loop_body<0, V, vn, dft_sz, A>(src_re, src_im, dst_re, dst_im);
   if constexpr (vn / 2 > 1)
@@ -672,7 +674,7 @@ void tiny_transform(
   VEC_TYPEDEFS(V);
   
   //Round up just to make it compile
-  constexpr Int vn = (n + V::vec_size - 1) / V::vec_size;
+  constexpr Int n = V::vec_size * vn;
 
   Locals<Vec, vn> a_re;
   Locals<Vec, vn> a_im;
@@ -686,13 +688,14 @@ void tiny_transform(
     a_im[i] = c.im;
   }
 
-  if(n >  1) tiny_transform_pass<V, vn,  1>(a_re, a_im, b_re, b_im);
-  if(n >  2) tiny_transform_pass<V, vn,  2>(b_re, b_im, a_re, a_im);
-  if(n >  4) tiny_transform_pass<V, vn,  4>(a_re, a_im, b_re, b_im);
-  if(n >  8) tiny_transform_pass<V, vn,  8>(b_re, b_im, a_re, a_im);
-  if(n > 16) tiny_transform_pass<V, vn, 16>(a_re, a_im, b_re, b_im);
-  if(n > 32) tiny_transform_pass<V, vn, 32>(b_re, b_im, a_re, a_im);
-  if(n > 64) tiny_transform_pass<V, vn, 64>(a_re, a_im, b_re, b_im);
+  using tiny_transform_detail::pass;
+  if constexpr(n >  1) pass<V, vn,  1>(a_re, a_im, b_re, b_im);
+  if constexpr(n >  2) pass<V, vn,  2>(b_re, b_im, a_re, a_im);
+  if constexpr(n >  4) pass<V, vn,  4>(a_re, a_im, b_re, b_im);
+  if constexpr(n >  8) pass<V, vn,  8>(b_re, b_im, a_re, a_im);
+  if constexpr(n > 16) pass<V, vn, 16>(a_re, a_im, b_re, b_im);
+  if constexpr(n > 32) pass<V, vn, 32>(b_re, b_im, a_re, a_im);
+  if constexpr(n > 64) pass<V, vn, 64>(a_re, a_im, b_re, b_im);
 
   for(Int i = 0; i < vn; i++)
   {
@@ -702,6 +705,12 @@ void tiny_transform(
 
     store<DstCf>(c, dst_re, dst_im, i * stride<V, DstCf>());
   }
+}
+
+template<typename V>
+constexpr Int tiny_fft_max_n()
+{
+  return max(V::vec_size * V::vec_size / 2, Int(8));
 }
 
 template<bool do_create, typename V, typename SrcCf, typename DstCf>
@@ -716,15 +725,26 @@ Int tiny_fft_create_impl(Int n, void* ptr)
   state->working = nullptr;
   state->steps = nullptr;
   state->n = n;
-  state->transform_fun = 
-    n ==  1 ?  &tiny_transform<V, SrcCf, DstCf,  1> :
-    n ==  2 ?  &tiny_transform<V, SrcCf, DstCf,  2> :
-    n ==  4 ?  &tiny_transform<V, SrcCf, DstCf,  4> :
-    n ==  8 ?  &tiny_transform<V, SrcCf, DstCf,  8> :
-    n == 16 ?  &tiny_transform<V, SrcCf, DstCf, 16> :
-    n == 32 ?  &tiny_transform<V, SrcCf, DstCf, 32> :
-    n == 64 ?  &tiny_transform<V, SrcCf, DstCf, 64> :
-    n == 128 ?  &tiny_transform<V, SrcCf, DstCf, 128> : nullptr;
+
+  state->transform_fun = nullptr;
+  Int vn = n / V::vec_size;
+  constexpr Int max_vn = tiny_fft_max_n<V>() / V::vec_size;
+
+  if constexpr(max_vn >= 1)
+    if(vn == 1)
+      state->transform_fun = &tiny_transform<V, SrcCf, DstCf, 1>;
+
+  if constexpr(max_vn >= 2)
+    if(vn == 2)
+      state->transform_fun = &tiny_transform<V, SrcCf, DstCf, 2>;
+
+  if constexpr(max_vn >= 4)
+    if(vn == 4)
+      state->transform_fun = &tiny_transform<V, SrcCf, DstCf, 4>;
+
+  if constexpr(max_vn >= 8)
+    if(vn == 8)
+      state->transform_fun = &tiny_transform<V, SrcCf, DstCf, 8>;
 
   return (Int) ptr;
 }
@@ -909,7 +929,7 @@ Int fft_create_impl(Int n, void* ptr)
   VEC_TYPEDEFS(V);
   if(n <= V::vec_size && V::vec_size != 1)
     return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(n, ptr);
-  else if(n < max(V::vec_size * V::vec_size, Int(16)))
+  else if(n <= tiny_fft_max_n<V>())
     return tiny_fft_create_impl<do_create, V, SrcCf, DstCf>(n, ptr);
   else
   {
