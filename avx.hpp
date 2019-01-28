@@ -73,6 +73,16 @@ struct AvxFloat
     store(r7, dst + 7 * stride);
   }
 
+  static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
+  {
+    return _mm256_fmadd_ps(a, b, c);
+  }
+
+  static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
+  {
+    return _mm256_fmsub_ps(a, b, c);
+  }
+
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
 
 //private:
@@ -173,6 +183,16 @@ struct AvxDouble
     transpose_128(b1, b3, r1, r3);
     store(r1, dst + 1 * stride);
     store(r3, dst + 3 * stride);
+  }
+
+  static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
+  {
+    return _mm256_fmadd_pd(a, b, c);
+  }
+
+  static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
+  {
+    return _mm256_fmsub_pd(a, b, c);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm256_set1_pd(a); }

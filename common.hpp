@@ -210,7 +210,7 @@ FORCEINLINE constexpr Complex<V> operator-(Complex<V> a, Complex<V> b)
 template<typename V>
 FORCEINLINE constexpr Complex<V> operator*(Complex<V> a, Complex<V> b)
 {
-  return { a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re};
+  return { V::msub(a.re, b.re, a.im * b.im), V::madd(a.re, b.im, a.im * b.re) };
 }
 
 template<typename V>
@@ -538,7 +538,7 @@ struct Scalar
     r0 = a0;
     r1 = a1;
   }
-  
+
   static FORCEINLINE void interleave(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = a0;
@@ -553,6 +553,16 @@ struct Scalar
 
   static Vec FORCEINLINE vec(T a){ return a; }
   static Vec reverse(Vec v) { return v; }
+
+  static FORCEINLINE constexpr Vec madd(Vec a, Vec b, Vec c)
+  {
+    return a * b + c;
+  }
+
+  static FORCEINLINE constexpr Vec msub(Vec a, Vec b, Vec c)
+  {
+    return a * b - c;
+  }
 
   template<Uint flags = 0> static Vec load(const T* p) { return *p; }
   static Vec unaligned_load(const T* p) { return *p; }

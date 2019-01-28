@@ -54,6 +54,16 @@ struct SseFloat
     store(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1)), dst + 3 * stride);
   }
 
+  static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
+  {
+    return _mm_fmadd_ps(a, b, c);
+  }
+
+  static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
+  {
+    return _mm_fmsub_ps(a, b, c);
+  }
+
   static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
   
   static Vec reverse(Vec v)
@@ -118,6 +128,16 @@ struct SseDouble
     r1 = _mm_unpackhi_pd(a0, a1);
   }
   
+  static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
+  {
+    return _mm_fmadd_pd(a, b, c);
+  }
+
+  static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
+  {
+    return _mm_fmsub_pd(a, b, c);
+  }
+
   static Vec FORCEINLINE vec(T a){ return _mm_set1_pd(a); }
 
   static Vec reverse(Vec v)
