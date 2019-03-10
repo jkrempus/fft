@@ -30,6 +30,7 @@ std::string format_option(const Options& opt)
     s << " -p " << *opt.precision;
 
   if(opt.is_real) s << " -r";
+  if(opt.is_double) s << " -d";
   if(opt.is_inverse) s << " -i";
   if(opt.is_bench) s << " -b";
  
