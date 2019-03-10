@@ -245,7 +245,7 @@ template<typename V, Int i>
 FORCEINLINE void first_four_passes_helper(Complex<V> (&interm)[16])
 {
   VEC_TYPEDEFS(V);
-  constexpr auto tw0 = C::adj(root_of_unity<T>(i, 16));
+  constexpr auto tw0 = Complex<Scalar<T>>::adj(root_of_unity<T>(i, 16));
   constexpr auto tw1 = tw0 * tw0;
   constexpr auto tw2 = tw1 * tw0;
   two_passes_inner(

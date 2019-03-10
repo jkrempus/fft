@@ -1,7 +1,9 @@
 #ifndef X86_FEATURES_HPP
 #define X86_FEATURES_HPP
 
+#ifdef _MSC_VER
 #include <intrin.h>
+#endif
 
 namespace
 {

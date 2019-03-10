@@ -56,12 +56,12 @@ struct SseFloat
 
   static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
   {
-    return _mm_fmadd_ps(a, b, c);
+    return _mm_add_ps(_mm_mul_ps(a, b), c);
   }
 
   static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
   {
-    return _mm_fmsub_ps(a, b, c);
+    return _mm_sub_ps(_mm_mul_ps(a, b), c);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm_set1_ps(a); }
@@ -130,12 +130,12 @@ struct SseDouble
   
   static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
   {
-    return _mm_fmadd_pd(a, b, c);
+    return _mm_sub_pd(_mm_mul_pd(a, b), c);
   }
 
   static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
   {
-    return _mm_fmsub_pd(a, b, c);
+    return _mm_sub_pd(_mm_mul_pd(a, b), c);
   }
 
   static Vec FORCEINLINE vec(T a){ return _mm_set1_pd(a); }

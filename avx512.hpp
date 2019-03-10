@@ -12,6 +12,16 @@ struct Avx512Float
   static constexpr Int vec_size = 16;
   static constexpr bool prefer_three_passes = true;
 
+  static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)
+  {
+    return _mm512_fmadd_ps(a, b, c);
+  }
+
+  static FORCEINLINE Vec msub(Vec a, Vec b, Vec c)
+  {
+    return _mm512_fmsub_ps(a, b, c);
+  }
+
   template<Int elements_per_vec>
   static FORCEINLINE void interleave_multi(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {

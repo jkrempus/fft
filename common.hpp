@@ -14,7 +14,7 @@ typedef unsigned long Uint;
 #define FORCEINLINE __forceinline
 #define HOT
 #define NOINLINE __declspec(noinline)
-#elif
+#elif defined __GNUC__ || defined __clang__
 #define FORCEINLINE __attribute__((always_inline)) inline
 #define HOT __attribute__((hot))
 #define NOINLINE __attribute__((noinline))
