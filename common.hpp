@@ -551,8 +551,8 @@ struct Scalar
     r1 = a1;
   }
 
-  static Vec FORCEINLINE vec(T a){ return a; }
-  static Vec reverse(Vec v) { return v; }
+  static FORCEINLINE Vec vec(T a){ return a; }
+  static FORCEINLINE Vec reverse(Vec v) { return v; }
 
   static FORCEINLINE constexpr Vec madd(Vec a, Vec b, Vec c)
   {
@@ -564,10 +564,12 @@ struct Scalar
     return a * b - c;
   }
 
-  template<Uint flags = 0> static Vec load(const T* p) { return *p; }
-  static Vec unaligned_load(const T* p) { return *p; }
-  template<Uint flags = 0> static void store(Vec val, T* p) { *p = val; }
-  static void unaligned_store(Vec val, T* p) { *p = val; }
+  template<Uint flags = 0>
+  static FORCEINLINE Vec load(const T* p) { return *p; }
+  static FORCEINLINE Vec unaligned_load(const T* p) { return *p; }
+  template<Uint flags = 0>
+  static FORCEINLINE void store(Vec val, T* p) { *p = val; }
+  static FORCEINLINE void unaligned_store(Vec val, T* p) { *p = val; }
   static void sfence(){ }
 };
 

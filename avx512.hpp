@@ -76,7 +76,7 @@ struct Avx512Float
   }
 
   template<Int stride>
-  static void FORCEINLINE transposed_store(
+  static FORCEINLINE void transposed_store(
     Vec (&src)[16], T* dst)
   {
     Vec a[16];
@@ -111,25 +111,29 @@ struct Avx512Float
     }
   }
 
-  static Vec FORCEINLINE vec(T a){ return _mm512_set1_ps(a); }
+  static FORCEINLINE Vec vec(T a){ return _mm512_set1_ps(a); }
 
-  static Vec reverse(Vec v)
+  static FORCEINLINE Vec reverse(Vec v)
   {
     return _mm512_permutexvar_ps(_mm512_setr_epi32(
       15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0), v);
   }
 
   template<Uint flags = 0>
-  static Vec load(const T* p)
+  static FORCEINLINE Vec load(const T* p)
   {
     return (flags & stream_flag) ?
       _mm512_castsi512_ps(_mm512_stream_load_si512((__m512i*) p)) :
       _mm512_load_ps(p);
   }
 
-  static Vec unaligned_load(const T* p) { return _mm512_loadu_ps(p); }
+  static FORCEINLINE Vec unaligned_load(const T* p)
+  {
+    return _mm512_loadu_ps(p);
+  }
+
   template<Uint flags = 0>
-  static void store(Vec val, T* p)
+  static FORCEINLINE void store(Vec val, T* p)
   {
     if((flags & stream_flag))
       _mm512_stream_ps(p, val);
@@ -137,7 +141,10 @@ struct Avx512Float
       _mm512_store_ps(p, val);
   }
 
-  static void unaligned_store(Vec val, T* p) { _mm512_storeu_ps(p, val); }
+  static FORCEINLINE void unaligned_store(Vec val, T* p)
+  {
+    _mm512_storeu_ps(p, val);
+  }
 
   static void sfence(){ _mm_sfence(); }
 

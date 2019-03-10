@@ -46,7 +46,7 @@ struct AvxFloat
   }
 
   template<Int stride>
-  static void FORCEINLINE transposed_store(
+  static FORCEINLINE void transposed_store(
     Vec a0, Vec a1, Vec a2, Vec a3,
     Vec a4, Vec a5, Vec a6, Vec a7,
     T* dst)
@@ -83,16 +83,16 @@ struct AvxFloat
     return _mm256_fmsub_ps(a, b, c);
   }
 
-  static Vec FORCEINLINE vec(T a){ return _mm256_set1_ps(a); }
+  static FORCEINLINE Vec vec(T a){ return _mm256_set1_ps(a); }
 
 //private:
-  static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  static FORCEINLINE void transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
     r1 = _mm256_permute2f128_ps(a0, a1, _MM_SHUFFLE(0, 3, 0, 1));
   }
 
-  static void transpose4x4_two(Vec& a0, Vec& a1, Vec& a2, Vec& a3)
+  static FORCEINLINE void transpose4x4_two(Vec& a0, Vec& a1, Vec& a2, Vec& a3)
   {
     Vec b0 = _mm256_unpacklo_ps(a0, a2);
     Vec b1 = _mm256_unpacklo_ps(a1, a3);
@@ -104,23 +104,27 @@ struct AvxFloat
     a3 = _mm256_unpackhi_ps(b2, b3);
   }
 
-  static Vec reverse(Vec v)
+  static FORCEINLINE Vec reverse(Vec v)
   {
     v = _mm256_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
     return _mm256_permute2f128_ps(v, v, _MM_SHUFFLE(0, 0, 0, 1));
   }
 
   template<Uint flags = 0>
-  static Vec load(const T* p)
+  static FORCEINLINE Vec load(const T* p)
   {
     return (flags & stream_flag) ?
       _mm256_castsi256_ps(_mm256_stream_load_si256((__m256i*) p)) :
       _mm256_load_ps(p);
   }
 
-  static Vec unaligned_load(const T* p) { return _mm256_loadu_ps(p); }
+  static FORCEINLINE Vec unaligned_load(const T* p)
+  {
+    return _mm256_loadu_ps(p);
+  }
+
   template<Uint flags = 0>
-  static void store(Vec val, T* p)
+  static FORCEINLINE void store(Vec val, T* p)
   {
     if((flags & stream_flag))
       _mm256_stream_ps(p, val);
@@ -128,7 +132,10 @@ struct AvxFloat
       _mm256_store_ps(p, val);
   }
 
-  static void unaligned_store(Vec val, T* p) { _mm256_storeu_ps(p, val); }
+  static FORCEINLINE void unaligned_store(Vec val, T* p)
+  {
+    _mm256_storeu_ps(p, val);
+  }
 
   static void sfence(){ _mm_sfence(); }
 };
@@ -165,7 +172,7 @@ struct AvxDouble
   }
 
   template<Int stride>
-  static void FORCEINLINE transposed_store(
+  static FORCEINLINE void transposed_store(
     Vec a0, Vec a1, Vec a2, Vec a3, T* dst)
   {
     Vec b0, b1, b2, b3;
@@ -195,32 +202,36 @@ struct AvxDouble
     return _mm256_fmsub_pd(a, b, c);
   }
 
-  static Vec FORCEINLINE vec(T a){ return _mm256_set1_pd(a); }
+  static FORCEINLINE Vec vec(T a){ return _mm256_set1_pd(a); }
 
 //private:
-  static void FORCEINLINE transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
+  static FORCEINLINE void transpose_128(Vec a0, Vec a1, Vec& r0, Vec& r1)
   {
     r0 = _mm256_permute2f128_pd(a0, a1, _MM_SHUFFLE(0, 2, 0, 0)),
     r1 = _mm256_permute2f128_pd(a0, a1, _MM_SHUFFLE(0, 3, 0, 1));
   }
 
-  static Vec reverse(Vec v)
+  static FORCEINLINE Vec reverse(Vec v)
   {
     v = _mm256_shuffle_pd(v, v, 0x5);
     return _mm256_permute2f128_pd(v, v, _MM_SHUFFLE(0, 0, 0, 1));
   }
 
   template<Uint flags = 0>
-  static Vec load(const T* p)
+  static FORCEINLINE Vec load(const T* p)
   {
     return (flags & stream_flag) ?
       _mm256_castsi256_pd(_mm256_stream_load_si256((__m256i*) p)) :
       _mm256_load_pd(p);
   }
 
-  static Vec unaligned_load(const T* p) { return _mm256_loadu_pd(p); }
+  static FORCEINLINE Vec unaligned_load(const T* p)
+  {
+    return _mm256_loadu_pd(p);
+  }
+
   template<Uint flags = 0>
-  static void store(Vec val, T* p)
+  static FORCEINLINE void store(Vec val, T* p)
   {
     if((flags & stream_flag))
       _mm256_stream_pd(p, val);
@@ -228,7 +239,10 @@ struct AvxDouble
       _mm256_store_pd(p, val);
   }
 
-  static void unaligned_store(Vec val, T* p) { _mm256_storeu_pd(p, val); }
+  static FORCEINLINE void unaligned_store(Vec val, T* p)
+  {
+    _mm256_storeu_pd(p, val);
+  }
 
   static void sfence(){ _mm_sfence(); }
 };
