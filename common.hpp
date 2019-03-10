@@ -126,14 +126,14 @@ struct BitReversed
 };
 
 template<typename V>
-FORCEINLINE void copy(const ET<V>* src, Int n, ET<V>* dst)
+FORCEINLINE void unaligned_copy(const ET<V>* src, Int n, ET<V>* dst)
 {
   if(n > 0 && n < V::vec_size) return;
 
   ASSERT(i & (V::vec_size - 1) == 0);
 
   for(Int i = 0; i < n; i += V::vec_size) 
-    V::store(V::load(src + i), dst + i);
+    V::unaligned_store(V::unaligned_load(src + i), dst + i);
 }
 
 template<typename T = char>
