@@ -85,6 +85,13 @@ struct SseFloat
   }
 
   static FORCEINLINE Vec unaligned_load(const T* p) { return _mm_loadu_ps(p); }
+
+  template<Uint flags = 0>
+  static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
+  {
+    deinterleave(load<flags>(src), load<flags>(src + vec_size), r0, r1);
+  }
+
   template<Uint flags = 0>
   static FORCEINLINE void store(Vec val, T* p)
   {
@@ -163,6 +170,13 @@ struct SseDouble
   }
 
   static Vec unaligned_load(const T* p) { return _mm_loadu_pd(p); }
+
+  template<Uint flags = 0>
+  static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
+  {
+    deinterleave(load<flags>(src), load<flags>(src + vec_size), r0, r1);
+  }
+
   template<Uint flags = 0>
   static void store(Vec val, T* p)
   {

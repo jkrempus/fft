@@ -290,11 +290,7 @@ namespace complex_format
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>*)
     {
       Complex<V> r;
-      V::deinterleave(
-        V::template load<flags>(re),
-        V::template load<flags>(re + V::vec_size),
-        r.re, r.im);
-
+      V::load_deinterleaved(re, r.re, r.im);
       return r;
     }
 
@@ -567,6 +563,13 @@ struct Scalar
   template<Uint flags = 0>
   static FORCEINLINE Vec load(const T* p) { return *p; }
   static FORCEINLINE Vec unaligned_load(const T* p) { return *p; }
+  template<Uint flags = 0>
+  static FORCEINLINE void load_deinterleaved(const T* src, Vec& dst0, Vec& dst1)
+  {
+    dst0 = src[0];
+    dst1 = src[1];
+  }
+
   template<Uint flags = 0>
   static FORCEINLINE void store(Vec val, T* p) { *p = val; }
   static FORCEINLINE void unaligned_store(Vec val, T* p) { *p = val; }

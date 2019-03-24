@@ -133,6 +133,12 @@ struct Avx512Float
   }
 
   template<Uint flags = 0>
+  static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
+  {
+    deinterleave(load<flags>(src), load<flags>(src + vec_size), r0, r1);
+  }
+
+  template<Uint flags = 0>
   static FORCEINLINE void store(Vec val, T* p)
   {
     if((flags & stream_flag))

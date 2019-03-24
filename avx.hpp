@@ -111,6 +111,14 @@ struct AvxFloat
   }
 
   template<Uint flags = 0>
+  static FORCEINLINE __m128 load_128(const T* p)
+  {
+    return (flags & stream_flag) ?
+      _mm_castsi128_ps(_mm_stream_load_si128((__m128i*) p)) :
+      _mm_load_ps(p);
+  }
+
+  template<Uint flags = 0>
   static FORCEINLINE Vec load(const T* p)
   {
     return (flags & stream_flag) ?
@@ -121,6 +129,21 @@ struct AvxFloat
   static FORCEINLINE Vec unaligned_load(const T* p)
   {
     return _mm256_loadu_ps(p);
+  }
+
+  template<Uint flags = 0>
+  static FORCEINLINE void load_deinterleaved(const T* src, Vec& dst0, Vec& dst1)
+  {
+    Vec a0 = _mm256_insertf128_ps(
+      _mm256_castps128_ps256(load_128<flags>(src)),
+      load_128<flags>(src + 8), 1);
+
+    Vec a1 = _mm256_insertf128_ps(
+      _mm256_castps128_ps256(load_128<flags>(src + 4)),
+      load_128<flags>(src + 12), 1);
+
+    dst0 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(2, 0, 2, 0));
+    dst1 = _mm256_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 1, 3, 1));
   }
 
   template<Uint flags = 0>
@@ -228,6 +251,12 @@ struct AvxDouble
   static FORCEINLINE Vec unaligned_load(const T* p)
   {
     return _mm256_loadu_pd(p);
+  }
+
+  template<Uint flags = 0>
+  static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
+  {
+    deinterleave(load<flags>(src), load<flags>(src + vec_size), r0, r1);
   }
 
   template<Uint flags = 0>
