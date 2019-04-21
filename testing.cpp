@@ -22,7 +22,7 @@
 #include "fftw3.h"
 #endif
 
-//#define INTERLEAVED 1
+#define INTERLEAVED 1
 
 static constexpr Int maxdim = 64;
 static constexpr Int chunk_size = 0;

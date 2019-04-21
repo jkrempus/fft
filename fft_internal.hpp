@@ -9,7 +9,16 @@ namespace
 constexpr Int maxdim = 64;
 
 template<typename T>
-struct Fft
+struct FftBase
+{
+  typedef void transform_fn_type(
+    FftBase<T>* state, const T* src_re, const T* src_im, T* dst_re, T* dst_im);
+
+  transform_fn_type* transform_fn;
+};
+
+template<typename T>
+struct Fft : public FftBase
 {
   Int ndim;
   Int num_elements;
@@ -19,6 +28,53 @@ struct Fft
   onedim::Fft<T>* last_transform;
   multi::Fft<T>* transforms[maxdim];
 };
+
+template<typename V, typename SrcCf, typename DstCf>
+void fft_impl(
+  Int idim, Fft<T>* s,
+  const ET<V>* src_re, const ET<V>* src_im,
+  ET<V>* working,
+  ET<V>* dst_re, ET<V>* dst_im,
+  bool interleaved_src_rows)
+{
+  ASSERT(idim < s->ndim);
+  if(idim == s->ndim - 1)
+    onedim::fft(s->last_transform, src_re, src_im, dst_re, dst_im);
+  else
+  {
+    multi::fft<V, SrcCf, cf::VecCf, true>(
+      s->transforms[idim], src_re, src_im, working, nullptr,
+      interleaved_src_rows, false);
+
+    Int m = s->transforms[idim]->m;
+    Int n = s->transforms[idim]->n;
+    for(BitReversed br(n); Int(br.i) < n; br.advance())
+    {
+      auto next_src_re = working + br.i * m * cf::Vec::idx_ratio;
+      Int dst_off = br.br * m * DstCf::idx_ratio;
+      fft_impl<V, cf::Vec, DstCf>(
+        idim + 1, s,
+        next_src_re, (ET<V>*) nullptr,
+        next_src_re,
+        dst_re + dst_off, dst_im + dst_off,
+        interleaved_src_rows);
+    }
+  }
+}
+
+template<typename V, typename SrcCf, typename DstCf>
+void fft_fun(
+  Fft<ET<V>>* state,
+  const ET<V>* src_re, const ET<V>* src_im,
+  ET<V>* dst_re, ET<V>* dst_im)
+{
+  fft_impl<V, SrcCf, DstCf>(
+    0, state,
+    src_re, src_im,
+    state->working,
+    dst_re, dst_im,
+    false);
+}
 
 template<bool do_create, typename V, typename SrcCf, typename DstCf>
 Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
@@ -33,13 +89,12 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
     return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(ndim, dim, mem);
 
   auto s = (Fft<typename V::T>*) mem;
+  s->transform_fn = &fft_fun<V, SrcCf, DstCf>;
   mem = aligned_increment(mem, sizeof(Fft<T>));
  
   if(do_create)
   {
     s->ndim = ndim;
-    s->working_idx_ratio = cf::Vec::idx_ratio;
-    s->dst_idx_ratio = DstCf::idx_ratio;
     s->working = (T*) mem;
     s->num_elements = num_elements;
   }
@@ -104,51 +159,6 @@ Fft<typename V::T>* fft_create(Int ndim_in, const Int* dim_in, void* mem)
 {
   fft_create_impl<true, V, SrcCf, DstCf>(ndim_in, dim_in, mem);
   return (Fft<typename V::T>*) mem;
-}
-
-template<typename T>
-void fft_impl(
-  Int idim, Fft<T>* s,
-  const T* src_re, const T* src_im,
-  T* working,
-  T* dst_re, T* dst_im,
-  bool interleaved_src_rows)
-{
-  ASSERT(idim < s->ndim);
-  if(idim == s->ndim - 1)
-    onedim::fft(s->last_transform, src_re, src_im, dst_re, dst_im);
-  else
-  {
-    s->transforms[idim]->fun_ptr(
-      s->transforms[idim], src_re, src_im, working, nullptr,
-      interleaved_src_rows, false);
-
-    Int m = s->transforms[idim]->m;
-    Int n = s->transforms[idim]->n;
-    for(BitReversed br(n); Int(br.i) < n; br.advance())
-    {
-      auto next_src_re = working + br.i * m * s->working_idx_ratio;;
-      Int dst_off = br.br * m * s->dst_idx_ratio;
-      fft_impl(
-        idim + 1, s,
-        next_src_re, (T*) nullptr,
-        next_src_re,
-        dst_re + dst_off, dst_im + dst_off,
-        interleaved_src_rows);
-    }
-  }
-}
-
-template<typename T>
-void fft(
-  Fft<T>* state, const T* src_re, const T* src_im, T* dst_re, T* dst_im)
-{
-  fft_impl<T>(
-    0, state,
-    src_re, src_im,
-    state->working,
-    dst_re, dst_im,
-    false);
 }
 
 template<typename T>
@@ -464,6 +474,20 @@ void irfft(Irfft<T>* s, const T* src_re, const T* src_im, T* dst)
     s->working0, s->working0 + s->outer_n / 2 * s->inner_n,
     dst, nullptr,
     false, true);
+}
+
+template<typename T>
+void transform(
+  Fft<ET<V>>* state,
+  const ET<V>* src_re, const ET<V>* src_im,
+  ET<V>* dst_re, ET<V>* dst_im)
+{
+  fft_impl<V, SrcCf, DstCf>(
+    0, state,
+    src_re, src_im,
+    state->working,
+    dst_re, dst_im,
+    false);
 }
 
 }

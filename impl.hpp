@@ -1,7 +1,7 @@
 #include "fft_internal.hpp"
 #include <cstdio>
 
-using Cf = complex_format::Split;
+using Cf = complex_format::Scal;
 
 namespace afft
 {
