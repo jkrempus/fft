@@ -32,7 +32,7 @@ namespace afft
 #define DECLARE_IMPL(IMPL) \
     template<> bool impl_supported<IMPL>(); \
     DECLARE_IMPL_FOR_TYPE(IMPL, float) \
-    DECLARE_IMPL_FOR_TYPE(IMPL, float)
+    DECLARE_IMPL_FOR_TYPE(IMPL, double)
 
     DECLARE_IMPL(afft_scalar)
     DECLARE_IMPL(afft_sse2)
