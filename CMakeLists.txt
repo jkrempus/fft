@@ -12,6 +12,16 @@ else()
   set(AVX2_FLAGS "-mavx2 -mfma")
 endif()
 
+option(ENABLE_SPLIT "Enable the split format" ON)
+if(ENABLE_SPLIT)
+  set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_SPLIT_ENABLED=1)
+endif()
+
+option(ENABLE_INTERLEAVED "Enable the interleaved format" ON)
+if(ENABLE_INTERLEAVED)
+  set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_INTERLEAVED_ENABLED=1)
+endif()
+
 option(ENABLE_SCALAR "Enable the scalar implementation" ON)
 if(ENABLE_SCALAR)
   set(IMPL_FILES ${IMPL_FILES} scalar_impl.cpp)

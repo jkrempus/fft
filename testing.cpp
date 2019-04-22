@@ -539,28 +539,25 @@ struct AlignedImOff
   }
 };
 
-#ifdef INTERLEAVED
-template<typename T, bool is_real, bool is_inverse>
-using Base = InterleavedWrapperBase<T, HalvedDimFirst, is_real, is_inverse>;
-#else
-template<typename T, bool is_real, bool is_inverse>
-using Base = SplitWrapperBase<
-  T, AlignedImOff, HalvedDimFirst, is_real, is_inverse>;
-#endif
+template<typename T, bool is_real, bool is_inverse, int format>
+using Base = std::conditional_t<
+  format == afft_split,
+  SplitWrapperBase<T, AlignedImOff, HalvedDimFirst, is_real, is_inverse>,
+  InterleavedWrapperBase<T, HalvedDimFirst, is_real, is_inverse>>;
 
-template<typename T, bool is_real, bool is_inverse>
+template<typename T, bool is_real, bool is_inverse, int format>
 struct TestWrapper { };
 
-template<typename T>
-struct TestWrapper<T, false, false>
-: public Base<T, false, false>
+template<typename T, int format>
+struct TestWrapper<T, false, false, format>
+: public Base<T, false, false, format>
 {
   static const bool is_real = false;
   static const bool is_inverse = false;
   typedef T value_type;
-  afft::complex_transform<T> t;
+  afft::complex_transform<T, format> t;
   TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, false, false>(size),
+    Base<T, false, false, format>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
@@ -570,16 +567,16 @@ struct TestWrapper<T, false, false>
   }
 };
 
-template<typename T>
-struct TestWrapper<T, false, true>
-: public Base<T, false, true>
+template<typename T, int format>
+struct TestWrapper<T, false, true, format>
+: public Base<T, false, true, format>
 {
   static const bool is_real = false;
   static const bool is_inverse = true;
   typedef T value_type;
-  afft::inverse_complex_transform<T> t;
+  afft::inverse_complex_transform<T, format> t;
   TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, false, true>(size),
+    Base<T, false, true, format>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
@@ -589,17 +586,17 @@ struct TestWrapper<T, false, true>
   }
 };
 
-template<typename T>
-struct TestWrapper<T, true, false>
-: public Base<T, true, false>
+template<typename T, int format>
+struct TestWrapper<T, true, false, format>
+: public Base<T, true, false, format>
 {
   static const bool is_real = true;
   static const bool is_inverse = false;
   typedef T value_type;
-  afft::real_transform<T> t;
+  afft::real_transform<T, format> t;
 
   TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, true, false>(size),
+    Base<T, true, false, format>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
@@ -608,17 +605,17 @@ struct TestWrapper<T, true, false>
   }
 };
 
-template<typename T>
-struct TestWrapper<T, true, true>
-: public Base<T, true, true>
+template<typename T, int format>
+struct TestWrapper<T, true, true, format>
+: public Base<T, true, true, format>
 {
   static const bool is_real = true;
   static const bool is_inverse = true;
   typedef T value_type;
-  afft::inverse_real_transform<T> t;
+  afft::inverse_real_transform<T, format> t;
 
   TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, true, true>(size),
+    Base<T, true, true, format>(size),
     t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
 
   void transform()
@@ -1212,7 +1209,11 @@ template<typename ET, bool is_real, bool is_inverse>
 TestResult test_or_bench3(const Options& opt, const std::vector<Int>& lsz)
 {
   if(opt.implementation == "fft")
-    return test_or_bench4<TestWrapper<ET, is_real, is_inverse>>(opt, lsz);
+    return test_or_bench4<TestWrapper<ET, is_real, is_inverse, afft_split>>(
+      opt, lsz);
+  if(opt.implementation == "fft-interleaved")
+    return test_or_bench4<TestWrapper<ET, is_real, is_inverse, afft_interleaved>>(
+      opt, lsz);
 #ifdef HAVE_FFTW
   else if(opt.implementation == "fftw")
     return

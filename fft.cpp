@@ -14,20 +14,20 @@ namespace afft
     bool impl_supported();
 
     template<Int impl, typename Op, typename T>
-    Int memsize_impl(Int ndim, const Int* dim);
+    Int memsize_impl(Int ndim, const Int* dim, int format);
 
     template<Int impl, typename Op, typename T>
-    void* create_impl(Int ndim, const Int* dim, void* mem);
+    void* create_impl(Int ndim, const Int* dim, int format, void* mem);
 
 #define DECLARE_IMPL_FOR_TYPE(IMPL, T) \
-    template<> Int memsize_impl<IMPL, OpC, T>(Int, const Int*); \
-    template<> Int memsize_impl<IMPL, OpCI, T>(Int, const Int*); \
-    template<> Int memsize_impl<IMPL, OpR, T>(Int, const Int*); \
-    template<> Int memsize_impl<IMPL, OpRI, T>(Int, const Int*); \
-    template<> void* create_impl<IMPL, OpC, T>(Int, const Int*, void*); \
-    template<> void* create_impl<IMPL, OpCI, T>(Int, const Int*, void*); \
-    template<> void* create_impl<IMPL, OpR, T>(Int, const Int*, void*); \
-    template<> void* create_impl<IMPL, OpRI, T>(Int, const Int*, void*);
+    template<> Int memsize_impl<IMPL, OpC, T>(Int, const Int*, int); \
+    template<> Int memsize_impl<IMPL, OpCI, T>(Int, const Int*, int); \
+    template<> Int memsize_impl<IMPL, OpR, T>(Int, const Int*, int); \
+    template<> Int memsize_impl<IMPL, OpRI, T>(Int, const Int*, int); \
+    template<> void* create_impl<IMPL, OpC, T>(Int, const Int*, int, void*); \
+    template<> void* create_impl<IMPL, OpCI, T>(Int, const Int*, int, void*); \
+    template<> void* create_impl<IMPL, OpR, T>(Int, const Int*, int, void*); \
+    template<> void* create_impl<IMPL, OpRI, T>(Int, const Int*, int, void*);
 
 #define DECLARE_IMPL(IMPL) \
     template<> bool impl_supported<IMPL>(); \
@@ -49,15 +49,16 @@ namespace
   struct SupportedTag{};
 
   template<Int impl, typename Op, typename T>
-  Int call_impl(const MemsizeTag&, Int ndim, const Int* dim)
+  Int call_impl(const MemsizeTag&, Int ndim, const Int* dim, int format)
   {
-    return afft::detail::memsize_impl<impl, Op, T>(ndim, dim);
+    return afft::detail::memsize_impl<impl, Op, T>(ndim, dim, format);
   }
 
   template<Int impl, typename Op, typename T>
-  void* call_impl(const CreateTag&, Int ndim, const Int* dim, void* ptr)
+  void* call_impl(
+    const CreateTag&, Int ndim, const Int* dim, int format, void* ptr)
   {
-    return afft::detail::create_impl<impl, Op, T>(ndim, dim, ptr);
+    return afft::detail::create_impl<impl, Op, T>(ndim, dim, format, ptr);
   }
 
   template<Int impl, typename Op, typename T>
@@ -135,18 +136,18 @@ namespace
 extern "C"
 {
 
-size_t afft_32_c_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_32_c_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpC, float>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_32_c_type* afft_32_c_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_32_c_type*)
     call_selected_impl<CreateTag, afft::detail::OpC, float>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_32_c_transform(afft_32_c_type* state,
@@ -155,18 +156,18 @@ void afft_32_c_transform(afft_32_c_type* state,
   fft((Fft<float>*) state, src_re, src_im, dst_re, dst_im);
 }
 
-size_t afft_32_ci_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_32_ci_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpCI, float>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_32_ci_type* afft_32_ci_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_32_ci_type*)
     call_selected_impl<CreateTag, afft::detail::OpCI, float>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_32_ci_transform(afft_32_ci_type* state,
@@ -175,18 +176,18 @@ void afft_32_ci_transform(afft_32_ci_type* state,
   ifft((Ifft<float>*) state, src_re, src_im, dst_re, dst_im);
 }
 
-size_t afft_32_r_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_32_r_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpR, float>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_32_r_type* afft_32_r_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_32_r_type*)
     call_selected_impl<CreateTag, afft::detail::OpR, float>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_32_r_transform(afft_32_r_type* state,
@@ -195,18 +196,18 @@ void afft_32_r_transform(afft_32_r_type* state,
   rfft((Rfft<float>*) state, src, dst_re, dst_im);
 }
 
-size_t afft_32_ri_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_32_ri_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpRI, float>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_32_ri_type* afft_32_ri_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_32_ri_type*)
     call_selected_impl<CreateTag, afft::detail::OpRI, float>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_32_ri_transform(afft_32_ri_type* state,
@@ -217,18 +218,18 @@ void afft_32_ri_transform(afft_32_ri_type* state,
 
 size_t afft_32_align_size(size_t sz) { return align_size<float>(sz); }
 
-size_t afft_64_c_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_64_c_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpC, double>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_64_c_type* afft_64_c_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_64_c_type*)
     call_selected_impl<CreateTag, afft::detail::OpC, double>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_64_c_transform(afft_64_c_type* state,
@@ -237,18 +238,18 @@ void afft_64_c_transform(afft_64_c_type* state,
   fft((Fft<double>*) state, src_re, src_im, dst_re, dst_im);
 }
 
-size_t afft_64_ci_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_64_ci_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpCI, double>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_64_ci_type* afft_64_ci_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_64_ci_type*)
     call_selected_impl<CreateTag, afft::detail::OpCI, double>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_64_ci_transform(afft_64_ci_type* state,
@@ -257,18 +258,18 @@ void afft_64_ci_transform(afft_64_ci_type* state,
   ifft((Ifft<double>*) state, src_re, src_im, dst_re, dst_im);
 }
 
-size_t afft_64_r_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_64_r_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpR, double>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_64_r_type* afft_64_r_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_64_r_type*)
     call_selected_impl<CreateTag, afft::detail::OpR, double>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_64_r_transform(afft_64_r_type* state,
@@ -277,18 +278,18 @@ void afft_64_r_transform(afft_64_r_type* state,
   rfft((Rfft<double>*) state, src, dst_re, dst_im);
 }
 
-size_t afft_64_ri_memsize(size_t ndim, const size_t* dim, int impl)
+size_t afft_64_ri_memsize(size_t ndim, const size_t* dim, int format, int impl)
 {
   return Uint(call_selected_impl<MemsizeTag, afft::detail::OpRI, double>(
-    impl, Int(ndim), (const Int*) dim));
+    impl, Int(ndim), (const Int*) dim, format));
 }
 
 afft_64_ri_type* afft_64_ri_create(
-  size_t ndim, const size_t* dim, void* mem, int impl)
+  size_t ndim, const size_t* dim, int format, void* mem, int impl)
 {
   return (afft_64_ri_type*)
     call_selected_impl<CreateTag, afft::detail::OpRI, double>(
-      impl, Int(ndim), (const Int*) dim, mem);
+      impl, Int(ndim), (const Int*) dim, format, mem);
 }
 
 void afft_64_ri_transform(afft_64_ri_type* state,

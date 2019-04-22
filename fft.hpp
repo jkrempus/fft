@@ -5,7 +5,7 @@ namespace afft
 
 namespace detail
 {
-template<typename T, typename AfftType>
+template<typename T, typename AfftType, int format>
 struct members
 {
   char* allocated = NULL;
@@ -16,21 +16,21 @@ struct members
   members() = default;
 
   members(
-    size_t (*memsize)(size_t ndim, const size_t* dim, int impl),
-    AfftType* (*create)(size_t ndim, const size_t* dim, void* mem, int impl),
+    size_t (*memsize)(size_t ndim, const size_t* dim, int fmt, int impl),
+    AfftType* (*create)(size_t ndim, const size_t* dim, int fmt, void* mem, int impl),
     size_t ndim, const size_t* dim, void* mem, int impl)
   {
     if(mem == 0)
     {
       size_t align_mask = afft_alignment - 1;
-      size_t size = memsize(ndim, dim, impl);
+      size_t size = memsize(ndim, dim, format, impl);
       if(size == 0) return;
 
       allocated = new char[size + align_mask];
       mem = (void*)((size_t(allocated) + align_mask) & ~align_mask);
     }
 
-    state = create(ndim, dim, mem, impl);
+    state = create(ndim, dim, format, mem, impl);
   }
 
   members(members&& other)
@@ -45,11 +45,11 @@ struct members
 };
 }
 
-template<typename T>
+template<typename T, int format = afft_split>
 struct complex_transform { };
 
-template<>
-class complex_transform<float>
+template<int format>
+class complex_transform<float, format>
 {
 public:
   complex_transform() = default;
@@ -68,11 +68,11 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<float, afft_32_c_type> m;
+  detail::members<float, afft_32_c_type, format> m;
 };
 
-template<>
-class complex_transform<double>
+template<int format>
+class complex_transform<double, format>
 {
 public:
   complex_transform() = default;
@@ -91,14 +91,14 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<double, afft_64_c_type> m;
+  detail::members<double, afft_64_c_type, format> m;
 };
 
-template<typename T>
+template<typename T, int format = afft_split>
 struct inverse_complex_transform { };
 
-template<>
-class inverse_complex_transform<float>
+template<int format>
+class inverse_complex_transform<float, format>
 {
 public:
   inverse_complex_transform() = default;
@@ -117,11 +117,11 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<float, afft_32_ci_type> m;
+  detail::members<float, afft_32_ci_type, format> m;
 };
 
-template<>
-class inverse_complex_transform<double>
+template<int format>
+class inverse_complex_transform<double, format>
 {
 public:
   inverse_complex_transform() = default;
@@ -140,14 +140,14 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<double, afft_64_ci_type> m;
+  detail::members<double, afft_64_ci_type, format> m;
 };
 
-template<typename T>
+template<typename T, int format = afft_split>
 struct real_transform { };
 
-template<>
-class real_transform<float>
+template<int format>
+class real_transform<float, format>
 {
 public:
   real_transform() = default;
@@ -164,11 +164,11 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<float, afft_32_r_type> m;
+  detail::members<float, afft_32_r_type, format> m;
 };
 
-template<>
-class real_transform<double>
+template<int format>
+class real_transform<double, format>
 {
 public:
   real_transform() = default;
@@ -185,14 +185,14 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<double, afft_64_r_type> m;
+  detail::members<double, afft_64_r_type, format> m;
 };
 
-template<typename T>
+template<typename T, int format = afft_split>
 struct inverse_real_transform { };
 
-template<>
-class inverse_real_transform<float>
+template<int format>
+class inverse_real_transform<float, format>
 {
 public:
   inverse_real_transform() = default;
@@ -209,11 +209,11 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<float, afft_32_ri_type> m;
+  detail::members<float, afft_32_ri_type, format> m;
 };
 
-template<>
-class inverse_real_transform<double>
+template<int format>
+class inverse_real_transform<double, format>
 {
 public:
   inverse_real_transform() = default;
@@ -230,7 +230,7 @@ public:
   operator bool() const { return bool(m.state); }
 
 private:
-  detail::members<double, afft_64_ri_type> m;
+  detail::members<double, afft_64_ri_type, format> m;
 };
 
 }
