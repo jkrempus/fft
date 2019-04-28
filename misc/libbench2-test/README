@@ -1,0 +1,6 @@
+doit.cpp is a benchmark program that benchmarks afft using libbench2, which is
+a benchmarking utility used by FFTW.
+
+To build it, you first need to build both FFTW and afft. Then you run build.sh,
+passing three arguments to it; the path to the FFTW source directory, the path to
+FFTW build directory, and the path to built afft library that you want to benchmark.
