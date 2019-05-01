@@ -408,7 +408,7 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
   if(vn < m * m)
   {
     for(BitReversed br(vn); Int(br.i) < vn; br.advance())
-      store<DstCf, stream_flag>(
+      stream_store<DstCf>(
         C::load(src + br.i * stride<V, cf::Vec>()),
         dst_re, dst_im, 
         br.br * stride<V, DstCf>());
@@ -431,7 +431,7 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
         for(Int i1 = 0; i1 < m; i1++)
         {
           auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
-          store<DstCf, stream_flag>(
+          stream_store<DstCf>(
             C::load(this_s),
             d_re, d_im,
             i1 * stride<V, DstCf>());
@@ -1084,14 +1084,14 @@ void real_pass(
 
   if(inverse)
   {
-    store<DstCf, 0, S>(
+    store<DstCf, S>(
       {src_start.re + src_end.re, src_start.re - src_end.re},
       dst_re, dst_im);
   }
   else
   {
-    store<DstCf, 0, S>({src_start.re + src_start.im, 0}, dst_re, dst_im);
-    store<DstCf, 0, S>(
+    store<DstCf, S>({src_start.re + src_start.im, 0}, dst_re, dst_im);
+    store<DstCf, S>(
       {src_start.re - src_start.im, 0}, dst_re, dst_im, n / 2 * dst_ratio);
   }
 }

@@ -71,36 +71,15 @@ struct SseFloat
     return _mm_shuffle_ps(v, v, _MM_SHUFFLE(0, 1, 2, 3));
   }
 
-  template<Uint flags = 0>
-  static FORCEINLINE Vec load(const T* p)
-  {
-#if 0
-    // Ignore the stream flag because _mm_stream_load_si128
-    // requires sse4.1
-    return (flags & stream_flag) ? 
-      _mm_castsi128_ps(_mm_stream_load_si128((__m128i*) p)) :
-      _mm_load_ps(p);
-#endif
-    return _mm_load_ps(p);
-  }
-
+  static FORCEINLINE Vec load(const T* p) { return _mm_load_ps(p); }
   static FORCEINLINE Vec unaligned_load(const T* p) { return _mm_loadu_ps(p); }
-
-  template<Uint flags = 0>
   static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
   {
-    deinterleave(load<flags>(src), load<flags>(src + vec_size), r0, r1);
+    deinterleave(load(src), load(src + vec_size), r0, r1);
   }
 
-  template<Uint flags = 0>
-  static FORCEINLINE void store(Vec val, T* p)
-  {
-    if((flags & stream_flag))
-      _mm_stream_ps(p, val);
-    else
-      _mm_store_ps(p, val);
-  }
-
+  static FORCEINLINE void store(Vec val, T* p) { _mm_store_ps(p, val); }
+  static FORCEINLINE void stream_store(Vec val, T* p) { _mm_stream_ps(p, val); }
   static FORCEINLINE void unaligned_store(Vec val, T* p)
   {
     _mm_storeu_ps(p, val);
@@ -155,37 +134,15 @@ struct SseDouble
     return _mm_shuffle_pd(v, v, 0x1);
   }
 
-  template<Uint flags = 0>
-  static Vec load(const T* p)
-  {
-#if 0
-    // Ignore the stream flag because _mm_stream_load_si128
-    // requires sse4.1
-    return (flags & stream_flag) ? 
-      _mm_castsi128_pd(_mm_stream_load_si128((__m128i*) p)) :
-      _mm_load_pd(p);
-#endif
-
-    return _mm_load_pd(p);
-  }
-
+  static Vec load(const T* p) { return _mm_load_pd(p); }
   static Vec unaligned_load(const T* p) { return _mm_loadu_pd(p); }
-
-  template<Uint flags = 0>
   static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
   {
-    deinterleave(load<flags>(src), load<flags>(src + vec_size), r0, r1);
+    deinterleave(load(src), load(src + vec_size), r0, r1);
   }
 
-  template<Uint flags = 0>
-  static void store(Vec val, T* p)
-  {
-    if((flags & stream_flag))
-      _mm_stream_pd(p, val);
-    else
-      _mm_store_pd(p, val);
-  }
-
+  static void store(Vec val, T* p) { _mm_store_pd(p, val); }
+  static void stream_store(Vec val, T* p) { _mm_stream_pd(p, val); }
   static void unaligned_store(Vec val, T* p) { _mm_storeu_pd(p, val); }
 
   static void sfence(){ _mm_sfence(); }
