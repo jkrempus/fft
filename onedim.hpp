@@ -603,7 +603,7 @@ void loop_body(A& src_re, A& src_im, A& dst_re, A& dst_im)
   {
     C a = { src_re[i], src_im[i] };
     C b = { src_re[i + vn / 2], src_im[i + vn / 2] };
-    C t = { V::unaligned_load(table.re), V::unaligned_load(table.im) };
+    C t = { unaligned_load<V>(table.re), unaligned_load<V>(table.im) };
     if(dft_sz > 1) b = b * t;
     C dst_a = a + b;
     C dst_b = a - b;
@@ -624,8 +624,8 @@ void loop_body(A& src_re, A& src_im, A& dst_re, A& dst_im)
     C src_a = { src_re[i0 + i1], src_im[i0 + i1] };
     C src_b = { src_re[i0 + i1 + vn / 2], src_im[i0 + i1 + vn / 2] };
     C t = {
-      V::unaligned_load(table.re + i1 * vsz),
-      V::unaligned_load(table.im + i1 * vsz) };
+      unaligned_load<V>(table.re + i1 * vsz),
+      unaligned_load<V>(table.im + i1 * vsz) };
 
     C m = src_b * t;
     C dst_a = src_a + m;

@@ -126,6 +126,30 @@ struct BitReversed
 };
 
 template<typename V>
+FORCEINLINE typename V::Vec load(const typename V::T* ptr)
+{
+  return V::template load<true>(ptr);
+}
+
+template<typename V>
+FORCEINLINE typename V::Vec unaligned_load(const typename V::T* ptr)
+{
+  return V::template load<false>(ptr);
+}
+
+template<typename V>
+FORCEINLINE void store(typename V::Vec val, ET<V>* dst)
+{
+  V::template store<true>(val, dst);
+}
+
+template<typename V>
+FORCEINLINE void unaligned_store(typename V::Vec val, ET<V>* dst)
+{
+  V::template store<false>(val, dst);
+}
+
+template<typename V>
 FORCEINLINE void unaligned_copy(const ET<V>* src, Int n, ET<V>* dst)
 {
   if(n > 0 && n < V::vec_size) return;
@@ -133,7 +157,7 @@ FORCEINLINE void unaligned_copy(const ET<V>* src, Int n, ET<V>* dst)
   ASSERT(i & (V::vec_size - 1) == 0);
 
   for(Int i = 0; i < n; i += V::vec_size) 
-    V::unaligned_store(V::unaligned_load(src + i), dst + i);
+    unaligned_store<V>(unaligned_load<V>(src + i), dst + i);
 }
 
 template<typename T = char>
@@ -170,30 +194,28 @@ struct Complex
 
   static FORCEINLINE Complex load(const ET<V>* ptr)
   {
-    return {V::load(ptr), V::load(ptr + V::vec_size)};
+    return {
+      V::template load<true>(ptr),
+      V::template load<true>(ptr + V::vec_size)};
   }
 
   static FORCEINLINE Complex unaligned_load(const ET<V>* ptr)
   {
-    return { V::unaligned_load(ptr), V::unaligned_load(ptr + V::vec_size)};
+    return {
+      V::template load<false>(ptr),
+      V::template load<false>(ptr + V::vec_size)};
   }
 
   FORCEINLINE void store(ET<V>* ptr) const
   {
-    V::store(re, ptr);
-    V::store(im, ptr + V::vec_size);
-  }
-
-  FORCEINLINE void stream_store(ET<V>* ptr) const
-  {
-    V::stream_store(re, ptr);
-    V::stream_store(im, ptr + V::vec_size);
+    V::template store<true>(re, ptr);
+    V::template store<true>(im, ptr + V::vec_size);
   }
 
   FORCEINLINE void unaligned_store(ET<V>* ptr) const
   {
-    V::unaligned_store(re, ptr);
-    V::unaligned_store(im, ptr + V::vec_size);
+    V::template store<false>(re, ptr);
+    V::template store<false>(im, ptr + V::vec_size);
   }
 };
 
@@ -227,24 +249,17 @@ namespace complex_format
   {
     static const Int idx_ratio = 1;
 
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>* im)
     {
-      return { V::load(re), V::load(im) };
+      return { V::template load<aligned>(re), V::template load<aligned>(im) };
     }
 
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(
-      const ET<V>* re, const ET<V>* im)
-    {
-      return { V::unaligned_load(re), V::unaligned_load(im)};
-    }
-
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>* im)
     {
-      V::store(a.re, re);
-      V::store(a.im, im);
+      V::template store<aligned>(a.re, re);
+      V::template store<aligned>(a.im, im);
     }
 
     template<typename V>
@@ -253,47 +268,32 @@ namespace complex_format
       V::stream_store(a.re, re);
       V::stream_store(a.im, im);
     }
-
-    template<typename V>
-    static FORCEINLINE void unaligned_store(Complex<V> a, ET<V>* re, ET<V>* im)
-    {
-      V::unaligned_store(a.re, re);
-      V::unaligned_store(a.im, im);
-    }
   };
 
   struct Vec
   {
     static const Int idx_ratio = 2;
 
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>*)
     {
-      return Complex<V>::load(re);
+      return {
+        V::template load<aligned>(re),
+        V::template load<aligned>(re + V::vec_size)};
     }
 
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(const ET<V>* re, const ET<V>*)
-    {
-      return Complex<V>::unaligned_load(re);
-    }
-
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>*)
     {
-      a.store(re);
+      V::template store<aligned>(a.re, re);
+      V::template store<aligned>(a.im, re + V::vec_size);
     }
-    
+
     template<typename V>
     static FORCEINLINE void stream_store(Complex<V> a, ET<V>* re, ET<V>*)
     {
-      a.stream_store(re);
-    }
-    
-    template<typename V>
-    static FORCEINLINE void unaligned_store(Complex<V> a, ET<V>* re, ET<V>*)
-    {
-      a.unaligned_store(re);
+      V::stream_store(a.re, re);
+      V::stream_store(a.im, re + V::vec_size);
     }
   };
 
@@ -301,32 +301,20 @@ namespace complex_format
   {
     static const Int idx_ratio = 2;
 
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>*)
     {
       Complex<V> r;
-      V::load_deinterleaved(re, r.re, r.im);
+      V::template load_deinterleaved<aligned>(re, r.re, r.im);
       return r;
     }
 
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(
-      const ET<V>* re, const ET<V>*)
-    {
-      Complex<V> r;
-      V::deinterleave(
-        V::unaligned_load(re), V::unaligned_load(re + V::vec_size),
-        r.re, r.im);
-
-      return r;
-    }
-
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>*)
     {
       V::interleave(a.re, a.im, a.re, a.im);
-      V::store(a.re, re);
-      V::store(a.im, re + V::vec_size);
+      V::template store<aligned>(a.re, re);
+      V::template store<aligned>(a.im, re + V::vec_size);
     }
 
     template<typename V>
@@ -336,15 +324,6 @@ namespace complex_format
       V::stream_store(a.re, re);
       V::stream_store(a.im, re + V::vec_size);
     }
-
-    template<typename V>
-    static FORCEINLINE void unaligned_store(
-      Complex<V> a, ET<V>* re, ET<V>*)
-    {
-      V::interleave(a.re, a.im, a.re, a.im);
-      V::unaligned_store(a.re, re);
-      V::unaligned_store(a.im, re + V::vec_size);
-    }
   };
 
   template<class InputCf>
@@ -352,37 +331,23 @@ namespace complex_format
   {
     static const Int idx_ratio = InputCf::idx_ratio;
 
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>* im)
     {
-      auto a = InputCf::template load<V>(re, im);
+      auto a = InputCf::template load<aligned, V>(re, im);
       return {a.im, a.re};
     }
 
-    template<typename V>
-    static FORCEINLINE Complex<V> unaligned_load(
-      const ET<V>* re, const ET<V>* im)
-    {
-      auto a = InputCf::template unaligned_load<V>(re, im);
-      return {a.im, a.re};
-    }
-
-    template<typename V>
+    template<bool aligned, typename V>
     static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>* im)
     {
-      InputCf::template store<V>({a.im, a.re}, re, im);
+      InputCf::template store<aligned, V>({a.im, a.re}, re, im);
     }
 
     template<typename V>
     static FORCEINLINE void stream_store(Complex<V> a, ET<V>* re, ET<V>* im)
     {
       InputCf::template stream_store<V>({a.im, a.re}, re, im);
-    }
-
-    template<typename V>
-    static FORCEINLINE void unaligned_store(Complex<V> a, ET<V>* re, ET<V>* im)
-    {
-      InputCf::template unaligned_store<V>({a.im, a.re}, re, im);
     }
   };
 }
@@ -391,14 +356,14 @@ template<typename V, typename Cf>
 FORCEINLINE Complex<V> load(
   const typename V::T* re, const typename V::T* im, Int offset = 0)
 {
-  return Cf::template load<V>(re + offset, im + offset);
+  return Cf::template load<true, V>(re + offset, im + offset);
 }
 
 template<typename V, typename Cf>
 FORCEINLINE Complex<V> unaligned_load(
   const typename V::T* re, const typename V::T* im, Int offset = 0)
 {
-  return Cf::template unaligned_load<V>(re + offset, im + offset);
+  return Cf::template load<false, V>(re + offset, im + offset);
 }
 
 template<typename V, typename Cf>
@@ -408,21 +373,21 @@ template<typename CF, typename V>
 FORCEINLINE void store(
   Complex<V> val, ET<V>* dst_re, ET<V>* dst_im, Int offset = 0)
 {
-  CF::store(val, dst_re + offset, dst_im + offset);
+  CF::template store<true>(val, dst_re + offset, dst_im + offset);
 }
 
 template<typename CF, typename V>
 FORCEINLINE void stream_store(
   Complex<V> val, ET<V>* dst_re, ET<V>* dst_im, Int offset = 0)
 {
-  CF::store(val, dst_re + offset, dst_im + offset);
+  CF::stream_store(val, dst_re + offset, dst_im + offset);
 }
 
 template<typename CF, typename V>
 FORCEINLINE void unaligned_store(
   Complex<V> val, ET<V>* dst_re, ET<V>* dst_im, Int offset = 0)
 {
-  CF::unaligned_store(val, dst_re + offset, dst_im + offset);
+  CF::template store<false>(val, dst_re + offset, dst_im + offset);
 }
 
 namespace cf = complex_format;
@@ -594,17 +559,20 @@ struct Scalar
     return a * b - c;
   }
 
+  template<bool aligned>
   static FORCEINLINE Vec load(const T* p) { return *p; }
-  static FORCEINLINE Vec unaligned_load(const T* p) { return *p; }
+  
+  template<bool aligned>
   static FORCEINLINE void load_deinterleaved(const T* src, Vec& dst0, Vec& dst1)
   {
     dst0 = src[0];
     dst1 = src[1];
   }
 
+  template<bool aligned>
   static FORCEINLINE void store(Vec val, T* p) { *p = val; }
+
   static FORCEINLINE void stream_store(Vec val, T* p) { *p = val; }
-  static FORCEINLINE void unaligned_store(Vec val, T* p) { *p = val; }
   static void sfence(){ }
 };
 
@@ -645,20 +613,20 @@ void compute_twiddle_step(
 
   for(Int j = 0; j < dst_size / 2; j += V::vec_size)
   {
-    Vec a_re = V::unaligned_load(src_re + j);
-    Vec a_im = V::unaligned_load(src_im + j);
+    Vec a_re = unaligned_load<V>(src_re + j);
+    Vec a_im = unaligned_load<V>(src_im + j);
     Vec b_re = a_re * c + a_im * s;
     Vec b_im = a_im * c - a_re * s;
 
     Vec c_re, d_re;
     V::interleave(a_re, b_re, c_re, d_re);
-    V::unaligned_store(c_re, dst_re + 2 * j);
-    V::unaligned_store(d_re, dst_re + 2 * j + V::vec_size);
+    unaligned_store<V>(c_re, dst_re + 2 * j);
+    unaligned_store<V>(d_re, dst_re + 2 * j + V::vec_size);
 
     Vec c_im, d_im;
     V::interleave(a_im, b_im, c_im, d_im);
-    V::unaligned_store(c_im, dst_im + 2 * j);
-    V::unaligned_store(d_im, dst_im + 2 * j + V::vec_size);
+    unaligned_store<V>(c_im, dst_im + 2 * j);
+    unaligned_store<V>(d_im, dst_im + 2 * j + V::vec_size);
   }
 }
 

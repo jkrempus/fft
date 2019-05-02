@@ -119,22 +119,30 @@ struct Avx512Float
       15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0), v);
   }
 
-  static FORCEINLINE Vec load(const T* p) { return _mm512_load_ps(p); }
-  static FORCEINLINE Vec unaligned_load(const T* p)
+  template<bool aligned>
+  static FORCEINLINE Vec load(const T* p)
   {
-    return _mm512_loadu_ps(p);
+    return aligned ? _mm512_load_ps(p) : _mm512_loadu_ps(p);
   }
 
+  template<bool aligned>
   static FORCEINLINE void load_deinterleaved(const T* src, Vec& r0, Vec& r1)
   {
-    deinterleave(load(src), load(src + vec_size), r0, r1);
+    deinterleave(load<aligned>(src), load<aligned>(src + vec_size), r0, r1);
   }
 
-  static FORCEINLINE void store(Vec val, T* p) { _mm512_store_ps(p, val); }
-  static FORCEINLINE void store(Vec val, T* p) { _mm512_stream_ps(p, val); }
-  static FORCEINLINE void unaligned_store(Vec val, T* p)
+  template<bool aligned>
+  static FORCEINLINE void store(Vec val, T* p)
   {
-    _mm512_storeu_ps(p, val);
+    if constexpr(aligned)
+      _mm512_store_ps(p, val);
+    else
+      _mm512_storeu_ps(p, val);
+  }
+
+  static FORCEINLINE void stream_store(Vec val, T* p)
+  {
+    _mm512_stream_ps(p, val);
   }
 
   static void sfence(){ _mm_sfence(); }
