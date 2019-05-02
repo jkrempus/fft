@@ -48,10 +48,10 @@ struct SseFloat
     Vec b2 = _mm_shuffle_ps(a0, a1, _MM_SHUFFLE(3, 2, 3, 2)); 
     Vec b3 = _mm_shuffle_ps(a2, a3, _MM_SHUFFLE(3, 2, 3, 2));
 
-    store(_mm_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0)), dst + 0 * stride);
-    store(_mm_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1)), dst + 1 * stride);
-    store(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0)), dst + 2 * stride);
-    store(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1)), dst + 3 * stride);
+    store<true>(_mm_shuffle_ps(b0, b1, _MM_SHUFFLE(2, 0, 2, 0)), dst + 0 * stride);
+    store<true>(_mm_shuffle_ps(b0, b1, _MM_SHUFFLE(3, 1, 3, 1)), dst + 1 * stride);
+    store<true>(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(2, 0, 2, 0)), dst + 2 * stride);
+    store<true>(_mm_shuffle_ps(b2, b3, _MM_SHUFFLE(3, 1, 3, 1)), dst + 3 * stride);
   }
 
   static FORCEINLINE Vec madd(Vec a, Vec b, Vec c)

@@ -394,7 +394,7 @@ void last_two_passes(
   }
 }
 
-template<typename V, typename DstCf>
+template<bool do_stream, typename V, typename DstCf>
 void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
 {
   VEC_TYPEDEFS(V);
@@ -408,10 +408,13 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
   if(vn < m * m)
   {
     for(BitReversed br(vn); Int(br.i) < vn; br.advance())
-      stream_store<DstCf>(
-        C::load(src + br.i * stride<V, cf::Vec>()),
-        dst_re, dst_im, 
-        br.br * stride<V, DstCf>());
+    {
+      auto a = C::load(src + br.i * stride<V, cf::Vec>());
+      if constexpr(do_stream)
+        stream_store<DstCf>(a, dst_re, dst_im, br.br * stride<V, DstCf>());
+      else
+        store<DstCf>(a, dst_re, dst_im, br.br * stride<V, DstCf>());
+    }
   }
   else
   {
@@ -430,17 +433,17 @@ void bit_reverse_pass(Int n, const ET<V>* src, ET<V>* dst_re, ET<V>* dst_im)
         T* d_im = d_outer_im + i0 * stride_ * stride<V, DstCf>();
         for(Int i1 = 0; i1 < m; i1++)
         {
-          auto this_s = s + br_table[i1] * stride_ * stride<V, cf::Vec>();
-          stream_store<DstCf>(
-            C::load(this_s),
-            d_re, d_im,
-            i1 * stride<V, DstCf>());
+          auto a = C::load(s + br_table[i1] * stride_ * stride<V, cf::Vec>());
+          if constexpr(do_stream)
+            stream_store<DstCf>(a, d_re, d_im, i1 * stride<V, DstCf>());
+          else
+            store<DstCf>(a, d_re, d_im, i1 * stride<V, DstCf>());
         }
       }
     }
   }
 
-  V::sfence();
+  if(do_stream) V::sfence();
 }
 
 template<typename V>
@@ -919,9 +922,17 @@ void large_transform(
 
   recursive_passes<V>(n, Int(1) << first_npasses, w, 0, n, state->steps + 1);
 
-  bit_reverse_pass<V, DstCf>(n, w, dst_re, dst_im);
+  auto low_bits = Uint(sizeof(Vec)  - 1);
+  if(
+    (Uint(w) & low_bits) == 0 &&
+    (Uint(dst_re) & low_bits) == 0 &&
+    (Uint(dst_im) & low_bits) == 0)
+  {
+    bit_reverse_pass<true, V, DstCf>(n, w, dst_re, dst_im);
+  }
+  else
+    bit_reverse_pass<false, V, DstCf>(n, w, dst_re, dst_im);
 }
-
 
 template<bool do_create, typename V, typename SrcCf, typename DstCf>
 Int fft_create_impl(Int n, void* ptr)
@@ -1053,7 +1064,7 @@ void real_pass(
     i0 <= i1; 
     i0 += V::vec_size, i1 -= V::vec_size, iw += V::vec_size)
   {
-    C w = load<V, cf::Split>(twiddle, twiddle + n / 2, iw);
+    C w = load<V, cf::AlignedSplit>(twiddle, twiddle + n / 2, iw);
     C s0 = unaligned_load<V, SrcCf>(src_re, src_im, i0 * src_ratio);
     C s1 = reverse_complex<V>(load<V, SrcCf>(src_re, src_im, i1 * src_ratio));
 
@@ -1137,7 +1148,7 @@ Int rfft_create_impl(Int n, void* ptr)
     unaligned_copy<V>(r->twiddle + 1, m - 1, r->twiddle);
     unaligned_copy<V>(r->twiddle + m + 1, m - 1, r->twiddle + m);
 
-    r->state = fft_create<V, cf::Scal, cf::Split>(n / 2, ptr);
+    r->state = fft_create<V, cf::Scal, cf::AlignedSplit>(n / 2, ptr);
   }
 
   ptr = aligned_increment(ptr, fft_memsize<V, cf::Scal, cf::Split>(n / 2));

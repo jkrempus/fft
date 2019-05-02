@@ -12,6 +12,11 @@ else()
   set(AVX2_FLAGS "-mavx2 -mfma")
 endif()
 
+option(STRICT_ALIGNMENT "Require memory to be aligned" OFF)
+if(STRICT_ALIGNMENT)
+  set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} STRICT_ALIGNMENT=1)
+endif()
+
 option(ENABLE_SPLIT "Enable the split format" ON)
 if(ENABLE_SPLIT)
   set(IMPL_DEFINITIONS ${IMPL_DEFINITIONS} AFFT_SPLIT_ENABLED=1)

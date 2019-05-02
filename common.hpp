@@ -245,31 +245,6 @@ FORCEINLINE constexpr Complex<V> operator*(Complex<V> a, typename V::Vec b)
 
 namespace complex_format
 {
-  struct Split
-  {
-    static const Int idx_ratio = 1;
-
-    template<bool aligned, typename V>
-    static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>* im)
-    {
-      return { V::template load<aligned>(re), V::template load<aligned>(im) };
-    }
-
-    template<bool aligned, typename V>
-    static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>* im)
-    {
-      V::template store<aligned>(a.re, re);
-      V::template store<aligned>(a.im, im);
-    }
-
-    template<typename V>
-    static FORCEINLINE void stream_store(Complex<V> a, ET<V>* re, ET<V>* im)
-    {
-      V::stream_store(a.re, re);
-      V::stream_store(a.im, im);
-    }
-  };
-
   struct Vec
   {
     static const Int idx_ratio = 2;
@@ -297,7 +272,36 @@ namespace complex_format
     }
   };
 
-  struct Scal
+  template<bool strict_alignment>
+  struct SplitImpl
+  {
+    static const Int idx_ratio = 1;
+
+    template<bool aligned, typename V>
+    static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>* im)
+    {
+      return {
+        V::template load<strict_alignment && aligned>(re),
+        V::template load<strict_alignment && aligned>(im) };
+    }
+
+    template<bool aligned, typename V>
+    static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>* im)
+    {
+      V::template store<strict_alignment && aligned>(a.re, re);
+      V::template store<strict_alignment && aligned>(a.im, im);
+    }
+
+    template<typename V>
+    static FORCEINLINE void stream_store(Complex<V> a, ET<V>* re, ET<V>* im)
+    {
+      V::stream_store(a.re, re);
+      V::stream_store(a.im, im);
+    }
+  };
+
+  template<bool strict_alignment>
+  struct ScalImpl
   {
     static const Int idx_ratio = 2;
 
@@ -305,7 +309,8 @@ namespace complex_format
     static FORCEINLINE Complex<V> load(const ET<V>* re, const ET<V>*)
     {
       Complex<V> r;
-      V::template load_deinterleaved<aligned>(re, r.re, r.im);
+      V::template load_deinterleaved<strict_alignment && aligned>(
+        re, r.re, r.im);
       return r;
     }
 
@@ -313,8 +318,8 @@ namespace complex_format
     static FORCEINLINE void store(Complex<V> a, ET<V>* re, ET<V>*)
     {
       V::interleave(a.re, a.im, a.re, a.im);
-      V::template store<aligned>(a.re, re);
-      V::template store<aligned>(a.im, re + V::vec_size);
+      V::template store<strict_alignment && aligned>(a.re, re);
+      V::template store<strict_alignment && aligned>(a.im, re + V::vec_size);
     }
 
     template<typename V>
@@ -325,6 +330,17 @@ namespace complex_format
       V::stream_store(a.im, re + V::vec_size);
     }
   };
+
+  using AlignedScal = ScalImpl<true>;
+  using AlignedSplit = SplitImpl<true>;
+
+#ifdef STRICT_ALIGNMENT
+  using Scal = ScalImpl<true>;
+  using Split = SplitImpl<true>;
+#else
+  using Scal = ScalImpl<false>;
+  using Split = SplitImpl<false>;
+#endif
 
   template<class InputCf>
   struct Swapped
