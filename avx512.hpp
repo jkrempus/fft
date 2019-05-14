@@ -107,7 +107,7 @@ struct Avx512Float
     for(int i = 0; i < 16; i++)
     {
       Int src_i = (i >> 2) | ((i & Int(3)) << 2);
-      store(d[src_i], dst + stride * i);
+      store<true>(d[src_i], dst + stride * i);
     }
   }
 
@@ -142,7 +142,7 @@ struct Avx512Float
 
   static FORCEINLINE void stream_store(Vec val, T* p)
   {
-    _mm512_stream_ps(p, val);
+      _mm512_stream_ps(p, val);
   }
 
   static void sfence(){ _mm_sfence(); }
