@@ -32,9 +32,16 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
   if(V::vec_size > 1 && dim[ndim - 1] < 2 * V::vec_size)
     return fft_create_impl<do_create, Scalar<T>, SrcCf, DstCf>(ndim, dim, mem);
 
+  // Because the initial alignment of mem can differ between different calls,
+  // the first aligned_increment call can increase mem more in some calls than
+  // it does in others (but the difference cannot be larger than align_bytes -
+  // 1).  We ensure that the size computed during the memsize call will always
+  // be large enough by adding "padding" in that call.
+  Uint padding = do_create ? 0 : align_bytes - 1;
+
   auto s = (Fft<typename V::T>*) mem;
-  mem = aligned_increment(mem, sizeof(Fft<T>));
- 
+  mem = aligned_increment(mem, sizeof(Fft<T>) + padding);
+
   if(do_create)
   {
     s->ndim = ndim;
@@ -217,8 +224,15 @@ Int rfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
     return rfft_create_impl<do_create, Scalar<T>, DstCf>(ndim, dim, mem);
 
+  // Because the initial alignment of mem can differ between different calls,
+  // the first aligned_increment call can increase mem more in some calls than
+  // it does in others (but the difference cannot be larger than align_bytes -
+  // 1).  We ensure that the size computed during the memsize call will always
+  // be large enough by adding "padding" in that call.
+  Uint padding = do_create ? 0 : align_bytes - 1;
+
   auto r = (Rfft<T>*) mem;
-  mem = aligned_increment(mem, sizeof(Rfft<T>));
+  mem = aligned_increment(mem, sizeof(Rfft<T>) + padding);
 
   if(ndim == 1)
   {
@@ -353,8 +367,15 @@ Int irfft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
   if(V::vec_size != 1 && dim[ndim - 1] < 2 * V::vec_size)
     return irfft_create_impl<do_create, Scalar<T>, SrcCf>(ndim, dim, mem);
 
+  // Because the initial alignment of mem can differ between different calls,
+  // the first aligned_increment call can increase mem more in some calls than
+  // it does in others (but the difference cannot be larger than align_bytes -
+  // 1).  We ensure that the size computed during the memsize call will always
+  // be large enough by adding "padding" in that call.
+  Uint padding = do_create ? 0 : align_bytes - 1;
+
   auto r = (Irfft<T>*) mem;
-  mem = aligned_increment(mem, sizeof(Irfft<T>));
+  mem = aligned_increment(mem, sizeof(Irfft<T>) + padding);
   
   if(ndim == 1)
   {

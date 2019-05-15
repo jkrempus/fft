@@ -26,8 +26,8 @@ struct members
       size_t size = memsize(ndim, dim, format, impl);
       if(size == 0) return;
 
-      allocated = new char[size + align_mask];
-      mem = (void*)((size_t(allocated) + align_mask) & ~align_mask);
+      allocated = new char[size];
+      mem = allocated;
     }
 
     state = create(ndim, dim, format, mem, impl);
