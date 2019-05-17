@@ -15,7 +15,8 @@ struct Fft
   Int num_elements;
   Int working_idx_ratio;
   Int dst_idx_ratio;
-  T* working;
+  T* working_re;
+  T* working_im;
   onedim::Fft<T>* last_transform;
   multi::Fft<T>* transforms[maxdim];
 };
@@ -42,12 +43,16 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
   auto s = (Fft<typename V::T>*) mem;
   mem = aligned_increment(mem, sizeof(Fft<T>) + padding);
 
+  using WorkingCf = cf::Vec;
+
   if(do_create)
   {
     s->ndim = ndim;
-    s->working_idx_ratio = cf::Vec::idx_ratio;
+    s->working_idx_ratio = WorkingCf::idx_ratio;
     s->dst_idx_ratio = DstCf::idx_ratio;
-    s->working = (T*) mem;
+    s->working_re = (T*) mem;
+    s->working_im = SameType<WorkingCf, cf::Split>::value ?
+      (T*) mem + num_elements : (T*) nullptr;
     s->num_elements = num_elements;
   }
  
@@ -72,29 +77,29 @@ Int fft_create_impl(Int ndim_in, const Int* dim_in, void* mem)
       if(i == 0)
       {
         if(do_create)
-          s->transforms[i] = multi::fft_create<V, SrcCf, cf::Vec, true>(
+          s->transforms[i] = multi::fft_create<V, SrcCf, WorkingCf, true>(
             dim[i], m, mem);
 
         mem = aligned_increment(
-          mem, multi::fft_memsize<V, SrcCf, cf::Vec, true>(dim[i], m));
+          mem, multi::fft_memsize<V, SrcCf, WorkingCf, true>(dim[i], m));
       }
       else
       {
         if(do_create)
-          s->transforms[i] = multi::fft_create<V, cf::Vec, cf::Vec, true>(
+          s->transforms[i] = multi::fft_create<V, WorkingCf, WorkingCf, true>(
             dim[i], m, mem);
 
         mem = aligned_increment(
-          mem, multi::fft_memsize<V, cf::Vec, cf::Vec, true>(dim[i], m));
+          mem, multi::fft_memsize<V, WorkingCf, WorkingCf, true>(dim[i], m));
       }
     }
 
     if(do_create)
       s->last_transform =
-        onedim::fft_create<V, cf::Vec, DstCf>(dim[ndim - 1], mem);
+        onedim::fft_create<V, WorkingCf, DstCf>(dim[ndim - 1], mem);
 
     mem = aligned_increment(
-      mem, onedim::fft_memsize<V, cf::Vec, DstCf>(dim[ndim - 1]));
+      mem, onedim::fft_memsize<V, WorkingCf, DstCf>(dim[ndim - 1]));
   }
 
   return Int(mem);
@@ -117,7 +122,7 @@ template<typename T>
 void fft_impl(
   Int idim, Fft<T>* s,
   const T* src_re, const T* src_im,
-  T* working,
+  T* working_re, T* working_im,
   T* dst_re, T* dst_im,
   bool interleaved_src_rows)
 {
@@ -127,19 +132,19 @@ void fft_impl(
   else
   {
     s->transforms[idim]->fun_ptr(
-      s->transforms[idim], src_re, src_im, working, nullptr,
+      s->transforms[idim], src_re, src_im, working_re, working_im,
       interleaved_src_rows, false);
 
     Int m = s->transforms[idim]->m;
     Int n = s->transforms[idim]->n;
     for(BitReversed br(n); Int(br.i) < n; br.advance())
     {
-      auto next_src_re = working + br.i * m * s->working_idx_ratio;;
+      Int src_off = br.i * m * s->working_idx_ratio;;
       Int dst_off = br.br * m * s->dst_idx_ratio;
       fft_impl(
         idim + 1, s,
-        next_src_re, (T*) nullptr,
-        next_src_re,
+        working_re + src_off, working_im + src_off,
+        working_re + src_off, working_im + src_off,
         dst_re + dst_off, dst_im + dst_off,
         interleaved_src_rows);
     }
@@ -153,7 +158,7 @@ void fft(
   fft_impl<T>(
     0, state,
     src_re, src_im,
-    state->working,
+    state->working_re, state->working_im,
     dst_re, dst_im,
     false);
 }
@@ -172,7 +177,7 @@ void ifft(
   fft_impl<T>(
     0, s,
     src_re, src_im,
-    s->working,
+    s->working_re, s->working_im,
     dst_re, dst_im,
     false);
 }
@@ -326,7 +331,7 @@ void rfft(Rfft<T>* s, const T* src, T* dst_re, T* dst_im)
 
   s->real_pass(s->outer_n, s->inner_n, s->twiddle, s->working0, nullptr);
 
-  const Int working_idx_ratio = 2; // because we have cf::Vec in working
+  const Int working_idx_ratio = s->multidim_transform->working_idx_ratio;
   const Int nbits = log2(s->outer_n / 2);
   for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
   {
@@ -334,7 +339,7 @@ void rfft(Rfft<T>* s, const T* src, T* dst_re, T* dst_im)
     fft_impl(
       0, s->multidim_transform,
       s->working0 + i * s->inner_n * working_idx_ratio, (T*) nullptr,
-      s->multidim_transform->working,
+      s->multidim_transform->working_re, s->multidim_transform->working_im,
       dst_re + dst_off, dst_im + dst_off,
       false);
   }
@@ -465,7 +470,7 @@ void irfft(Irfft<T>* s, const T* src_re, const T* src_im, T* dst)
   if(s->onedim_transform)
     return onedim::irfft(s->onedim_transform, src_re, src_im, dst);
   
-  const Int working_idx_ratio = 2; // because we have cf::Vec in working
+  const Int working_idx_ratio = s->multidim_transform->working_idx_ratio;
   const Int nbits = log2(s->outer_n / 2);
   for(Int i = 0; i < s->outer_n / 2 + 1 ; i++)
   {
@@ -473,7 +478,7 @@ void irfft(Irfft<T>* s, const T* src_re, const T* src_im, T* dst)
     fft_impl(
       0, s->multidim_transform,
       src_re + src_off, src_im + src_off,
-      s->multidim_transform->working,
+      s->multidim_transform->working_re, s->multidim_transform->working_im,
       s->working0 + i * s->inner_n * working_idx_ratio, (T*) nullptr,
       false);
   }
