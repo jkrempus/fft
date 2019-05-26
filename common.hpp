@@ -40,6 +40,16 @@ struct SameType { static const bool value = false; };
 template<typename T>
 struct SameType<T, T> { static const bool value = true; };
 
+template<bool cond, typename T, typename F> struct SelectType
+{
+  using type = F;
+};
+
+template<typename T, typename F> struct SelectType<true, T, F>
+{
+  using type = T;
+};
+
 template<typename T>
 constexpr T max(const T& a, const T& b){ return a > b ? a : b; }
 

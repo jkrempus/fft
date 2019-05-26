@@ -1126,7 +1126,7 @@ Int rfft_create_impl(Int n, void* ptr)
   Rfft<T>* r = (Rfft<T>*) ptr;
   ptr = aligned_increment(ptr, sizeof(Rfft<T>));
 
-  if(SameType<DstCf, cf::Split>::value)
+  if constexpr(SameType<DstCf, cf::Split>::value)
   {
     if(do_create) r->working = nullptr;
   }
@@ -1135,6 +1135,9 @@ Int rfft_create_impl(Int n, void* ptr)
     if(do_create) r->working = (T*) ptr;
     ptr = aligned_increment(ptr, sizeof(T) * n);
   }
+
+  using IntermediateCf = typename SelectType<
+    SameType<DstCf, cf::Split>::value, cf::Split, cf::AlignedSplit>::type;
 
   if(do_create) r->twiddle = (T*) ptr;
   ptr = aligned_increment(ptr, sizeof(T) * n);
@@ -1148,10 +1151,10 @@ Int rfft_create_impl(Int n, void* ptr)
     unaligned_copy<V>(r->twiddle + 1, m - 1, r->twiddle);
     unaligned_copy<V>(r->twiddle + m + 1, m - 1, r->twiddle + m);
 
-    r->state = fft_create<V, cf::Scal, cf::AlignedSplit>(n / 2, ptr);
+    r->state = fft_create<V, cf::Scal, IntermediateCf>(n / 2, ptr);
   }
 
-  ptr = aligned_increment(ptr, fft_memsize<V, cf::Scal, cf::Split>(n / 2));
+  ptr = aligned_increment(ptr, fft_memsize<V, cf::Scal, IntermediateCf>(n / 2));
 
   return Int(ptr);
 }
