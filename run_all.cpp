@@ -11,6 +11,19 @@
 #include <mutex>
 #include <future>
 
+struct RunAllOptions
+{
+  Int max_size = 22;
+  Int max_dim = 5;
+  Int verbosity = 1;
+  Int threads = 1;
+  Int total = 1000000000;
+  std::string implementation;
+  SimdImpl simd_impl;
+  bool random_alignment = false;
+  bool is_double = false;
+};
+
 int64_t num_processed_elements(const std::vector<Int>& a)
 {
   return 4 * (int64_t(1) << std::accumulate(a.begin(), a.end(), Int(0)));
@@ -33,13 +46,14 @@ std::string format_option(const Options& opt)
   if(opt.is_double) s << " -d";
   if(opt.is_inverse) s << " -i";
   if(opt.is_bench) s << " -b";
+  if(opt.misaligned_by != 0) s << " --misaligned-by " << opt.misaligned_by;
  
   return s.str();
 }
 
 void run(
-  const std::vector<Int>& size, std::mutex& output_mutex, Int verbosity,
-  std::string_view implementation, Int simd_impl)
+  const std::vector<Int>& size, Int misaligned_by,
+  std::mutex& output_mutex, const RunAllOptions& ra_opt)
 {
   for(auto [is_real, is_inverse] : {
     std::make_pair(true, true),
@@ -48,16 +62,18 @@ void run(
     std::make_pair(false, false)})
   {
     Options opt;
-    opt.implementation = std::string(implementation);
+    opt.implementation = std::string(ra_opt.implementation);
     for(auto e : size) opt.size.push_back({e, e + 1});
 
     opt.precision = 1.2e-7;
+    opt.is_double = ra_opt.is_double;
     opt.is_bench =  false;
     opt.is_real = is_real;
     opt.is_inverse = is_inverse;
-    opt.simd_impl = {simd_impl};
+    opt.simd_impl = {ra_opt.simd_impl};
+    opt.misaligned_by = misaligned_by;
 
-    if(verbosity >= 2)
+    if(ra_opt.verbosity >= 2)
     {
       std::lock_guard<std::mutex> lock(output_mutex);
       std::cerr << format_option(opt) << std::endl;
@@ -75,7 +91,7 @@ void run(
       exit(1);
     }
 
-    if(verbosity >= 3)
+    if(ra_opt.verbosity >= 3)
     {
       std::lock_guard<std::mutex> lock(output_mutex);
       std::cerr << s.str() << std::endl;
@@ -83,12 +99,16 @@ void run(
   }
 }
 
-void run(
-  const std::vector<std::vector<Int>>& sizes, Int num_threads, Int verbosity,
-  std::string_view implementation, Int simd_impl)
+void run(const std::vector<std::vector<Int>>& sizes, const RunAllOptions& opt)
 {
   int64_t total_size = 0;
   for(auto& s : sizes) total_size += num_processed_elements(s);
+
+  std::mt19937 rng;
+  std::uniform_int_distribution<Int> dist(0, 4095);
+
+  std::vector<Int> misaligned_by(sizes.size(), 0);
+  if(opt.random_alignment) for(auto& e: misaligned_by) e = dist(rng);
 
   std::mutex mutex;
   std::vector<std::future<void>> futures;
@@ -104,22 +124,22 @@ void run(
       if(idx >= sizes.size()) return;
       auto& s = sizes[idx];
 
-      run(s, mutex, verbosity, implementation, simd_impl);
+      run(s, misaligned_by[idx], mutex, opt);
 
       std::lock_guard<std::mutex> lock(mutex);
       done_size += num_processed_elements(s);
 
-      if(verbosity >= 1)
+      if(opt.verbosity >= 1)
         std::cerr
           << "Done " << (100.0 * done_size / total_size) << "%" << std::endl;
     }
   };
 
-  if(num_threads == 1)
+  if(opt.threads == 1)
     fn();
   else
   {
-    for(Int i = 0; i < num_threads; i++)
+    for(Int i = 0; i < opt.threads; i++)
       futures.push_back(std::async(std::launch::async, fn));
 
     for(auto& f : futures) f.get();
@@ -159,8 +179,7 @@ std::vector<double> get_weights(
 }
 
 double add_random_sizes(
-  Int max_size, Int max_dim, int64_t total_size,
-  std::vector<std::vector<Int>>& sizes)
+  const RunAllOptions& opt, std::vector<std::vector<Int>>& sizes)
 {
   static std::set<std::vector<Int>> present_sizes;
 
@@ -173,7 +192,7 @@ double add_random_sizes(
   }
 
   std::vector<std::vector<Int>> all_sizes;
-  get_all_sizes(std::vector<Int>{}, max_size, max_dim, all_sizes);
+  get_all_sizes(std::vector<Int>{}, opt.max_size, opt.max_dim, all_sizes);
   auto w = get_weights(all_sizes);
 
   Int num_tested = 0;
@@ -184,7 +203,7 @@ double add_random_sizes(
   std::mt19937 rng;
   std::discrete_distribution<Int> dist{w.begin(), w.end()};
 
-  while(done_size < total_size && num_tested != all_sizes.size())
+  while(done_size < opt.total && num_tested != all_sizes.size())
   {
     auto& s = all_sizes[dist(rng)];
     if(present_sizes.count(s) == 0)
@@ -201,31 +220,29 @@ double add_random_sizes(
 
 int main(int argc, char** argv)
 {
-  Int max_size = 22;
-  Int max_dim = 5;
-  Int verbosity = 1;
-  Int threads = 1;
-  Int total = 1000000000;
-  std::string implementation;
-  SimdImpl simd_impl = {0};
-
-  OptionParser op;
-  op.add_optional_flag("-v", "Verbosity level.", &verbosity);
-  op.add_optional_flag("--threads", "Number of threads.", &threads);
-  op.add_optional_flag("-d", "Maximal number of dimensions.", &max_dim);
-  op.add_optional_flag(
-    "--simd", "which SIMD implementation to use.", &simd_impl);
-  op.add_optional_flag(
+  RunAllOptions opt;
+  OptionParser parser;
+  parser.add_optional_flag("-v", "Verbosity level.", &opt.verbosity);
+  parser.add_optional_flag("--threads", "Number of threads.", &opt.threads);
+  parser.add_optional_flag("-d", "Maximal number of dimensions.", &opt.max_dim);
+  parser.add_optional_flag(
+    "--simd", "which SIMD implementation to use.", &opt.simd_impl);
+  parser.add_optional_flag(
     "-s", "Maximal value for the binary logarithm of transform size.",
-    &max_size);
-  op.add_optional_flag(
+    &opt.max_size);
+  parser.add_optional_flag(
     "-t", "The total number of elements that will be processed in all of the tests.",
-    &total);
-  
-  op.add_positional(
-    "implementation", "Fft implementation to test.", &implementation);
+    &opt.total);
+  parser.add_optional_flag(
+    "--misaligned_by", "which SIMD implementation to use.", &opt.simd_impl);
+  parser.add_switch(
+    "--random-alignment", "Use randomly aligned buffers.", &opt.random_alignment);
+  parser.add_switch("--is-double", "Use double precision.", &opt.is_double);
 
-  auto parsing_result = op.parse(argc, argv);
+  parser.add_positional(
+    "implementation", "Fft implementation to test.", &opt.implementation);
+
+  auto parsing_result = parser.parse(argc, argv);
   if(!parsing_result)
   {
     std::cerr << parsing_result.message << std::endl;
@@ -233,20 +250,19 @@ int main(int argc, char** argv)
   }
 
   std::vector<std::vector<Int>> sizes;
-  for(Int i = 1; i < max_size + 1; i++) sizes.push_back({i});
-  for(Int i = 1; i < max_size / 2 + 1; i++) sizes.push_back({i, i});
-  for(Int i = 1; i < max_size / 3 + 1; i++) sizes.push_back({i, i, i});
-  double tested_percentage = add_random_sizes(
-    max_size, max_dim, total, sizes);
+  for(Int i = 1; i < opt.max_size + 1; i++) sizes.push_back({i});
+  for(Int i = 1; i < opt.max_size / 2 + 1; i++) sizes.push_back({i, i});
+  for(Int i = 1; i < opt.max_size / 3 + 1; i++) sizes.push_back({i, i, i});
+  double tested_percentage = add_random_sizes(opt, sizes);
 
-  if(verbosity >= 1)
+  if(opt.verbosity >= 1)
     std::cerr
       << (100.0 * tested_percentage) << "% of all possible sizes with up to "
-      << max_dim << " dimensions " << std::endl
+      << opt.max_dim << " dimensions " << std::endl
       << "and number of elements up to 2^"
-      << max_size << " will be tested." << std::endl;
+      << opt.max_size << " will be tested." << std::endl;
 
-  run(sizes, threads, verbosity, implementation, simd_impl.val);
+  run(sizes, opt);
 
   return 0;
 }
