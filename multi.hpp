@@ -15,6 +15,26 @@ struct ComplexPointers
   T* im;
 };
 
+template<typename SrcCf, typename DstCf, typename V, typename Fn>
+FORCEINLINE void iterate_row(Int n, const Fn& fn)
+{
+  VEC_TYPEDEFS(V);
+
+  Int s = 0;
+  Int d = 0;
+  for(; s + stride<V, SrcCf>() <= n * SrcCf::idx_ratio;
+    s += stride<V, SrcCf>(), d += stride<V, DstCf>())
+  {
+    fn(V(), s, d);
+  }
+
+  for(; s < n * SrcCf::idx_ratio;
+    s += SrcCF::idx_ratio, d += DstCf::idx_ratio)
+  {
+    fn(Scalar<T>(), s, d);
+  }
+}
+
 template<typename SrcRows, typename DstRows>
 void first_pass(Int n, const SrcRows& src, const DstRows& dst)
 {

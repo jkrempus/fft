@@ -26,8 +26,8 @@ struct members
       size_t size = memsize(ndim, dim, format, impl);
       if(size == 0) return;
 
-      allocated = new char[size];
-      mem = allocated;
+      allocated = new char[size + align_mask];
+      mem = (char*)((size_t(allocated) + align_mask) & ~align_mask) + 2;
     }
 
     state = create(ndim, dim, format, mem, impl);
@@ -41,7 +41,7 @@ struct members
     other.state = NULL;
   }
 
-  ~members() { delete [] allocated; }
+  ~members() { delete [] (allocated); }
 };
 }
 
