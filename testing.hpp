@@ -17,6 +17,7 @@ struct Options
   std::optional<double> precision;
   double num_ops;
   SimdImpl simd_impl;
+  ptrdiff_t misaligned_by;
   std::string implementation;
   std::vector<SizeRange> size;
 };

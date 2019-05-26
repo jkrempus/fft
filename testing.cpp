@@ -64,29 +64,28 @@ struct IterateMultidim
   }
 };
 
-void* alloc(Int n)
+void* alloc(Int n, Int offset)
 {
 #ifdef _WIN32
-  return _aligned_malloc(n, 4096);
+  return (char*) _aligned_malloc(n + offset, 4096) + offset;
 #else
-  return valloc(n);
+  return (char*) valloc(n + offset) + offset;
 #endif
 }
 
-void dealloc(void* p)
+void dealloc(void* p, Int offset)
 {
 #ifdef _WIN32
-  _aligned_free(p);
+  _aligned_free((char*) p - offset);
 #else
-  free(p);
+  free((char*) p - offset);
 #endif
 }
 
 template<typename T>
-T* alloc_array(Int n)
+T* alloc_array(Int n, Int offset)
 {
-  auto r = (T*) alloc(n * sizeof(T));
-  //printf("allocated range %p %p\n", r, r + 2 * n * sizeof(T));
+  auto r = (T*) alloc(n * sizeof(T), offset);
   return r;
 }
 
@@ -249,6 +248,14 @@ T product(const std::vector<T>& v)
   return r;
 }
 
+struct WrapperConstructorArgs
+{
+  std::vector<Int> size;
+  Int alloc_offset;
+  Int simd_impl;
+  bool is_bench;
+};
+
 template<
   typename T, typename ImOff, typename HalvedDim,
   bool is_real, bool is_inverse>
@@ -258,18 +265,20 @@ template<typename T, typename ImOff, typename HalvedDim, bool is_inverse_>
 struct SplitWrapperBase<T, ImOff, HalvedDim, false, is_inverse_>
 {
   std::vector<Int> size;
+  Int alloc_offset;
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int> size) :
-    size(size),
-    src((T*) alloc(2 * sizeof(T) * product(size))),
-    dst((T*) alloc(2 * sizeof(T) * product(size))) { }
+  SplitWrapperBase(const WrapperConstructorArgs& args) :
+    size(args.size),
+    alloc_offset(args.alloc_offset),
+    src(alloc_array<T>(2 * product(args.size), args.alloc_offset)),
+    dst(alloc_array<T>(2 * product(args.size), args.alloc_offset)) { }
 
   ~SplitWrapperBase()
   {
-    dealloc(src);
-    dealloc(dst);
+    dealloc(src, alloc_offset);
+    dealloc(dst, alloc_offset);
   }
 
   template<typename U>
@@ -294,19 +303,21 @@ struct SplitWrapperBase<T, ImOff, HalvedDim, true, false>
 {
   Int im_off;
   std::vector<Int> size;
+  Int alloc_offset;
   T* src;
   T* dst;
   
-  SplitWrapperBase(const std::vector<Int>& size) :
-    im_off(ImOff::template get<T>(size)),
-    size(size),
-    src(alloc_array<T>(product(size))),
-    dst(alloc_array<T>(2 * im_off)) { }
+  SplitWrapperBase(const WrapperConstructorArgs& args) :
+    im_off(ImOff::template get<T>(args.size)),
+    size(args.size),
+    alloc_offset(args.alloc_offset),
+    src(alloc_array<T>(product(size), args.alloc_offset)),
+    dst(alloc_array<T>(2 * im_off, args.alloc_offset)) { }
 
   ~SplitWrapperBase()
   {
-    dealloc(src);
-    dealloc(dst);
+    dealloc(src, alloc_offset);
+    dealloc(dst, alloc_offset);
   }
 
   template<typename U>
@@ -339,15 +350,17 @@ struct SplitWrapperBase<T, ImOff, HalvedDim, true, true>
 {
   Int im_off;
   std::vector<Int> size;
+  Int alloc_offset;
   std::vector<Int> symmetric_size;
   T* src;
   T* dst;
 
-  SplitWrapperBase(const std::vector<Int>& size) :
-    im_off(ImOff::template get<T>(size)),
-    size(size),
-    dst(alloc_array<T>(product(size))),
-    src(alloc_array<T>(2 * im_off))
+  SplitWrapperBase(const WrapperConstructorArgs& args) :
+    im_off(ImOff::template get<T>(args.size)),
+    size(args.size),
+    alloc_offset(args.alloc_offset),
+    dst(alloc_array<T>(product(args.size), args.alloc_offset)),
+    src(alloc_array<T>(2 * im_off, args.alloc_offset))
   {
     Int hd = HalvedDim::get(size);
     symmetric_size = size;
@@ -356,8 +369,8 @@ struct SplitWrapperBase<T, ImOff, HalvedDim, true, true>
 
   ~SplitWrapperBase()
   {
-    dealloc(src);
-    dealloc(dst);
+    dealloc(src, alloc_offset);
+    dealloc(dst, alloc_offset);
   }
 
   template<typename U>
@@ -390,18 +403,20 @@ template<typename T, typename HalvedDim, bool is_inverse_>
 struct InterleavedWrapperBase<T, HalvedDim, false, is_inverse_>
 {
   std::vector<Int> size;
+  Int alloc_offset;
   T* src;
   T* dst;
 
-  InterleavedWrapperBase(const std::vector<Int>& size) :
-    size(size),
-    src((T*) alloc(2 * sizeof(T) * product(size))),
-    dst((T*) alloc(2 * sizeof(T) * product(size))) { }
+  InterleavedWrapperBase(const WrapperConstructorArgs& args) :
+    size(args.size),
+    alloc_offset(args.alloc_offset),
+    src(alloc_array<T>(2 * product(args.size), args.alloc_offset)),
+    dst(alloc_array<T>(2 * product(args.size), args.alloc_offset)) { }
 
   ~InterleavedWrapperBase()
   {
-    dealloc(src);
-    dealloc(dst);
+    dealloc(src, alloc_offset);
+    dealloc(dst, alloc_offset);
   };
 
   template<typename U>
@@ -425,23 +440,25 @@ template<typename T, typename HalvedDim>
 struct InterleavedWrapperBase<T, HalvedDim, true, false>
 {
   std::vector<Int> size;
+  Int alloc_offset;
   std::vector<Int> symmetric_size;
   T* src;
   T* dst;
 
-  InterleavedWrapperBase(const std::vector<Int>& size) : size(size)
+  InterleavedWrapperBase(const WrapperConstructorArgs& args)
+  : size(args.size), alloc_offset(args.alloc_offset)
   {
     Int hd = HalvedDim::get(size);
-    symmetric_size = size;
-    symmetric_size[hd] = size[hd] / 2 + 1;
-    dst = (T*) alloc(2 * sizeof(T) * product(symmetric_size));
-    src = (T*) alloc(sizeof(T) * product(size));
+    symmetric_size = args.size;
+    symmetric_size[hd] = args.size[hd] / 2 + 1;
+    dst = alloc_array<T>(2 * product(symmetric_size), args.alloc_offset);
+    src = alloc_array<T>(product(size), args.alloc_offset);
   }
 
   ~InterleavedWrapperBase()
   {
-    dealloc(src);
-    dealloc(dst);
+    dealloc(src, alloc_offset);
+    dealloc(dst, alloc_offset);
   };
 
   template<typename U>
@@ -469,25 +486,27 @@ template<typename T, typename HalvedDim>
 struct InterleavedWrapperBase<T, HalvedDim, true, true>
 {
   std::vector<Int> size;
+  Int alloc_offset;
   std::vector<Int> symmetric_size;
   T* src;
   T* dst;
-  
-  InterleavedWrapperBase(const std::vector<Int>& size) : size(size)
+
+  InterleavedWrapperBase(const WrapperConstructorArgs& args)
+  : size(args.size), alloc_offset(args.alloc_offset)
   {
     Int hd = HalvedDim::get(size);
     symmetric_size = size;
     symmetric_size[hd] = size[hd] / 2 + 1;
 
     Int src_n = product(symmetric_size);
-    src = (T*) alloc(2 * sizeof(T) * src_n);
-    dst = (T*) alloc(sizeof(T) * product(size));
+    src = alloc_array<T>(2 * src_n, alloc_offset);
+    dst = alloc_array<T>(product(size), alloc_offset);
   }
 
   ~InterleavedWrapperBase()
   {
-    dealloc(src);
-    dealloc(dst);
+    dealloc(src, alloc_offset);
+    dealloc(dst, alloc_offset);
   };
 
   template<typename U>
@@ -556,9 +575,9 @@ struct TestWrapper<T, false, false, format>
   static const bool is_inverse = false;
   typedef T value_type;
   afft::complex_transform<T, format> t;
-  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, false, false, format>(size),
-    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
+  TestWrapper(const WrapperConstructorArgs& args) :
+    Base<T, false, false, format>(args),
+    t(args.size.size(), (const Uint*) &args.size[0], nullptr, args.simd_impl) {}
 
   void transform()
   {
@@ -575,9 +594,9 @@ struct TestWrapper<T, false, true, format>
   static const bool is_inverse = true;
   typedef T value_type;
   afft::inverse_complex_transform<T, format> t;
-  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, false, true, format>(size),
-    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
+  TestWrapper(const WrapperConstructorArgs& args) :
+    Base<T, false, true, format>(args),
+    t(args.size.size(), (const Uint*) &args.size[0], nullptr, args.simd_impl) {}
 
   void transform()
   {
@@ -595,9 +614,9 @@ struct TestWrapper<T, true, false, format>
   typedef T value_type;
   afft::real_transform<T, format> t;
 
-  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, true, false, format>(size),
-    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
+  TestWrapper(const WrapperConstructorArgs& args) :
+    Base<T, true, false, format>(args),
+    t(args.size.size(), (const Uint*) &args.size[0], nullptr, args.simd_impl) {}
 
   void transform()
   {
@@ -614,9 +633,9 @@ struct TestWrapper<T, true, true, format>
   typedef T value_type;
   afft::inverse_real_transform<T, format> t;
 
-  TestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench) :
-    Base<T, true, true, format>(size),
-    t(size.size(), (const Uint*) &size[0], nullptr, simd_impl) {}
+  TestWrapper(const WrapperConstructorArgs& args) :
+    Base<T, true, true, format>(args),
+    t(args.size.size(), (const Uint*) &args.size[0], nullptr, args.simd_impl) {}
 
   void transform()
   {
@@ -649,11 +668,11 @@ struct FftwTestWrapper :
 
   unsigned fftw_flags;
 
-  FftwTestWrapper(const std::vector<Int>& size, Int simd_impl, bool is_bench)
-  : Base(size), fftw_flags(is_bench ? FFTW_PATIENT : FFTW_ESTIMATE)
+  FftwTestWrapper(const WrapperConstructorArgs& args)
+  : Base(args), fftw_flags(args.is_bench ? FFTW_PATIENT : FFTW_ESTIMATE)
   {
     int idx[maxdim];
-    std::copy_n(&size[0], size.size(), idx);
+    std::copy_n(&this->size[0], this->size.size(), idx);
     auto src = this->src;
     auto dst = this->dst;
 
@@ -663,19 +682,19 @@ struct FftwTestWrapper :
       {
         if constexpr(std::is_same_v<T, float>)
           plan = fftwf_plan_dft_c2r(
-            size.size(), idx, (fftwf_complex*) src, dst, fftw_flags);
+            this->size.size(), idx, (fftwf_complex*) src, dst, fftw_flags);
         else
           plan = fftw_plan_dft_c2r(
-            size.size(), idx, (fftw_complex*) src, dst, fftw_flags);
+            this->size.size(), idx, (fftw_complex*) src, dst, fftw_flags);
       }
       else
       {
         if constexpr(std::is_same_v<T, float>)
           plan = fftwf_plan_dft_r2c(
-            size.size(), idx, src, (fftwf_complex*) dst, fftw_flags);
+            this->size.size(), idx, src, (fftwf_complex*) dst, fftw_flags);
         else
           plan = fftw_plan_dft_r2c(
-            size.size(), idx, src, (fftw_complex*) dst, fftw_flags);
+            this->size.size(), idx, src, (fftw_complex*) dst, fftw_flags);
       }
     }
     else
@@ -684,12 +703,12 @@ struct FftwTestWrapper :
       {
         if constexpr(std::is_same_v<T, float>)
           plan = fftwf_plan_dft(
-            size.size(), idx, 
+            this->size.size(), idx, 
             (fftwf_complex*) src, (fftwf_complex*) dst,
             FFTW_BACKWARD, fftw_flags);
         else
           plan = fftw_plan_dft(
-            size.size(), idx, 
+            this->size.size(), idx, 
             (fftw_complex*) src, (fftw_complex*) dst,
             FFTW_BACKWARD, fftw_flags);
       }
@@ -697,12 +716,12 @@ struct FftwTestWrapper :
       {
         if constexpr(std::is_same_v<T, float>)
           plan = fftwf_plan_dft(
-            size.size(), idx, 
+            this->size.size(), idx, 
             (fftwf_complex*) src, (fftwf_complex*) dst,
             FFTW_FORWARD, fftw_flags);
         else
           plan = fftw_plan_dft(
-            size.size(), idx, 
+            this->size.size(), idx, 
             (fftw_complex*) src, (fftw_complex*) dst,
             FFTW_FORWARD, fftw_flags);
       }
@@ -741,9 +760,8 @@ struct FftwSplitTestWrapper :
 
   unsigned fftw_flags;
 
-  FftwSplitTestWrapper(
-    const std::vector<Int>& size, Int simd_impl, Int is_bench)
-  : Base(size), fftw_flags(is_bench ? FFTW_PATIENT : FFTW_ESTIMATE)
+  FftwSplitTestWrapper(const WrapperConstructorArgs& args)
+  : Base(args), fftw_flags(args.is_bench ? FFTW_PATIENT : FFTW_ESTIMATE)
   {
     auto src = this->src;
     auto dst = this->dst;
@@ -751,13 +769,13 @@ struct FftwSplitTestWrapper :
     fftw_iodim dims[maxdim];
     Int src_stride = 1;
     Int dst_stride = 1;
-    for(Int i = size.size() - 1; i >= 0; i--)
+    for(Int i = this->size.size() - 1; i >= 0; i--)
     {
-      ptrdiff_t n = size[i];
+      ptrdiff_t n = this->size[i];
       dims[i].n = n;
       dims[i].is = src_stride;
       dims[i].os = dst_stride;
-      if(is_real && i == size.size() - 1)
+      if(is_real && i == this->size.size() - 1)
       {
         if(is_inverse)
         {
@@ -783,13 +801,13 @@ struct FftwSplitTestWrapper :
       {
         if constexpr(std::is_same_v<T, float>)
           plan = fftwf_plan_guru_split_dft_c2r(
-            size.size(), dims,
+            this->size.size(), dims,
             0, nullptr,
             src, src + this->im_off, dst,
             fftw_flags);
         else
           plan = fftw_plan_guru_split_dft_c2r(
-            size.size(), dims,
+            this->size.size(), dims,
             0, nullptr,
             src, src + this->im_off, dst,
             fftw_flags);
@@ -798,13 +816,13 @@ struct FftwSplitTestWrapper :
       {
         if constexpr(std::is_same_v<T, float>)
           plan = fftwf_plan_guru_split_dft_r2c(
-              size.size(), dims,
+              this->size.size(), dims,
               0, nullptr,
               src, dst, dst + this->im_off,
               fftw_flags);
         else
           plan = fftw_plan_guru_split_dft_r2c(
-              size.size(), dims,
+              this->size.size(), dims,
               0, nullptr,
               src, dst, dst + this->im_off,
               fftw_flags);
@@ -817,13 +835,13 @@ struct FftwSplitTestWrapper :
       Int im_off = is_inverse ? 0 : n;
       if constexpr(std::is_same_v<T, float>)
         plan = fftwf_plan_guru_split_dft(
-            size.size(), dims,
+            this->size.size(), dims,
             0, nullptr,
             src + re_off, src + im_off, dst + re_off, dst + im_off,
             fftw_flags);
       else
         plan = fftw_plan_guru_split_dft(
-            size.size(), dims,
+            this->size.size(), dims,
             0, nullptr,
             src + re_off, src + im_off, dst + re_off, dst + im_off,
             fftw_flags);
@@ -938,10 +956,10 @@ struct ReferenceFft :
   std::vector<Onedim> onedim;
   std::vector<T> working;
 
-  ReferenceFft(const std::vector<Int>& size, Int simd_impl, bool is_bench)
-    : InterleavedWrapperBase<T, void, false, is_inverse_>(size)
+  ReferenceFft(const WrapperConstructorArgs& args)
+    : InterleavedWrapperBase<T, void, false, is_inverse_>(args)
   {
-    for(auto e : size) onedim.emplace_back(e);
+    for(auto e : args.size) onedim.emplace_back(e);
   }
 
   void transform()
@@ -995,13 +1013,14 @@ struct TestResult
 
 template<typename Fft>
 TestResult bench(
-  const std::vector<Int>& size, double requested_operations, Int simd_impl)
+  const std::vector<Int>& size, Int alloc_offset,
+  double requested_operations, Int simd_impl)
 {
   Int n = product(size);
   typedef typename Fft::value_type T;
-  Fft fft(size, simd_impl, true);
+  Fft fft({size, alloc_offset, simd_impl, true});
 
-  T* src = alloc_array<T>(2 * n);
+  T* src = alloc_array<T>(2 * n, alloc_offset);
   for(Int i = 0; i < n * 2; i++) src[i] = 0.0f;
   fft.set_input(src);
 
@@ -1023,20 +1042,24 @@ TestResult bench(
   r.flops = operations / to_seconds(t1 - t0);
   r.element_iterations = iter * uint64_t(n);
   r.time_per_element = to_seconds(t1 - t0) / iter / n;
+
+  dealloc(src, alloc_offset);
   return r;
 }
 
 template<typename Fft0, typename Fft1>
-TestResult compare(const std::vector<Int>& size, Int simd_impl)
+TestResult compare(
+  const std::vector<Int>& size, Int alloc_offset, Int simd_impl)
 {
   static_assert(Fft0::is_inverse == Fft1::is_inverse, "");
   typedef typename Fft0::value_type T;
   Int n = product(size);
-  Fft0 fft0(size, simd_impl, false);
-  Fft1 fft1(size, simd_impl, false);
-  T* src = alloc_array<T>(2 * n);
-  T* dst0 = alloc_array<T>(2 * n);
-  T* dst1 = alloc_array<T>(2 * n);
+  WrapperConstructorArgs args{size, alloc_offset, simd_impl, false};
+  Fft0 fft0(args);
+  Fft1 fft1(args);
+  T* src = alloc_array<T>(2 * n, alloc_offset);
+  T* dst0 = alloc_array<T>(2 * n, alloc_offset);
+  T* dst1 = alloc_array<T>(2 * n, alloc_offset);
   
   std::mt19937 mt;
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
@@ -1096,9 +1119,9 @@ TestResult compare(const std::vector<Int>& size, Int simd_impl)
     diff_sumsq += sq(dst1[i] - dst0[i]);
   }
 
-  dealloc(src);
-  dealloc(dst0);
-  dealloc(dst1);
+  dealloc(src, alloc_offset);
+  dealloc(dst0, alloc_offset);
+  dealloc(dst1, alloc_offset);
 
   TestResult r;
   r.error = std::sqrt(diff_sumsq / sum_sumsq);
@@ -1183,6 +1206,13 @@ OptionParser::Result parse_options(int argc, char** argv, Options* dst)
   parser.add_optional_flag(
     "--simd", "Which SIMD implementation to use", &dst->simd_impl);
 
+  dst->misaligned_by = 0;
+  parser.add_optional_flag(
+    "--misaligned-by",
+    "After aligning buffer addresses to 4096 bytes, "
+    "add this many bytes to them.",
+    &dst->misaligned_by);
+
   parser.add_positional(
     "implementation", "Fft implementation to test.", &dst->implementation);
 
@@ -1197,12 +1227,12 @@ TestResult test_or_bench4(const Options& opt, const std::vector<Int>& lsz)
   for(auto e : lsz) size.push_back(1 << e);
 
   if(opt.is_bench)
-    return bench<Fft>(size, opt.num_ops, opt.simd_impl.val);
+    return bench<Fft>(size, opt.misaligned_by, opt.num_ops, opt.simd_impl.val);
   else
     //TODO: Use long double for ReferenceFft
     return 
       compare<ReferenceFft<double, Fft::is_inverse>, Fft>(
-        size, opt.simd_impl.val);
+        size, opt.misaligned_by, opt.simd_impl.val);
 }
 
 template<typename ET, bool is_real, bool is_inverse>
