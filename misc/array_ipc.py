@@ -21,7 +21,7 @@ class PackageType(object):
     onedim_array = 0;
 
 def recvall(sock, sz):
-    r = ""
+    r = bytes()
     while len(r) < sz:
         r += sock.recv(sz - len(r))
 
@@ -33,10 +33,10 @@ def read_int64(sock):
 
 def read_array(sock):
     recvall(sock, 8)   #read package_type and ignore it
-    
+
     name_len = read_int64(sock)
-    name = recvall(sock, name_len)
-    
+    name = recvall(sock, name_len).decode("utf-8")
+
     elemtype = elemetype_dict[read_int64(sock)]
     
     data_len = read_int64(sock);
@@ -61,11 +61,11 @@ def create_server(address):
 
 def listen_loop(server, callback):
     while True:
-        print "accepting..."
+        print("accepting...")
         sock, _ = server.accept()
-        print "accepted."
+        print("accepted.")
         callback(*read_array(sock))
-        print "done."
+        print("done.")
         sock.close()
 
 class Received(dict):

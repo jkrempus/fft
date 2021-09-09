@@ -93,9 +93,10 @@ static int uds_connect(const char* name)
 }
 
 template<typename T>
-void send(const char* name, const T* ptr, size_t len)
+void send(const char* name, const T* ptr, size_t len,
+  const char* addr = "/tmp/array_ipc")
 {
-  int sock = uds_connect("/tmp/array_ipc");
+  int sock = uds_connect(addr);
   if(sock >= 0)
   {
     write_array(sock, name, ptr, len);
@@ -106,7 +107,8 @@ void send(const char* name, const T* ptr, size_t len)
 #else
 namespace array_ipc
 {
-template<typename T> void send(const char* name, T* ptr, int len) { }
+template<typename T> void send(
+  const char* name, T* ptr, int len, const char* addr = "/tmp/array_ipc") { }
 }
 #endif
 #endif
